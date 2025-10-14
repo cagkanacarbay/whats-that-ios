@@ -41,42 +41,34 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository {
     }
 
     public func fetchDiscoveries(limit: Int, before discoveryId: Int64?) async throws -> [DiscoverySummary] {
-        guard let currentUserId = client.auth.currentUser?.id else {
+        guard client.auth.currentUser?.id != nil else {
             supabaseDiscoveryLogger.error("Attempted to fetch discoveries without an authenticated Supabase user.")
             throw DiscoveryFeedError.unauthorized
         }
 
         do {
-            var builder = client
-                .from("discoveries")
-                .select("""
-                    id,
-                    user_id,
-                    title,
-                    short_description,
-                    description,
-                    image_url,
-                    created_at,
-                    country,
-                    locality,
-                    street_name,
-                    closest_place,
-                    share_token,
-                    ST_AsText(location) as location_text
-                """, head: false)
-                .eq("user_id", value: currentUserId.uuidString)
+            let params = GetDiscoveriesParams(
+                p_limit: limit,
+                p_last_id: discoveryId
+            )
 
-            if let discoveryId,
-               let cursor = Int(exactly: discoveryId) {
-                builder = builder.lt("id", value: cursor)
+            let builder = try client.rpc(
+                "get_discoveries_with_location",
+                params: params
+            )
+
+            let response: PostgrestResponse<[JSONObject]> = try await builder.execute()
+
+            let jsonArray: JSONArray = response.value.map { AnyJSON.object($0) }
+            let records: [DiscoveryRecord]
+            do {
+                records = try jsonArray.decode(as: DiscoveryRecord.self)
+            } catch {
+                if let payload = response.string() {
+                    supabaseDiscoveryLogger.error("Failed to decode discoveries payload: \(payload, privacy: .public)")
+                }
+                throw error
             }
-
-            let response: PostgrestResponse<[DiscoveryRecord]> = try await builder
-                .order("created_at", ascending: false)
-                .limit(limit)
-                .execute()
-
-            let records = response.value
 
             return try await withThrowingTaskGroup(of: DiscoverySummary?.self) { group in
                 for record in records {
@@ -103,6 +95,11 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository {
     }
 }
 
+private struct GetDiscoveriesParams: Encodable {
+    let p_limit: Int
+    let p_last_id: Int64?
+}
+
 private struct DiscoveryRecord: Decodable {
     let id: Int64
     let userId: UUID?
@@ -116,7 +113,7 @@ private struct DiscoveryRecord: Decodable {
     let streetName: String?
     let closestPlace: String?
     let shareToken: UUID?
-    let locationText: String?
+    let location: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -131,7 +128,7 @@ private struct DiscoveryRecord: Decodable {
         case streetName = "street_name"
         case closestPlace = "closest_place"
         case shareToken = "share_token"
-        case locationText = "location_text"
+        case location
     }
 }
 
@@ -148,18 +145,16 @@ private extension String {
 
 private extension DiscoveryRecord {
     func makeLocation() -> DiscoveryLocation? {
-        guard let locationText else {
+        guard let location,
+              location.hasPrefix("POINT("),
+              location.hasSuffix(")") else {
             return nil
         }
 
-        let trimmed = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("POINT("), trimmed.hasSuffix(")") else {
-            return nil
-        }
-
-        let inner = trimmed.dropFirst("POINT(".count).dropLast()
+        let inner = location
+            .dropFirst("POINT(".count)
+            .dropLast()
         let components = inner.split(whereSeparator: { $0 == " " || $0 == "," })
-
         guard components.count >= 2,
               let longitude = Double(components[0]),
               let latitude = Double(components[1]) else {

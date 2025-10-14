@@ -91,11 +91,12 @@ This guide explains how we will bootstrap, exercise, and validate the native iOS
 ## Auth Troubleshooting Log
 - **Date:** 2024-10-14  
 - **Symptom:** Email/password sign-in always surfaced “We couldn't sign you in…” even with known-good Supabase credentials. Auth flow never advanced beyond the login screen.
-- **Root Cause:** The generated Info.plist omitted the Supabase URL, anon key, and Google client ID because `GENERATE_INFOPLIST_FILE=YES` strips values containing `://`. `AppConfiguration.fromBundle()` therefore returned the `.preview` fallback, forcing `AppDependencyContainer.bootstrap` to instantiate `StubAuthService`.
+- **Root Cause:** The generated Info.plist omitted the Supabase URL, anon key, and Google client ID because `GENERATE_INFOPLIST_FILE=YES` strips values containing `://`. `AppConfiguration.fromBundle()` therefore returned the `.preview` fallback, forcing `AppDependencyContainer.bootstrap` to instantiate `StubAuthService` (this path has since been removed—misconfiguration now triggers an immediate failure).
 - **Fix Implemented:**  
   1. Added a dedicated plist (`Config/AppInfo.plist`) that references the xcconfig-supplied `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `GOOGLE_CLIENT_ID`.  
   2. Split the Supabase URL into `SUPABASE_URL_SCHEME` + `SUPABASE_URL_HOST_PATH` inside the environment config (`Config/Environments/Development.xcconfig`) so build setting parsing no longer treats `//` as a comment.  
-  3. Updated `Package.swift` so remote dependencies (Supabase, Google Sign-In, Nuke, etc.) are enabled by default; set `USE_REMOTE_DEPS=0` only when explicitly opting into stubbed builds.
+  3. Updated `Package.swift` so remote dependencies (Supabase, Google Sign-In, Nuke, etc.) are enabled by default; set `USE_REMOTE_DEPS=0` only when explicitly opting into stubbed builds.  
+  4. Removed the stub authentication fallback so bootstrapping now requires valid Supabase and Google credentials.
 - **Verification:** After the change, the simulator build authenticates successfully against Supabase, transitions through onboarding, and surfaces live auth session state. Keep these steps on hand if the issue reappears (e.g., when rotating xcconfig secrets or regenerating build settings).
 
 ---

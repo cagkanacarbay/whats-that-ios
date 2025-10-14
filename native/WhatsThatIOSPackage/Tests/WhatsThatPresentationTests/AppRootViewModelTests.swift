@@ -1,7 +1,6 @@
 import Foundation
 import XCTest
 @testable import WhatsThatDomain
-@testable import WhatsThatInfrastructure
 @testable import WhatsThatPresentation
 
 final class AppRootViewModelTests: XCTestCase {
@@ -42,7 +41,7 @@ final class AppRootViewModelTests: XCTestCase {
 
     @MainActor
     private func makeViewModel() -> AppRootViewModel {
-        let authService = StubAuthService()
+        let authService = TestAuthService()
         let authUseCase = AuthUseCase(service: authService)
         let onboardingRepository = TestOnboardingRepository()
         let onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
@@ -71,6 +70,106 @@ final class AppRootViewModelTests: XCTestCase {
         }
 
         XCTFail("Timed out waiting for expected state change", file: file, line: line)
+    }
+}
+
+private actor TestAuthService: AuthService {
+    private struct StoredCredential {
+        var password: String
+        var id: UUID
+    }
+
+    private var storedCredentials: [String: StoredCredential] = [:]
+    private var currentUser: AuthenticatedUser?
+    private var continuations: [UUID: AsyncStream<AuthSession>.Continuation] = [:]
+
+    func currentSession() async throws -> AuthSession {
+        currentSessionValue
+    }
+
+    func sessionUpdates() async -> AsyncStream<AuthSession> {
+        AsyncStream { continuation in
+            let token = UUID()
+            Task { [weak self] in
+                await self?.registerContinuation(id: token, continuation: continuation)
+            }
+        }
+    }
+
+    func signIn(email: String, password: String) async throws -> AuthSession {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let credentials = storedCredentials[normalizedEmail],
+              credentials.password == password
+        else {
+            throw AuthError.invalidCredentials
+        }
+
+        let user = AuthenticatedUser(id: credentials.id, email: normalizedEmail)
+        currentUser = user
+        let session = AuthSession.authenticated(user)
+        notify(session: session)
+        return session
+    }
+
+    func signUp(email: String, password: String) async throws -> AuthSession {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if storedCredentials[normalizedEmail] != nil {
+            throw AuthError.emailAlreadyInUse
+        }
+
+        let userId = UUID()
+        storedCredentials[normalizedEmail] = StoredCredential(password: password, id: userId)
+        let user = AuthenticatedUser(id: userId, email: normalizedEmail)
+        currentUser = user
+        let session = AuthSession.authenticated(user)
+        notify(session: session)
+        return session
+    }
+
+    func signInWithGoogle() async throws -> AuthSession {
+        let user = AuthenticatedUser(id: UUID(), email: "google-user@example.com")
+        currentUser = user
+        let session = AuthSession.authenticated(user)
+        notify(session: session)
+        return session
+    }
+
+    func signOut() async throws {
+        guard currentUser != nil else { return }
+        currentUser = nil
+        notify(session: .signedOut)
+    }
+
+    func sendPasswordReset(email _: String) async throws {}
+
+    private func registerContinuation(
+        id: UUID,
+        continuation: AsyncStream<AuthSession>.Continuation
+    ) async {
+        continuations[id] = continuation
+        continuation.yield(currentSessionValue)
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeContinuation(id: id) }
+        }
+    }
+
+    private func removeContinuation(id: UUID) async {
+        continuations[id] = nil
+    }
+
+    private func notify(session: AuthSession) {
+        for continuation in continuations.values {
+            continuation.yield(session)
+        }
+    }
+
+    private var currentSessionValue: AuthSession {
+        if let user = currentUser {
+            return .authenticated(user)
+        } else {
+            return .signedOut
+        }
     }
 }
 

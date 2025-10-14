@@ -30,34 +30,22 @@ public struct AppDependencyContainer: Sendable {
 }
 
 public extension AppDependencyContainer {
-    static func preview() -> AppDependencyContainer {
-        AppDependencyContainer(
-            configuration: .preview,
-            discoveryRepository: StubDiscoveryRepository(transport: StubSupabaseTransport()),
-            authService: StubAuthService(),
-            onboardingRepository: UserDefaultsOnboardingRepository(suiteName: "preview.onboarding")
-        )
-    }
-
     static func bootstrap(
         configuration: AppConfiguration,
         session: URLSession = .shared
     ) -> AppDependencyContainer {
         #if USE_REMOTE_DEPS && canImport(Supabase)
-        if let liveContainer = try? AppDependencyContainer.live(
-            configuration: configuration,
-            session: session
-        ) {
-            return liveContainer
+        do {
+            return try AppDependencyContainer.live(
+                configuration: configuration,
+                session: session
+            )
+        } catch {
+            preconditionFailure("Failed to bootstrap live dependencies: \(error)")
         }
+        #else
+        preconditionFailure("Supabase dependencies are unavailable. Build with USE_REMOTE_DEPS=1 and resolve packages.")
         #endif
-
-        return AppDependencyContainer(
-            configuration: configuration,
-            discoveryRepository: StubDiscoveryRepository(transport: StubSupabaseTransport()),
-            authService: StubAuthService(),
-            onboardingRepository: UserDefaultsOnboardingRepository(suiteName: "app.onboarding")
-        )
     }
 
     #if USE_REMOTE_DEPS && canImport(Supabase)

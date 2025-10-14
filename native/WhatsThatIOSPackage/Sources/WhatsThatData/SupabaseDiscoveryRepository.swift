@@ -1,9 +1,15 @@
 #if USE_REMOTE_DEPS && canImport(Supabase)
 import Foundation
+import OSLog
 import Supabase
 import WhatsThatDomain
 import WhatsThatInfrastructure
 import WhatsThatShared
+
+private let supabaseDiscoveryLogger = Logger(
+    subsystem: "com.example.whatsthatios",
+    category: "SupabaseDiscoveryRepository"
+)
 
 public enum SupabaseDiscoveryRepositoryError: LocalizedError {
     case decodingFailure
@@ -19,17 +25,27 @@ public enum SupabaseDiscoveryRepositoryError: LocalizedError {
 public struct SupabaseDiscoveryRepository: DiscoveryRepository {
     private let client: SupabaseClient
 
+    public init(client: SupabaseClient) {
+        self.client = client
+    }
+
     public init(
         configuration: AppConfiguration,
         session: URLSession = .shared
     ) throws {
-        self.client = try SupabaseClientFactory.makeClient(
+        let client = try SupabaseClientFactory.makeClient(
             configuration: configuration,
             session: session
         )
+        self.init(client: client)
     }
 
     public func fetchDiscoveries(limit: Int, before discoveryId: Int64?) async throws -> [DiscoverySummary] {
+        guard let currentUserId = client.auth.currentUser?.id else {
+            supabaseDiscoveryLogger.error("Attempted to fetch discoveries without an authenticated Supabase user.")
+            throw DiscoveryFeedError.unauthorized
+        }
+
         do {
             var builder = client
                 .from("discoveries")
@@ -48,6 +64,7 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository {
                     share_token,
                     ST_AsText(location) as location_text
                 """, head: false)
+                .eq("user_id", value: currentUserId.uuidString)
 
             if let discoveryId,
                let cursor = Int(exactly: discoveryId) {
@@ -80,6 +97,7 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository {
                 return summaries.sorted(by: { $0.capturedAt > $1.capturedAt })
             }
         } catch {
+            supabaseDiscoveryLogger.error("Failed to fetch discoveries: \(error.localizedDescription, privacy: .public)")
             throw DiscoveryFeedError.failedToLoad
         }
     }

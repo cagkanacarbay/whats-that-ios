@@ -78,9 +78,9 @@ if useRemoteDependencies {
 ### Runtime Configuration
 - `AppConfiguration` values are read from the app bundle via `AppConfiguration.fromBundle()`, which maps the xcconfig keys (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`) into Info.plist entries.
 - You can still override the configuration manually by passing a custom `AppConfiguration` into `AppRootView(configuration:)` (it will call `AppDependencyContainer.bootstrap(...)`).
-- If configuration is incomplete or the remote packages are unavailable, the bootstrapper automatically falls back to `StubDiscoveryRepository` and other local stubs.
+- The app now fails fast when configuration is missing; make sure Supabase and Google keys are present for development builds.
 - Inject secrets through `.xcconfig` files or launch arguments; avoid hard-coding credentials in source.
-- Populate the placeholders `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `GOOGLE_CLIENT_ID` in `Config/Shared.xcconfig` (and override in Debug/Release files as needed). Leave them blank to continue using stubbed services.
+- Populate the placeholders `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`, and `GOOGLE_REVERSED_CLIENT_ID` in `Config/Shared.xcconfig` (and override in Debug/Release files as needed); missing values will cause the app to terminate during startup.
 - Remember to build with `USE_REMOTE_DEPS=1` (e.g., by adding it to your Xcode scheme’s environment) whenever you want the Supabase/GoogleSignIn packages compiled into the binary.
 
 ### Test Structure

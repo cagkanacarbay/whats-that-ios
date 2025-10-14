@@ -20,25 +20,40 @@ public final actor SupabaseAuthService: AuthService {
 
     #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     public init(
+        client: SupabaseClient,
+        googleSignInService: GoogleSignInServicing? = nil
+    ) {
+        self.client = client
+        self.googleSignInService = googleSignInService
+    }
+
+    public convenience init(
         configuration: AppConfiguration,
         session: URLSession = .shared,
         googleSignInService: GoogleSignInServicing? = nil
     ) throws {
-        self.client = try SupabaseClientFactory.makeClient(
+        let client = try SupabaseClientFactory.makeClient(
             configuration: configuration,
             session: session
         )
-        self.googleSignInService = googleSignInService
+        self.init(client: client, googleSignInService: googleSignInService)
     }
     #else
     public init(
+        client: SupabaseClient
+    ) {
+        self.client = client
+    }
+
+    public convenience init(
         configuration: AppConfiguration,
         session: URLSession = .shared
     ) throws {
-        self.client = try SupabaseClientFactory.makeClient(
+        let client = try SupabaseClientFactory.makeClient(
             configuration: configuration,
             session: session
         )
+        self.init(client: client)
     }
     #endif
 

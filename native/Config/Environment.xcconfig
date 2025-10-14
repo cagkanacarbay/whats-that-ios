@@ -1,0 +1,9 @@
+// Environment.xcconfig
+// Includes the shared example values first so the project always builds.
+// Create a non-tracked file (e.g. Development.xcconfig, Production.xcconfig,
+// or Local.xcconfig) to override these defaults with real credentials.
+
+#include "Environments/Example.xcconfig"
+#include? "Environments/Development.xcconfig"
+#include? "Environments/Production.xcconfig"
+#include? "Environments/Local.xcconfig"

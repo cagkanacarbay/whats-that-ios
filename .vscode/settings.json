@@ -1,0 +1,9 @@
+{
+    // Keep Cursor/VS Code focused on the main repository and ignore SwiftPM checkouts.
+    "git.autoRepositoryDetection": true,
+    "git.autoRepositoryDetectionExclude": [
+        "**/.build/**",
+        "**/.swiftpm/**",
+        "**/SourcePackages/**"
+    ]
+}

@@ -1,0 +1,1414 @@
+{
+  "metadata": {
+    "roleHeading": "Framework",
+    "symbolKind": "module",
+    "modules": [
+      {
+        "name": "StoreKit"
+      }
+    ],
+    "role": "collection",
+    "title": "StoreKit",
+    "platforms": [
+      {
+        "beta": false,
+        "introducedAt": "3.0",
+        "name": "iOS"
+      },
+      {
+        "beta": false,
+        "introducedAt": "3.0",
+        "name": "iPadOS"
+      },
+      {
+        "beta": false,
+        "introducedAt": "13.0",
+        "name": "Mac Catalyst"
+      },
+      {
+        "beta": false,
+        "introducedAt": "10.7",
+        "name": "macOS"
+      },
+      {
+        "beta": false,
+        "introducedAt": "9.0",
+        "name": "tvOS"
+      },
+      {
+        "beta": false,
+        "introducedAt": "1.0",
+        "name": "visionOS"
+      },
+      {
+        "beta": false,
+        "introducedAt": "6.2",
+        "name": "watchOS"
+      }
+    ],
+    "externalID": "StoreKit"
+  },
+  "abstract": [
+    {
+      "type": "text",
+      "text": "Support In-App Purchases and interactions with the App Store."
+    }
+  ],
+  "variants": [
+    {
+      "traits": [
+        {
+          "interfaceLanguage": "swift"
+        }
+      ],
+      "paths": [
+        "/documentation/storekit"
+      ]
+    },
+    {
+      "traits": [
+        {
+          "interfaceLanguage": "occ"
+        }
+      ],
+      "paths": [
+        "/documentation/storekit"
+      ]
+    }
+  ],
+  "schemaVersion": {
+    "major": 0,
+    "minor": 3,
+    "patch": 0
+  },
+  "hierarchy": {
+    "paths": [
+      [
+        "doc://com.apple.documentation/documentation/technologies"
+      ]
+    ]
+  },
+  "primaryContentSections": [
+    {
+      "content": [
+        {
+          "type": "heading",
+          "anchor": "overview",
+          "text": "Overview",
+          "level": 2
+        },
+        {
+          "type": "paragraph",
+          "inlineContent": [
+            {
+              "text": "Use the StoreKit framework to provide the following features and services for your apps and In-App Purchases:",
+              "type": "text"
+            }
+          ]
+        },
+        {
+          "type": "termList",
+          "items": [
+            {
+              "definition": {
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "inlineContent": [
+                      {
+                        "type": "text",
+                        "text": "Offer and promote In-App Purchases for content and services."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "type": "text",
+                    "text": "In-App Purchase"
+                  }
+                ]
+              }
+            },
+            {
+              "definition": {
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "inlineContent": [
+                      {
+                        "type": "text",
+                        "text": "Verify a customer’s app purchase with an App Store-signed transaction."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "text": "App transaction",
+                    "type": "text"
+                  }
+                ]
+              }
+            },
+            {
+              "definition": {
+                "content": [
+                  {
+                    "inlineContent": [
+                      {
+                        "type": "text",
+                        "text": "Control the display of App Store messages in your app."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "type": "text",
+                    "text": "Messages"
+                  }
+                ]
+              }
+            },
+            {
+              "definition": {
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "inlineContent": [
+                      {
+                        "type": "text",
+                        "text": "Request App Store reviews and ratings from your customers."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "text": "Reviews",
+                    "type": "text"
+                  }
+                ]
+              }
+            },
+            {
+              "definition": {
+                "content": [
+                  {
+                    "inlineContent": [
+                      {
+                        "text": "Provide recommendations for third-party content that customers can purchase from the App Store.",
+                        "type": "text"
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "type": "text",
+                    "text": "Recommendations"
+                  }
+                ]
+              }
+            },
+            {
+              "definition": {
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "inlineContent": [
+                      {
+                        "type": "text",
+                        "text": "Validate advertisement-driven app installations. See "
+                      },
+                      {
+                        "isActive": true,
+                        "type": "reference",
+                        "identifier": "doc://com.apple.documentation/documentation/AdAttributionKit"
+                      },
+                      {
+                        "type": "text",
+                        "text": " for app ad campaigns on the App Store and alternative marketplaces."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "term": {
+                "inlineContent": [
+                  {
+                    "text": "Ad network attribution",
+                    "type": "text"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "The StoreKit framework also provides functionality for "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/external-purchase",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": ", "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/external-link-account",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": ", "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/PaymentMethodBinding",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": ", and "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/StoreDownloaderExtension",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "kind": "content"
+    }
+  ],
+  "topicSections": [
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/in-app-purchase",
+        "doc://com.apple.storekit/documentation/StoreKit/understanding-storekit-workflows",
+        "doc://com.apple.storekit/documentation/StoreKit/getting-started-with-in-app-purchases-using-storekit-views"
+      ],
+      "anchor": "In-App-Purchase",
+      "title": "In-App Purchase"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/supporting-business-model-changes-by-using-the-app-transaction",
+        "doc://com.apple.storekit/documentation/StoreKit/AppTransaction"
+      ],
+      "anchor": "App-transaction",
+      "title": "App transaction"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Message",
+        "doc://com.apple.storekit/documentation/StoreKit/Message/Reason-swift.struct",
+        "doc://com.apple.storekit/documentation/StoreKit/DisplayMessageAction"
+      ],
+      "anchor": "Messages",
+      "title": "Messages"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/requesting-app-store-reviews",
+        "doc://com.apple.storekit/documentation/StoreKit/RequestReviewAction",
+        "doc://com.apple.storekit/documentation/StoreKit/SKStoreReviewController"
+      ],
+      "anchor": "Reviews",
+      "title": "Reviews"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/offering-media-for-sale-in-your-app",
+        "doc://com.apple.storekit/documentation/StoreKit/SKStoreProductViewController",
+        "doc://com.apple.storekit/documentation/StoreKit/SKOverlay"
+      ],
+      "anchor": "Recommendations",
+      "title": "Recommendations"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/StoreDownloaderExtension"
+      ],
+      "anchor": "Background-assets-extension",
+      "title": "Background assets extension"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/PaymentMethodBinding"
+      ],
+      "anchor": "Payment-method-binding",
+      "title": "Payment method binding"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/ad-network-attribution"
+      ],
+      "anchor": "Ad-network-attribution",
+      "title": "Ad network attribution"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/external-purchase"
+      ],
+      "anchor": "External-Purchase",
+      "title": "External Purchase"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/external-link-account"
+      ],
+      "anchor": "External-link-account",
+      "title": "External link account"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceSetupViewController",
+        "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceController"
+      ],
+      "anchor": "Deprecated",
+      "title": "Deprecated"
+    }
+  ],
+  "sections": [],
+  "identifier": {
+    "interfaceLanguage": "swift",
+    "url": "doc://com.apple.storekit/documentation/StoreKit"
+  },
+  "seeAlsoSections": [
+    {
+      "identifiers": [
+        "doc://com.apple.documentation/documentation/AppStoreServerAPI",
+        "doc://com.apple.documentation/documentation/StoreKitTest",
+        "doc://com.apple.documentation/documentation/AppStoreServerNotifications",
+        "doc://com.apple.documentation/documentation/AppStoreConnectAPI",
+        "doc://com.apple.documentation/documentation/AdvancedCommerceAPI",
+        "doc://com.apple.documentation/documentation/AppStoreReceipts"
+      ],
+      "anchor": "Related-Documentation",
+      "title": "Related Documentation"
+    }
+  ],
+  "kind": "symbol",
+  "references": {
+    "doc://com.apple.documentation/documentation/AppStoreConnectAPI": {
+      "role": "collection",
+      "title": "App Store Connect API",
+      "abstract": [
+        {
+          "text": "Automate the tasks you perform on the Apple Developer website and in App Store Connect.",
+          "type": "text"
+        }
+      ],
+      "kind": "symbol",
+      "url": "/documentation/AppStoreConnectAPI",
+      "type": "topic",
+      "identifier": "doc://com.apple.documentation/documentation/AppStoreConnectAPI"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKDownloaderExtension": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKDownloaderExtension",
+      "kind": "symbol",
+      "role": "symbol",
+      "title": "SKDownloaderExtension",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "An application extension that uses the system implementation to schedule Apple-hosted asset-pack downloads automatically."
+        }
+      ],
+      "url": "/documentation/storekit/skdownloaderextension",
+      "fragments": [
+        {
+          "kind": "identifier",
+          "text": "SKDownloaderExtension"
+        }
+      ]
+    },
+    "doc://com.apple.documentation/documentation/AppStoreServerAPI": {
+      "identifier": "doc://com.apple.documentation/documentation/AppStoreServerAPI",
+      "kind": "symbol",
+      "title": "App Store Server API",
+      "abstract": [
+        {
+          "text": "Manage your customers’ App Store transactions from your server.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/AppStoreServerAPI",
+      "type": "topic",
+      "role": "collection"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/getting-started-with-in-app-purchases-using-storekit-views": {
+      "url": "/documentation/storekit/getting-started-with-in-app-purchases-using-storekit-views",
+      "role": "article",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Set up an in-app store using SwiftUI and StoreKit views."
+        }
+      ],
+      "title": "Getting started with In-App Purchase using StoreKit views",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/getting-started-with-in-app-purchases-using-storekit-views",
+      "kind": "article"
+    },
+    "doc://com.apple.documentation/documentation/AdAttributionKit": {
+      "role": "collection",
+      "title": "AdAttributionKit",
+      "url": "/documentation/AdAttributionKit",
+      "type": "topic",
+      "identifier": "doc://com.apple.documentation/documentation/AdAttributionKit",
+      "abstract": [
+        {
+          "text": "Present, process, and register postbacks for in-app ads in the App Store and alternative app marketplaces.",
+          "type": "text"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.documentation/documentation/StoreKitTest": {
+      "role": "collection",
+      "title": "StoreKit Test",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Create and automate tests in Xcode for your app’s subscription and in-app purchase transactions, and SKAdNetwork implementations."
+        }
+      ],
+      "kind": "symbol",
+      "url": "/documentation/StoreKitTest",
+      "type": "topic",
+      "identifier": "doc://com.apple.documentation/documentation/StoreKitTest"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKOverlay": {
+      "kind": "symbol",
+      "role": "symbol",
+      "fragments": [
+        {
+          "text": "class",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SKOverlay",
+          "kind": "identifier"
+        }
+      ],
+      "title": "SKOverlay",
+      "navigatorTitle": [
+        {
+          "text": "SKOverlay",
+          "kind": "identifier"
+        }
+      ],
+      "url": "/documentation/storekit/skoverlay",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A class that displays an overlay you can use to recommend another app or an App Clip’s corresponding full app."
+        }
+      ],
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKOverlay"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/in-app-purchase": {
+      "url": "/documentation/storekit/in-app-purchase",
+      "role": "collectionGroup",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Offer content and services in your app across Apple platforms using a Swift-based interface."
+        }
+      ],
+      "title": "In-App Purchase",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/in-app-purchase",
+      "kind": "article"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceController": {
+      "deprecated": true,
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceController",
+      "kind": "symbol",
+      "title": "SKCloudServiceController",
+      "abstract": [
+        {
+          "text": "An object that determines the current capabilities of a person’s Music library.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/storekit/skcloudservicecontroller",
+      "fragments": [
+        {
+          "text": "class",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SKCloudServiceController",
+          "kind": "identifier"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "text": "SKCloudServiceController",
+          "kind": "identifier"
+        }
+      ],
+      "type": "topic",
+      "role": "symbol"
+    },
+    "storekit-workflows-PageImage-card.png": {
+      "variants": [
+        {
+          "traits": [
+            "2x",
+            "light"
+          ],
+          "url": "https://docs-assets.developer.apple.com/published/17c1ca7b418385393bd52f0d6ed75730/storekit-workflows-PageImage-card%402x.png"
+        },
+        {
+          "traits": [
+            "2x",
+            "dark"
+          ],
+          "url": "https://docs-assets.developer.apple.com/published/fd957ef05a28d3be6a81c23f4c616ce1/storekit-workflows-PageImage-card~dark%402x.png"
+        }
+      ],
+      "type": "image",
+      "identifier": "storekit-workflows-PageImage-card.png",
+      "alt": "A stylized montage showing a storefront with buttons and views."
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/RequestReviewAction": {
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "text": "RequestReviewAction",
+          "kind": "identifier"
+        }
+      ],
+      "title": "RequestReviewAction",
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "RequestReviewAction",
+          "kind": "identifier"
+        }
+      ],
+      "url": "/documentation/storekit/requestreviewaction",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/RequestReviewAction",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "An instance that tells StoreKit to request an App Store rating or review, if appropriate."
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/external-purchase": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/external-purchase",
+      "kind": "article",
+      "title": "External Purchase",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Enable qualifying apps to offer external purchases."
+        }
+      ],
+      "url": "/documentation/storekit/external-purchase",
+      "type": "topic",
+      "role": "collectionGroup"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/ad-network-attribution": {
+      "abstract": [
+        {
+          "text": "Validate advertisement-driven app installations.",
+          "type": "text"
+        }
+      ],
+      "kind": "article",
+      "role": "collectionGroup",
+      "title": "Ad network attribution",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/ad-network-attribution",
+      "url": "/documentation/storekit/ad-network-attribution",
+      "type": "topic"
+    },
+    "doc://com.apple.documentation/documentation/technologies": {
+      "url": "/documentation/technologies",
+      "role": "overview",
+      "abstract": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "title": "Technologies",
+      "type": "topic",
+      "identifier": "doc://com.apple.documentation/documentation/technologies",
+      "kind": "technologies"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKStoreReviewController": {
+      "deprecated": true,
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKStoreReviewController",
+      "abstract": [
+        {
+          "text": "An object that controls the process of requesting App Store ratings and reviews from customers.",
+          "type": "text"
+        }
+      ],
+      "role": "symbol",
+      "type": "topic",
+      "url": "/documentation/storekit/skstorereviewcontroller",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "class"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "SKStoreReviewController"
+        }
+      ],
+      "title": "SKStoreReviewController",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "SKStoreReviewController"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/StoreDownloaderExtension": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/StoreDownloaderExtension",
+      "kind": "symbol",
+      "title": "StoreDownloaderExtension",
+      "abstract": [
+        {
+          "text": "An app extension that uses the system implementation to schedule Apple-hosted asset-pack downloads automatically.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/storekit/storedownloaderextension",
+      "fragments": [
+        {
+          "text": "protocol",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "StoreDownloaderExtension",
+          "kind": "identifier"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "text": "StoreDownloaderExtension",
+          "kind": "identifier"
+        }
+      ],
+      "type": "topic",
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit": {
+      "url": "/documentation/storekit",
+      "role": "collection",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Support In-App Purchases and interactions with the App Store."
+        }
+      ],
+      "title": "StoreKit",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit",
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/DisplayMessageAction": {
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "text": "DisplayMessageAction",
+          "kind": "identifier"
+        }
+      ],
+      "title": "DisplayMessageAction",
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "DisplayMessageAction",
+          "kind": "identifier"
+        }
+      ],
+      "url": "/documentation/storekit/displaymessageaction",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/DisplayMessageAction",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "An instance that asks StoreKit to display an App Store message, if appropriate."
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/PaymentMethodBinding": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A binding that makes payment methods available in apps for an Apple Account."
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "PaymentMethodBinding"
+        }
+      ],
+      "kind": "symbol",
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "PaymentMethodBinding"
+        }
+      ],
+      "title": "PaymentMethodBinding",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/PaymentMethodBinding",
+      "url": "/documentation/storekit/paymentmethodbinding",
+      "type": "topic"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/supporting-business-model-changes-by-using-the-app-transaction": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/supporting-business-model-changes-by-using-the-app-transaction",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Access the app transaction to determine when a customer purchased an app and the features to which they’re entitled."
+        }
+      ],
+      "role": "article",
+      "type": "topic",
+      "url": "/documentation/storekit/supporting-business-model-changes-by-using-the-app-transaction",
+      "title": "Supporting business model changes by using the app transaction",
+      "kind": "article"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/offering-media-for-sale-in-your-app": {
+      "abstract": [
+        {
+          "text": "Allow users to purchase media in the App Store from within your app.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/storekit/offering-media-for-sale-in-your-app",
+      "type": "topic",
+      "title": "Offering media for sale in your app",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/offering-media-for-sale-in-your-app",
+      "kind": "article",
+      "role": "sampleCode"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/AppTransaction": {
+      "url": "/documentation/storekit/apptransaction",
+      "abstract": [
+        {
+          "text": "Information that represents the customer’s purchase of the app, cryptographically signed by the App Store.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "title": "AppTransaction",
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "AppTransaction",
+          "kind": "identifier"
+        }
+      ],
+      "kind": "symbol",
+      "role": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/AppTransaction",
+      "navigatorTitle": [
+        {
+          "text": "AppTransaction",
+          "kind": "identifier"
+        }
+      ]
+    },
+    "advanced-commerce-PageImage-card.png": {
+      "variants": [
+        {
+          "traits": [
+            "2x",
+            "dark"
+          ],
+          "url": "https://docs-assets.developer.apple.com/published/6e6bc9f277244a0f368a727c70a1a9de/advanced-commerce-PageImage-card~dark%402x.png"
+        },
+        {
+          "traits": [
+            "2x",
+            "light"
+          ],
+          "url": "https://docs-assets.developer.apple.com/published/c504bbb128b5a484bbf609b9ff77de0f/advanced-commerce-PageImage-card%402x.png"
+        }
+      ],
+      "alt": "A payment sheet displayed at the bottom of an iPhone screen.",
+      "type": "image",
+      "identifier": "advanced-commerce-PageImage-card.png"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/external-link-account": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/external-link-account",
+      "abstract": [
+        {
+          "text": "Enable qualifying apps to link to an external website for account creation or management.",
+          "type": "text"
+        }
+      ],
+      "role": "collectionGroup",
+      "type": "topic",
+      "url": "/documentation/storekit/external-link-account",
+      "title": "External link account",
+      "kind": "article"
+    },
+    "doc://com.apple.documentation/documentation/AppStoreServerNotifications": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Monitor In-App Purchase events in real time and learn of unreported external purchase tokens, with server notifications from the App Store."
+        }
+      ],
+      "url": "/documentation/AppStoreServerNotifications",
+      "kind": "symbol",
+      "type": "topic",
+      "role": "collection",
+      "identifier": "doc://com.apple.documentation/documentation/AppStoreServerNotifications",
+      "title": "App Store Server Notifications"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Message": {
+      "title": "Message",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Message",
+      "role": "symbol",
+      "kind": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "Message"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "Message"
+        }
+      ],
+      "url": "/documentation/storekit/message",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "An instance for receiving and displaying App Store messages in your app."
+        }
+      ],
+      "type": "topic"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKStoreProductViewController": {
+      "type": "topic",
+      "navigatorTitle": [
+        {
+          "text": "SKStoreProductViewController",
+          "kind": "identifier"
+        }
+      ],
+      "fragments": [
+        {
+          "text": "class",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SKStoreProductViewController",
+          "kind": "identifier"
+        }
+      ],
+      "kind": "symbol",
+      "title": "SKStoreProductViewController",
+      "url": "/documentation/storekit/skstoreproductviewcontroller",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A view controller that provides a page where customers can purchase media from the App Store."
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKStoreProductViewController",
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/requesting-app-store-reviews": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Implement best practices for prompting users to review your app in the App Store."
+        }
+      ],
+      "url": "/documentation/storekit/requesting-app-store-reviews",
+      "type": "topic",
+      "title": "Requesting App Store reviews",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/requesting-app-store-reviews",
+      "kind": "article",
+      "role": "sampleCode"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Message/Reason-swift.struct": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Message/Reason-swift.struct",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Reasons for the App Store messages."
+        }
+      ],
+      "role": "symbol",
+      "type": "topic",
+      "url": "/documentation/storekit/message/reason-swift.struct",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "Reason"
+        }
+      ],
+      "title": "Message.Reason",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "Reason"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.documentation/documentation/AdvancedCommerceAPI": {
+      "identifier": "doc://com.apple.documentation/documentation/AdvancedCommerceAPI",
+      "kind": "symbol",
+      "title": "Advanced Commerce API",
+      "abstract": [
+        {
+          "text": "Support In-App Purchases through the App Store for exceptionally large catalogs of custom one-time purchases, subscriptions, and subscriptions with optional add-ons.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/AdvancedCommerceAPI",
+      "type": "topic",
+      "role": "collection",
+      "images": [
+        {
+          "identifier": "advanced-commerce-PageImage-card.png",
+          "type": "card"
+        }
+      ]
+    },
+    "doc://com.apple.documentation/documentation/AppStoreReceipts": {
+      "title": "App Store Receipts",
+      "identifier": "doc://com.apple.documentation/documentation/AppStoreReceipts",
+      "role": "collection",
+      "kind": "symbol",
+      "deprecated": true,
+      "url": "/documentation/AppStoreReceipts",
+      "abstract": [
+        {
+          "text": "Validate app and In-App Purchase receipts with the App Store.",
+          "type": "text"
+        }
+      ],
+      "type": "topic"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceSetupViewController": {
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "text": "SKCloudServiceSetupViewController",
+          "kind": "identifier"
+        }
+      ],
+      "title": "SKCloudServiceSetupViewController",
+      "abstract": [
+        {
+          "text": "A view controller that helps people perform setup for a cloud service, like an Apple Music subscription.",
+          "type": "text"
+        }
+      ],
+      "kind": "symbol",
+      "fragments": [
+        {
+          "text": "class",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SKCloudServiceSetupViewController",
+          "kind": "identifier"
+        }
+      ],
+      "deprecated": true,
+      "url": "/documentation/storekit/skcloudservicesetupviewcontroller",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceSetupViewController"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/understanding-storekit-workflows": {
+      "images": [
+        {
+          "type": "card",
+          "identifier": "storekit-workflows-PageImage-card.png"
+        }
+      ],
+      "role": "sampleCode",
+      "title": "Understanding StoreKit workflows",
+      "url": "/documentation/storekit/understanding-storekit-workflows",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/understanding-storekit-workflows",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Implement an in-app store with several product types, using StoreKit views."
+        }
+      ],
+      "kind": "article"
+    }
+  },
+  "variantOverrides": [
+    {
+      "patch": [
+        {
+          "value": "occ",
+          "path": "/identifier/interfaceLanguage",
+          "op": "replace"
+        },
+        {
+          "value": {
+            "paths": [
+              [
+                "doc://com.apple.documentation/documentation/technologies"
+              ]
+            ]
+          },
+          "path": "/hierarchy",
+          "op": "replace"
+        },
+        {
+          "path": "/topicSections",
+          "value": [
+            {
+              "title": "In-App Purchase",
+              "anchor": "In-App-Purchase",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/in-app-purchase",
+                "doc://com.apple.storekit/documentation/StoreKit/understanding-storekit-workflows",
+                "doc://com.apple.storekit/documentation/StoreKit/getting-started-with-in-app-purchases-using-storekit-views"
+              ]
+            },
+            {
+              "title": "App transaction",
+              "anchor": "App-transaction",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/supporting-business-model-changes-by-using-the-app-transaction"
+              ]
+            },
+            {
+              "title": "Reviews",
+              "anchor": "Reviews",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/requesting-app-store-reviews",
+                "doc://com.apple.storekit/documentation/StoreKit/SKStoreReviewController"
+              ]
+            },
+            {
+              "title": "Recommendations",
+              "anchor": "Recommendations",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/offering-media-for-sale-in-your-app",
+                "doc://com.apple.storekit/documentation/StoreKit/SKStoreProductViewController",
+                "doc://com.apple.storekit/documentation/StoreKit/SKOverlay"
+              ]
+            },
+            {
+              "title": "Background assets extension",
+              "anchor": "Background-assets-extension",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/SKDownloaderExtension"
+              ]
+            },
+            {
+              "title": "Ad network attribution",
+              "anchor": "Ad-network-attribution",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/ad-network-attribution"
+              ]
+            },
+            {
+              "title": "External Purchase",
+              "anchor": "External-Purchase",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/external-purchase"
+              ]
+            },
+            {
+              "title": "External link account",
+              "anchor": "External-link-account",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/external-link-account"
+              ]
+            },
+            {
+              "title": "Deprecated",
+              "anchor": "Deprecated",
+              "identifiers": [
+                "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceSetupViewController",
+                "doc://com.apple.storekit/documentation/StoreKit/SKCloudServiceController"
+              ]
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/relationshipsSections",
+          "value": null,
+          "op": "add"
+        },
+        {
+          "path": "/seeAlsoSections",
+          "value": [
+            {
+              "anchor": "Related-Documentation",
+              "title": "Related Documentation",
+              "identifiers": [
+                "doc://com.apple.documentation/documentation/AppStoreServerAPI",
+                "doc://com.apple.documentation/documentation/StoreKitTest",
+                "doc://com.apple.documentation/documentation/AppStoreServerNotifications",
+                "doc://com.apple.documentation/documentation/AppStoreConnectAPI",
+                "doc://com.apple.documentation/documentation/AdvancedCommerceAPI",
+                "doc://com.apple.documentation/documentation/AppStoreReceipts"
+              ]
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKOverlay/title",
+          "value": "SKOverlay",
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKOverlay/fragments",
+          "value": [
+            {
+              "text": "SKOverlay",
+              "kind": "identifier"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKOverlay/navigatorTitle",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKOverlay"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceController/title",
+          "value": "SKCloudServiceController",
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceController/fragments",
+          "value": [
+            {
+              "text": "SKCloudServiceController",
+              "kind": "identifier"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceController/navigatorTitle",
+          "value": [
+            {
+              "text": "SKCloudServiceController",
+              "kind": "identifier"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreReviewController/title",
+          "value": "SKStoreReviewController",
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreReviewController/fragments",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKStoreReviewController"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreReviewController/navigatorTitle",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKStoreReviewController"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreProductViewController/title",
+          "value": "SKStoreProductViewController",
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreProductViewController/fragments",
+          "value": [
+            {
+              "text": "SKStoreProductViewController",
+              "kind": "identifier"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKStoreProductViewController/navigatorTitle",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKStoreProductViewController"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceSetupViewController/title",
+          "value": "SKCloudServiceSetupViewController",
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceSetupViewController/fragments",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKCloudServiceSetupViewController"
+            }
+          ],
+          "op": "replace"
+        },
+        {
+          "path": "/references/doc:~1~1com.apple.storekit~1documentation~1StoreKit~1SKCloudServiceSetupViewController/navigatorTitle",
+          "value": [
+            {
+              "kind": "identifier",
+              "text": "SKCloudServiceSetupViewController"
+            }
+          ],
+          "op": "replace"
+        }
+      ],
+      "traits": [
+        {
+          "interfaceLanguage": "occ"
+        }
+      ]
+    }
+  ],
+  "legalNotices": {
+    "copyright": "Copyright &copy; 2025 Apple Inc. All rights reserved.",
+    "termsOfUse": "https://www.apple.com/legal/internet-services/terms/site.html",
+    "privacyPolicy": "https://www.apple.com/privacy/privacy-policy"
+  }
+}

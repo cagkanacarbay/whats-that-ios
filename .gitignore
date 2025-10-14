@@ -1,0 +1,61 @@
+# macOS filesystem noise
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Editors
+*.swp
+*~
+.cursor/
+.netrc
+
+# Xcode intermediate maps
+*.hmap
+
+# Xcode build artifacts
+DerivedData/
+build/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+*.xcsettings
+xcuserdata/
+
+# Xcode per-user data (keep shared defaults)
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Dependency managers
+Pods/
+Carthage/Build/
+Carthage/Checkouts/
+
+# Fastlane output
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Archives and symbols
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcarchive
+
+# Local environment overrides
+native/Config/Environments/*.local.xcconfig
+
+# Environment configuration (only keep example template tracked)
+native/Config/Environments/*.xcconfig
+!native/Config/Environments/Example.xcconfig

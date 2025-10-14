@@ -1,0 +1,10 @@
+// Example.xcconfig
+// Copy to Development.xcconfig, Production.xcconfig, or Local.xcconfig
+// and fill in the real credentials. Files other than this example are
+// ignored by Git to keep secrets out of source control.
+
+SUPABASE_URL_SCHEME = https:/
+SUPABASE_URL_HOST_PATH = /your-project.supabase.co
+SUPABASE_URL = $(SUPABASE_URL_SCHEME)$(SUPABASE_URL_HOST_PATH)
+SUPABASE_ANON_KEY = replace-with-your-supabase-anon-key
+GOOGLE_CLIENT_ID = replace-with-your-google-client-id

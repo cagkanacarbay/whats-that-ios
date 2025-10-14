@@ -1,0 +1,2813 @@
+{
+  "hierarchy": {
+    "paths": [
+      [
+        "doc://com.apple.documentation/documentation/technologies",
+        "doc://com.apple.storekit/documentation/StoreKit"
+      ]
+    ]
+  },
+  "seeAlsoSections": [
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/implementing-a-store-in-your-app-using-the-storekit-api",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo",
+        "doc://com.apple.storekit/documentation/StoreKit/SubscriptionInfo",
+        "doc://com.apple.storekit/documentation/StoreKit/SubscriptionStatus"
+      ],
+      "title": "Product and subscription information",
+      "anchor": "Product-and-subscription-information",
+      "generated": true
+    }
+  ],
+  "identifier": {
+    "interfaceLanguage": "swift",
+    "url": "doc://com.apple.storekit/documentation/StoreKit/Product"
+  },
+  "primaryContentSections": [
+    {
+      "kind": "declarations",
+      "declarations": [
+        {
+          "tokens": [
+            {
+              "text": "struct",
+              "kind": "keyword"
+            },
+            {
+              "text": " ",
+              "kind": "text"
+            },
+            {
+              "text": "Product",
+              "kind": "identifier"
+            }
+          ],
+          "platforms": [
+            "iOS",
+            "iPadOS",
+            "Mac Catalyst",
+            "macOS",
+            "tvOS",
+            "visionOS",
+            "watchOS"
+          ],
+          "languages": [
+            "swift"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mentions",
+      "mentions": [
+        "doc://com.apple.storekit/documentation/StoreKit/supporting-family-sharing-in-your-app",
+        "doc://com.apple.storekit/documentation/StoreKit/supporting-promoted-in-app-purchases-in-your-app"
+      ]
+    },
+    {
+      "kind": "content",
+      "content": [
+        {
+          "anchor": "overview",
+          "text": "Overview",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "The "
+            },
+            {
+              "type": "codeVoice",
+              "code": "Product"
+            },
+            {
+              "type": "text",
+              "text": " type represents the in-app purchases that you configure in App Store Connect and make available for purchase within your app. Use "
+            },
+            {
+              "type": "codeVoice",
+              "code": "Product"
+            },
+            {
+              "type": "text",
+              "text": " to perform all product-related tasks in your app, from displaying in-app purchases and offers to making a purchase and getting transaction and subscription status information."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "To get a "
+            },
+            {
+              "type": "codeVoice",
+              "code": "Product"
+            },
+            {
+              "type": "text",
+              "text": " instance, call "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/products(for:)",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": " and provide one or more in-app purchase product identifiers. Use a "
+            },
+            {
+              "type": "codeVoice",
+              "code": "Product"
+            },
+            {
+              "type": "text",
+              "text": " instance to display in-app purchases and subscription offers in your store, as follows:"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "items": [
+            {
+              "content": [
+                {
+                  "type": "paragraph",
+                  "inlineContent": [
+                    {
+                      "text": "Show the localized name, description, and pricing information using ",
+                      "type": "text"
+                    },
+                    {
+                      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/displayName",
+                      "isActive": true,
+                      "type": "reference"
+                    },
+                    {
+                      "text": ", ",
+                      "type": "text"
+                    },
+                    {
+                      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/description",
+                      "isActive": true,
+                      "type": "reference"
+                    },
+                    {
+                      "text": ", and ",
+                      "type": "text"
+                    },
+                    {
+                      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/displayPrice",
+                      "isActive": true,
+                      "type": "reference"
+                    },
+                    {
+                      "text": ", respectively.",
+                      "type": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "content": [
+                {
+                  "type": "paragraph",
+                  "inlineContent": [
+                    {
+                      "type": "text",
+                      "text": "Determine whether a user is eligible for an introductory offer for the product using "
+                    },
+                    {
+                      "type": "reference",
+                      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/isEligibleForIntroOffer",
+                      "isActive": true
+                    },
+                    {
+                      "type": "text",
+                      "text": "."
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "content": [
+                {
+                  "type": "paragraph",
+                  "inlineContent": [
+                    {
+                      "type": "text",
+                      "text": "Display your subscription offers using the subscription information in "
+                    },
+                    {
+                      "type": "reference",
+                      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/subscription",
+                      "isActive": true
+                    },
+                    {
+                      "type": "text",
+                      "text": "."
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "type": "unorderedList"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "When users initiate a purchase, call "
+            },
+            {
+              "type": "reference",
+              "isActive": true,
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(options:)"
+            },
+            {
+              "type": "text",
+              "text": " or "
+            },
+            {
+              "type": "reference",
+              "isActive": true,
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-3bivf"
+            },
+            {
+              "type": "text",
+              "text": " on the product instance. If your app uses SwiftUI, you can also use "
+            },
+            {
+              "type": "reference",
+              "isActive": true,
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/PurchaseAction"
+            },
+            {
+              "type": "text",
+              "text": ". Set purchase options ("
+            },
+            {
+              "type": "reference",
+              "isActive": true,
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseOption"
+            },
+            {
+              "type": "text",
+              "text": ") to define an optional app account token, apply a promotional offer, or set a product quantity. Purchase options can also simulate an Ask to Buy scenario when you’re testing your app in the sandbox environment."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "Use a "
+            },
+            {
+              "code": "Product",
+              "type": "codeVoice"
+            },
+            {
+              "type": "text",
+              "text": " instance to learn whether a user is entitled to a product by checking "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlement",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": ", which holds the transaction that entitles the user to the product. This transaction information, as well as the transaction in "
+            },
+            {
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/latestTransaction",
+              "type": "reference",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": ", are cryptographically signed by the App Store in JSON Web Signature (JWS) format."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "If the product is an auto-renewable subscription, use the "
+            },
+            {
+              "type": "reference",
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/status-swift.property",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": " and "
+            },
+            {
+              "type": "reference",
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct/renewalInfo",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": " in the "
+            },
+            {
+              "type": "reference",
+              "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/subscription",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": " information to help manage subscriptions and inform business decisions, such as presenting subscription offers."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlineContent": [
+            {
+              "type": "text",
+              "text": "For information about configuring In-App Purchases in App Store Connect, see "
+            },
+            {
+              "type": "reference",
+              "identifier": "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases",
+              "isActive": true
+            },
+            {
+              "type": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "traits": [
+        {
+          "interfaceLanguage": "swift"
+        }
+      ],
+      "paths": [
+        "/documentation/storekit/product"
+      ]
+    }
+  ],
+  "kind": "symbol",
+  "sections": [],
+  "schemaVersion": {
+    "major": 0,
+    "minor": 3,
+    "patch": 0
+  },
+  "abstract": [
+    {
+      "text": "Information about a product that you configure in App Store Connect.",
+      "type": "text"
+    }
+  ],
+  "metadata": {
+    "externalID": "s:8StoreKit7ProductV",
+    "title": "Product",
+    "roleHeading": "Structure",
+    "symbolKind": "struct",
+    "fragments": [
+      {
+        "kind": "keyword",
+        "text": "struct"
+      },
+      {
+        "kind": "text",
+        "text": " "
+      },
+      {
+        "kind": "identifier",
+        "text": "Product"
+      }
+    ],
+    "navigatorTitle": [
+      {
+        "kind": "identifier",
+        "text": "Product"
+      }
+    ],
+    "role": "symbol",
+    "modules": [
+      {
+        "name": "StoreKit"
+      }
+    ],
+    "platforms": [
+      {
+        "introducedAt": "15.0",
+        "deprecated": false,
+        "name": "iOS",
+        "beta": false,
+        "unavailable": false
+      },
+      {
+        "introducedAt": "15.0",
+        "deprecated": false,
+        "name": "iPadOS",
+        "beta": false,
+        "unavailable": false
+      },
+      {
+        "introducedAt": "12.0",
+        "deprecated": false,
+        "name": "macOS",
+        "beta": false,
+        "unavailable": false
+      },
+      {
+        "introducedAt": "15.0",
+        "deprecated": false,
+        "name": "tvOS",
+        "beta": false,
+        "unavailable": false
+      },
+      {
+        "introducedAt": "1.0",
+        "deprecated": false,
+        "name": "visionOS",
+        "beta": false,
+        "unavailable": false
+      },
+      {
+        "introducedAt": "8.0",
+        "deprecated": false,
+        "name": "watchOS",
+        "beta": false,
+        "unavailable": false
+      }
+    ]
+  },
+  "relationshipsSections": [
+    {
+      "kind": "relationships",
+      "identifiers": [
+        "doc://com.externally.resolved.symbol/s:s8CopyableP",
+        "doc://com.externally.resolved.symbol/s:s28CustomDebugStringConvertibleP",
+        "doc://com.externally.resolved.symbol/s:SQ",
+        "doc://com.externally.resolved.symbol/s:SH",
+        "doc://com.externally.resolved.symbol/s:s12IdentifiableP",
+        "doc://com.externally.resolved.symbol/s:s8SendableP",
+        "doc://com.externally.resolved.symbol/s:s16SendableMetatypeP"
+      ],
+      "title": "Conforms To",
+      "type": "conformsTo"
+    }
+  ],
+  "topicSections": [
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/products(for:)"
+      ],
+      "title": "Requesting products from the App Store",
+      "anchor": "Requesting-products-from-the-App-Store"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/displayName",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/description",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/displayPrice",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/price",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/priceFormatStyle",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodFormatStyle",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodUnitFormatStyle"
+      ],
+      "title": "Displaying a product description and price",
+      "anchor": "Displaying-a-product-description-and-price"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(options:)",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-6dj6y",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-3bivf",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-8eai6",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseOption",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseResult",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseError"
+      ],
+      "title": "Purchasing a product",
+      "anchor": "Purchasing-a-product"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlement"
+      ],
+      "title": "Receiving current entitlement information",
+      "anchor": "Receiving-current-entitlement-information"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/latestTransaction"
+      ],
+      "title": "Getting the latest transaction",
+      "anchor": "Getting-the-latest-transaction"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/subscription",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionPeriod",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionOffer",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct"
+      ],
+      "title": "Getting subscription information",
+      "anchor": "Getting-subscription-information"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/id",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/type",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/ProductType"
+      ],
+      "title": "Getting product identifiers and type",
+      "anchor": "Getting-product-identifiers-and-type"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/isFamilyShareable"
+      ],
+      "title": "Getting Family Sharing status",
+      "anchor": "Getting-Family-Sharing-status"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/PromotionInfo"
+      ],
+      "title": "Managing promoted in-app purchases",
+      "anchor": "Managing-promoted-in-app-purchases"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/CollectionTaskState",
+        "doc://com.apple.storekit/documentation/StoreKit/Product/TaskState"
+      ],
+      "title": "Loading products",
+      "anchor": "Loading-products"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/jsonRepresentation"
+      ],
+      "title": "Getting product info in JSON format",
+      "anchor": "Getting-product-info-in-JSON-format"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionRelationship"
+      ],
+      "title": "Getting subscription relationship",
+      "anchor": "Getting-subscription-relationship"
+    },
+    {
+      "identifiers": [
+        "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlements"
+      ],
+      "title": "Instance Properties",
+      "anchor": "Instance-Properties",
+      "generated": true
+    }
+  ],
+  "references": {
+    "doc://com.apple.storekit/documentation/StoreKit/Product/jsonRepresentation": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/jsonRepresentation",
+      "title": "jsonRepresentation",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "var"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "jsonRepresentation"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:10Foundation4DataV",
+          "text": "Data"
+        }
+      ],
+      "role": "symbol",
+      "kind": "symbol",
+      "url": "/documentation/storekit/product/jsonrepresentation",
+      "abstract": [
+        {
+          "text": "The JSON representation of the product information.",
+          "type": "text"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/id": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/id",
+      "title": "id",
+      "role": "symbol",
+      "abstract": [
+        {
+          "text": "The unique product identifier.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "id",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "String",
+          "preciseIdentifier": "s:SS",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "url": "/documentation/storekit/product/id",
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SubscriptionInfo": {
+      "kind": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SubscriptionInfo",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Information about an auto-renewable subscription."
+        }
+      ],
+      "title": "SubscriptionInfo",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "typealias"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "SubscriptionInfo"
+        }
+      ],
+      "type": "topic",
+      "url": "/documentation/storekit/subscriptioninfo",
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "SubscriptionInfo"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/subscription": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The subscription information for an auto-renewable subscripton."
+        }
+      ],
+      "role": "symbol",
+      "title": "subscription",
+      "kind": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/subscription",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "let"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "subscription"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "text": "Product",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:8StoreKit7ProductV16SubscriptionInfoV",
+          "text": "SubscriptionInfo",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": "?",
+          "kind": "text"
+        }
+      ],
+      "url": "/documentation/storekit/product/subscription",
+      "type": "topic"
+    },
+    "doc://com.externally.resolved.symbol/s:s12IdentifiableP": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A class of types whose instances hold the value of an entity with stable identity."
+        }
+      ],
+      "kind": "symbol",
+      "identifier": "doc://com.externally.resolved.symbol/s:s12IdentifiableP",
+      "role": "symbol",
+      "title": "Identifiable",
+      "type": "topic",
+      "fragments": [
+        {
+          "text": "protocol",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "Identifiable",
+          "kind": "identifier"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "ID",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:s12IdentifiableP2IDQa"
+        },
+        {
+          "text": ">",
+          "kind": "text"
+        }
+      ],
+      "url": "/documentation/Swift/Identifiable"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlements": {
+      "title": "currentEntitlements",
+      "role": "symbol",
+      "kind": "symbol",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlements",
+      "fragments": [
+        {
+          "text": "var",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "currentEntitlements",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Transaction",
+          "preciseIdentifier": "s:8StoreKit11TransactionV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "Transactions",
+          "preciseIdentifier": "s:8StoreKit11TransactionV12TransactionsV",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "url": "/documentation/storekit/product/currententitlements",
+      "abstract": []
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct/renewalInfo": {
+      "role": "symbol",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The signed renewal information for the auto-renewable subscription."
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct/renewalInfo",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "renewalInfo",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "VerificationResult",
+          "preciseIdentifier": "s:8StoreKit18VerificationResultO",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:8StoreKit7ProductV16SubscriptionInfoV",
+          "text": "SubscriptionInfo",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:8StoreKit7ProductV16SubscriptionInfoV07RenewalE0V",
+          "text": "RenewalInfo",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ">",
+          "kind": "text"
+        }
+      ],
+      "type": "topic",
+      "url": "/documentation/storekit/product/subscriptioninfo/status-swift.struct/renewalinfo",
+      "title": "renewalInfo",
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseOption": {
+      "type": "topic",
+      "kind": "symbol",
+      "url": "/documentation/storekit/product/purchaseoption",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "text": "PurchaseOption",
+          "kind": "identifier"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "PurchaseOption"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseOption",
+      "abstract": [
+        {
+          "text": "Optional settings for a product purchase that add account information, purchase details, and offers, or that specify behaviors.",
+          "type": "text"
+        }
+      ],
+      "role": "symbol",
+      "title": "Product.PurchaseOption"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/SubscriptionStatus": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Represents the renewal status information for an auto-renewable subscription."
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "text": "SubscriptionStatus",
+          "kind": "identifier"
+        }
+      ],
+      "kind": "symbol",
+      "type": "topic",
+      "title": "SubscriptionStatus",
+      "fragments": [
+        {
+          "text": "typealias",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SubscriptionStatus",
+          "kind": "identifier"
+        }
+      ],
+      "url": "/documentation/storekit/subscriptionstatus",
+      "role": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/SubscriptionStatus"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodFormatStyle": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The format style for the date components related to a subscription’s duration."
+        }
+      ],
+      "title": "subscriptionPeriodFormatStyle",
+      "url": "/documentation/storekit/product/subscriptionperiodformatstyle",
+      "kind": "symbol",
+      "role": "symbol",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "var"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "subscriptionPeriodFormatStyle"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Date",
+          "preciseIdentifier": "s:10Foundation4DateV"
+        },
+        {
+          "kind": "text",
+          "text": "."
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "ComponentsFormatStyle",
+          "preciseIdentifier": "s:10Foundation4DateV21ComponentsFormatStyleV"
+        }
+      ],
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodFormatStyle"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/isEligibleForIntroOffer": {
+      "title": "isEligibleForIntroOffer",
+      "role": "symbol",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A Boolean value that indicates whether the customer is eligible for an introductory offer."
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/isEligibleForIntroOffer",
+      "url": "/documentation/storekit/product/subscriptioninfo/iseligibleforintrooffer",
+      "kind": "symbol",
+      "type": "topic",
+      "fragments": [
+        {
+          "text": "var",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "isEligibleForIntroOffer",
+          "kind": "identifier"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:Sb",
+          "text": "Bool"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product": {
+      "kind": "symbol",
+      "url": "/documentation/storekit/product",
+      "role": "symbol",
+      "navigatorTitle": [
+        {
+          "text": "Product",
+          "kind": "identifier"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "identifier"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "Information about a product that you configure in App Store Connect.",
+          "type": "text"
+        }
+      ],
+      "title": "Product",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product",
+      "type": "topic"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/implementing-a-store-in-your-app-using-the-storekit-api": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Offer In-App Purchases and manage entitlements using signed transactions and status information."
+        }
+      ],
+      "kind": "article",
+      "type": "topic",
+      "title": "Implementing a store in your app using the StoreKit API",
+      "url": "/documentation/storekit/implementing-a-store-in-your-app-using-the-storekit-api",
+      "role": "sampleCode",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/implementing-a-store-in-your-app-using-the-storekit-api"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodUnitFormatStyle": {
+      "url": "/documentation/storekit/product/subscriptionperiodunitformatstyle",
+      "role": "symbol",
+      "title": "subscriptionPeriodUnitFormatStyle",
+      "abstract": [
+        {
+          "text": "The format style for subscription period units, such as week, month, or year.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/subscriptionPeriodUnitFormatStyle",
+      "fragments": [
+        {
+          "text": "var",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "subscriptionPeriodUnitFormatStyle",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "SubscriptionPeriod",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV18SubscriptionPeriodV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "Unit",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV18SubscriptionPeriodV4UnitO"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "FormatStyle",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV18SubscriptionPeriodV4UnitO11FormatStyleV"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionPeriod": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionPeriod",
+      "kind": "symbol",
+      "role": "symbol",
+      "title": "Product.SubscriptionPeriod",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Values that represent the duration of time between subscription renewals."
+        }
+      ],
+      "url": "/documentation/storekit/product/subscriptionperiod",
+      "navigatorTitle": [
+        {
+          "text": "SubscriptionPeriod",
+          "kind": "identifier"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "kind": "identifier",
+          "text": "SubscriptionPeriod"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/status-swift.property": {
+      "type": "topic",
+      "role": "symbol",
+      "title": "status",
+      "url": "/documentation/storekit/product/subscriptioninfo/status-swift.property",
+      "kind": "symbol",
+      "abstract": [
+        {
+          "text": "An array that contains status information for a subscription group, including renewal and transaction information.",
+          "type": "text"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "var"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "status"
+        },
+        {
+          "kind": "text",
+          "text": ": ["
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "kind": "text",
+          "text": "."
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "SubscriptionInfo",
+          "preciseIdentifier": "s:8StoreKit7ProductV16SubscriptionInfoV"
+        },
+        {
+          "kind": "text",
+          "text": "."
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Status",
+          "preciseIdentifier": "s:8StoreKit7ProductV16SubscriptionInfoV6StatusV"
+        },
+        {
+          "kind": "text",
+          "text": "]"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/status-swift.property"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseError": {
+      "fragments": [
+        {
+          "text": "enum",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseError",
+          "kind": "identifier"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "PurchaseError"
+        }
+      ],
+      "title": "Product.PurchaseError",
+      "type": "topic",
+      "role": "symbol",
+      "kind": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseError",
+      "url": "/documentation/storekit/product/purchaseerror",
+      "abstract": [
+        {
+          "text": "Error information for product purchase errors.",
+          "type": "text"
+        }
+      ]
+    },
+    "doc://com.externally.resolved.symbol/s:s8SendableP": {
+      "abstract": [
+        {
+          "text": "A thread-safe type whose values can be shared across arbitrary concurrent contexts without introducing a risk of data races.",
+          "type": "text"
+        }
+      ],
+      "role": "symbol",
+      "identifier": "doc://com.externally.resolved.symbol/s:s8SendableP",
+      "kind": "symbol",
+      "title": "Sendable",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "protocol"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "Sendable",
+          "kind": "identifier"
+        },
+        {
+          "text": " : ",
+          "kind": "text"
+        },
+        {
+          "text": "SendableMetatype",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:s16SendableMetatypeP"
+        }
+      ],
+      "type": "topic",
+      "url": "/documentation/Swift/Sendable"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/displayName": {
+      "type": "topic",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "displayName",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:SS",
+          "text": "String",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "kind": "symbol",
+      "title": "displayName",
+      "url": "/documentation/storekit/product/displayname",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The localized display name of the product, if it exists."
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/displayName",
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/price": {
+      "url": "/documentation/storekit/product/price",
+      "role": "symbol",
+      "title": "price",
+      "abstract": [
+        {
+          "text": "The decimal representation of the cost of the product, in local currency.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/price",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "price",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "c:@SA@NSDecimal",
+          "text": "Decimal",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "doc://com.externally.resolved.symbol/s:s28CustomDebugStringConvertibleP": {
+      "title": "CustomDebugStringConvertible",
+      "fragments": [
+        {
+          "text": "protocol",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "CustomDebugStringConvertible",
+          "kind": "identifier"
+        }
+      ],
+      "url": "/documentation/Swift/CustomDebugStringConvertible",
+      "role": "symbol",
+      "type": "topic",
+      "kind": "symbol",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A type with a customized textual representation suitable for debugging purposes."
+        }
+      ],
+      "identifier": "doc://com.externally.resolved.symbol/s:s28CustomDebugStringConvertibleP"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionRelationship": {
+      "kind": "symbol",
+      "role": "symbol",
+      "abstract": [],
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "kind": "identifier",
+          "text": "SubscriptionRelationship"
+        }
+      ],
+      "type": "topic",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "SubscriptionRelationship"
+        }
+      ],
+      "url": "/documentation/storekit/product/subscriptionrelationship",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionRelationship",
+      "title": "Product.SubscriptionRelationship"
+    },
+    "doc://com.externally.resolved.symbol/s:s8CopyableP": {
+      "url": "/documentation/Swift/Copyable",
+      "title": "Copyable",
+      "kind": "symbol",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "protocol"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "Copyable"
+        }
+      ],
+      "type": "topic",
+      "role": "symbol",
+      "identifier": "doc://com.externally.resolved.symbol/s:s8CopyableP",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A type whose values can be implicitly or explicitly copied."
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/ProductType": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/ProductType",
+      "title": "Product.ProductType",
+      "abstract": [
+        {
+          "text": "The types of in-app purchases.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/storekit/product/producttype",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "ProductType"
+        }
+      ],
+      "role": "symbol",
+      "kind": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "ProductType"
+        }
+      ]
+    },
+    "doc://com.externally.resolved.symbol/s:SH": {
+      "kind": "symbol",
+      "url": "/documentation/Swift/Hashable",
+      "role": "symbol",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "protocol"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "Hashable"
+        },
+        {
+          "kind": "text",
+          "text": " : "
+        },
+        {
+          "preciseIdentifier": "s:SQ",
+          "kind": "typeIdentifier",
+          "text": "Equatable"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "A type that can be hashed into a `Hasher` to produce an integer hash value.",
+          "type": "text"
+        }
+      ],
+      "title": "Hashable",
+      "identifier": "doc://com.externally.resolved.symbol/s:SH",
+      "type": "topic"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/displayPrice": {
+      "url": "/documentation/storekit/product/displayprice",
+      "abstract": [
+        {
+          "text": "The localized string representation of the product price, suitable for display.",
+          "type": "text"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/displayPrice",
+      "role": "symbol",
+      "title": "displayPrice",
+      "type": "topic",
+      "kind": "symbol",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "displayPrice",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "String",
+          "preciseIdentifier": "s:SS",
+          "kind": "typeIdentifier"
+        }
+      ]
+    },
+    "doc://com.apple.documentation/documentation/technologies": {
+      "url": "/documentation/technologies",
+      "role": "overview",
+      "abstract": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "title": "Technologies",
+      "type": "topic",
+      "identifier": "doc://com.apple.documentation/documentation/technologies",
+      "kind": "technologies"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/description": {
+      "url": "/documentation/storekit/product/description",
+      "role": "symbol",
+      "abstract": [
+        {
+          "text": "The localized description of the product.",
+          "type": "text"
+        }
+      ],
+      "title": "description",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/description",
+      "kind": "symbol",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "let"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "description",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:SS",
+          "text": "String",
+          "kind": "typeIdentifier"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlement": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/currentEntitlement",
+      "fragments": [
+        {
+          "text": "var",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "currentEntitlement",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "VerificationResult",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit18VerificationResultO"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "preciseIdentifier": "s:8StoreKit11TransactionV",
+          "text": "Transaction",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ">?",
+          "kind": "text"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "The transaction that entitles the user to the product.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "title": "currentEntitlement",
+      "role": "symbol",
+      "deprecated": true,
+      "kind": "symbol",
+      "url": "/documentation/storekit/product/currententitlement"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo": {
+      "abstract": [
+        {
+          "text": "Information about an auto-renewable subscription, such as its status, period, subscription group, and subscription offer details.",
+          "type": "text"
+        }
+      ],
+      "url": "/documentation/storekit/product/subscriptioninfo",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "SubscriptionInfo"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "SubscriptionInfo"
+        }
+      ],
+      "kind": "symbol",
+      "type": "topic",
+      "role": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo",
+      "title": "Product.SubscriptionInfo"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-6dj6y": {
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "func"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "purchase"
+        },
+        {
+          "kind": "text",
+          "text": "("
+        },
+        {
+          "kind": "externalParam",
+          "text": "confirmIn"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "keyword",
+          "text": "some"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "UIScene",
+          "preciseIdentifier": "c:objc(cs)UIScene"
+        },
+        {
+          "kind": "text",
+          "text": ", "
+        },
+        {
+          "kind": "externalParam",
+          "text": "options"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Set",
+          "preciseIdentifier": "s:Sh"
+        },
+        {
+          "kind": "text",
+          "text": "<"
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "kind": "text",
+          "text": "."
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "PurchaseOption",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseOptionV"
+        },
+        {
+          "kind": "text",
+          "text": ">) "
+        },
+        {
+          "kind": "keyword",
+          "text": "async"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "keyword",
+          "text": "throws"
+        },
+        {
+          "kind": "text",
+          "text": " -> "
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "kind": "text",
+          "text": "."
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "PurchaseResult",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseResultO"
+        }
+      ],
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-6dj6y",
+      "title": "purchase(confirmIn:options:)",
+      "role": "symbol",
+      "kind": "symbol",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Initiates a purchase for the product with the App Store and displays the confirmation sheet."
+        }
+      ],
+      "url": "/documentation/storekit/product/purchase(confirmin:options:)-6dj6y"
+    },
+    "doc://com.externally.resolved.symbol/s:s16SendableMetatypeP": {
+      "abstract": [
+        {
+          "text": "A type whose metatype can be shared across arbitrary concurrent contexts without introducing a risk of data races. When a generic type `T` conforms to `SendableMetatype`, its metatype `T.Type` conforms to `Sendable`.  All concrete types implicitly conform to the `SendableMetatype` protocol, so its primary purpose is in generic code to prohibit the use of isolated conformances along with the generic type.",
+          "type": "text"
+        }
+      ],
+      "role": "symbol",
+      "identifier": "doc://com.externally.resolved.symbol/s:s16SendableMetatypeP",
+      "kind": "symbol",
+      "title": "SendableMetatype",
+      "fragments": [
+        {
+          "text": "protocol",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SendableMetatype",
+          "kind": "identifier"
+        },
+        {
+          "text": " : ~Copyable, ~Escapable",
+          "kind": "text"
+        }
+      ],
+      "type": "topic",
+      "url": "/documentation/Swift/SendableMetatype"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/TaskState": {
+      "type": "topic",
+      "title": "Product.TaskState",
+      "role": "symbol",
+      "url": "/documentation/storekit/product/taskstate",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/TaskState",
+      "kind": "symbol",
+      "abstract": [
+        {
+          "text": "The state of a task that loads a product in the background.",
+          "type": "text"
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "enum"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "TaskState"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "TaskState"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/PromotionInfo": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/PromotionInfo",
+      "kind": "symbol",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Information about a promoted In-App Purchase that customizes its order and visibility on the device."
+        }
+      ],
+      "url": "/documentation/storekit/product/promotioninfo",
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "PromotionInfo",
+          "kind": "identifier"
+        }
+      ],
+      "navigatorTitle": [
+        {
+          "text": "PromotionInfo",
+          "kind": "identifier"
+        }
+      ],
+      "role": "symbol",
+      "title": "Product.PromotionInfo"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/products(for:)": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/products(for:)",
+      "title": "products(for:)",
+      "type": "topic",
+      "url": "/documentation/storekit/product/products(for:)",
+      "role": "symbol",
+      "fragments": [
+        {
+          "text": "static",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "func",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "products",
+          "kind": "identifier"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "Identifiers",
+          "kind": "genericParameter"
+        },
+        {
+          "text": ">(",
+          "kind": "text"
+        },
+        {
+          "text": "for",
+          "kind": "externalParam"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Identifiers",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ") ",
+          "kind": "text"
+        },
+        {
+          "text": "async",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "throws",
+          "kind": "keyword"
+        },
+        {
+          "text": " -> [",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": "]",
+          "kind": "text"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "Requests product data from the App Store.",
+          "type": "text"
+        }
+      ],
+      "kind": "symbol"
+    },
+    "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases": {
+      "title": "Overview for configuring In-App Purchases",
+      "type": "link",
+      "url": "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases",
+      "identifier": "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases",
+      "titleInlineContent": [
+        {
+          "text": "Overview for configuring In-App Purchases",
+          "type": "text"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(options:)": {
+      "kind": "symbol",
+      "title": "purchase(options:)",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(options:)",
+      "role": "symbol",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "func"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "text": "purchase",
+          "kind": "identifier"
+        },
+        {
+          "text": "(",
+          "kind": "text"
+        },
+        {
+          "text": "options",
+          "kind": "externalParam"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Set",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:Sh"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseOption",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseOptionV"
+        },
+        {
+          "text": ">) ",
+          "kind": "text"
+        },
+        {
+          "text": "async",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "throws",
+          "kind": "keyword"
+        },
+        {
+          "text": " -> ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseResult",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseResultO"
+        }
+      ],
+      "url": "/documentation/storekit/product/purchase(options:)",
+      "type": "topic",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Initiates a purchase for the product with the App Store and displays the confirmation sheet."
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-3bivf": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Processes a purchase for the product."
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "func"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "purchase"
+        },
+        {
+          "kind": "text",
+          "text": "("
+        },
+        {
+          "kind": "externalParam",
+          "text": "confirmIn"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "c:objc(cs)UIViewController",
+          "text": "UIViewController"
+        },
+        {
+          "kind": "text",
+          "text": ", "
+        },
+        {
+          "text": "options",
+          "kind": "externalParam"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Set",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:Sh"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseOption",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseOptionV"
+        },
+        {
+          "text": ">) ",
+          "kind": "text"
+        },
+        {
+          "text": "async",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "throws",
+          "kind": "keyword"
+        },
+        {
+          "text": " -> ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseResult",
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseResultO"
+        }
+      ],
+      "url": "/documentation/storekit/product/purchase(confirmin:options:)-3bivf",
+      "kind": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-3bivf",
+      "title": "purchase(confirmIn:options:)",
+      "type": "topic",
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseResult": {
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The result of a purchase."
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "enum"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "PurchaseResult"
+        }
+      ],
+      "url": "/documentation/storekit/product/purchaseresult",
+      "kind": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "PurchaseResult"
+        }
+      ],
+      "role": "symbol",
+      "type": "topic",
+      "title": "Product.PurchaseResult",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/PurchaseResult"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/priceFormatStyle": {
+      "fragments": [
+        {
+          "text": "var",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "priceFormatStyle",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Decimal",
+          "preciseIdentifier": "c:@SA@NSDecimal",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "FormatStyle",
+          "preciseIdentifier": "s:So9NSDecimala10FoundationE11FormatStyleV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "Currency",
+          "preciseIdentifier": "s:So9NSDecimala10FoundationE11FormatStyleV8CurrencyV",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "url": "/documentation/storekit/product/priceformatstyle",
+      "kind": "symbol",
+      "type": "topic",
+      "role": "symbol",
+      "title": "priceFormatStyle",
+      "abstract": [
+        {
+          "text": "The format style for the numbers in the price of the product.",
+          "type": "text"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/priceFormatStyle"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/PurchaseAction": {
+      "kind": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "PurchaseAction"
+        }
+      ],
+      "role": "symbol",
+      "url": "/documentation/storekit/purchaseaction",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/PurchaseAction",
+      "title": "PurchaseAction",
+      "type": "topic",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "struct"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "PurchaseAction"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "An action that starts an In-App Purchase.",
+          "type": "text"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit": {
+      "url": "/documentation/storekit",
+      "role": "collection",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Support In-App Purchases and interactions with the App Store."
+        }
+      ],
+      "title": "StoreKit",
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit",
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/CollectionTaskState": {
+      "fragments": [
+        {
+          "text": "enum",
+          "kind": "keyword"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "CollectionTaskState"
+        }
+      ],
+      "abstract": [
+        {
+          "text": "The state of a task that loads a collection of products in the background.",
+          "type": "text"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/CollectionTaskState",
+      "role": "symbol",
+      "title": "Product.CollectionTaskState",
+      "kind": "symbol",
+      "type": "topic",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "CollectionTaskState"
+        }
+      ],
+      "url": "/documentation/storekit/product/collectiontaskstate"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/latestTransaction": {
+      "type": "topic",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "var"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "latestTransaction"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "VerificationResult",
+          "preciseIdentifier": "s:8StoreKit18VerificationResultO"
+        },
+        {
+          "kind": "text",
+          "text": "<"
+        },
+        {
+          "kind": "typeIdentifier",
+          "text": "Transaction",
+          "preciseIdentifier": "s:8StoreKit11TransactionV"
+        },
+        {
+          "kind": "text",
+          "text": ">?"
+        }
+      ],
+      "kind": "symbol",
+      "title": "latestTransaction",
+      "url": "/documentation/storekit/product/latesttransaction",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "The most recent transaction for the product."
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/latestTransaction",
+      "role": "symbol"
+    },
+    "doc://com.externally.resolved.symbol/s:SQ": {
+      "identifier": "doc://com.externally.resolved.symbol/s:SQ",
+      "title": "Equatable",
+      "type": "topic",
+      "kind": "symbol",
+      "url": "/documentation/Swift/Equatable",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A type that can be compared for value equality."
+        }
+      ],
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "protocol"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "kind": "identifier",
+          "text": "Equatable"
+        }
+      ],
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/type": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/type",
+      "title": "type",
+      "role": "symbol",
+      "abstract": [
+        {
+          "text": "The in-app purchase product type.",
+          "type": "text"
+        }
+      ],
+      "type": "topic",
+      "fragments": [
+        {
+          "text": "let",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "type",
+          "kind": "identifier"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "ProductType",
+          "preciseIdentifier": "s:8StoreKit7ProductV0C4TypeV",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "url": "/documentation/storekit/product/type",
+      "kind": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct": {
+      "type": "topic",
+      "navigatorTitle": [
+        {
+          "text": "Status",
+          "kind": "identifier"
+        }
+      ],
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "Status",
+          "kind": "identifier"
+        }
+      ],
+      "kind": "symbol",
+      "title": "Product.SubscriptionInfo.Status",
+      "url": "/documentation/storekit/product/subscriptioninfo/status-swift.struct",
+      "abstract": [
+        {
+          "text": "The renewal status information for an auto-renewable subscription.",
+          "type": "text"
+        }
+      ],
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionInfo/Status-swift.struct",
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/supporting-family-sharing-in-your-app": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/supporting-family-sharing-in-your-app",
+      "title": "Supporting Family Sharing in your app",
+      "type": "topic",
+      "role": "article",
+      "kind": "article",
+      "url": "/documentation/storekit/supporting-family-sharing-in-your-app",
+      "abstract": [
+        {
+          "text": "Provide service to share subscriptions and non-consumable products to family members.",
+          "type": "text"
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/supporting-promoted-in-app-purchases-in-your-app": {
+      "type": "topic",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/supporting-promoted-in-app-purchases-in-your-app",
+      "url": "/documentation/storekit/supporting-promoted-in-app-purchases-in-your-app",
+      "title": "Supporting promoted In-App Purchases in your app",
+      "role": "article",
+      "abstract": [
+        {
+          "type": "text",
+          "text": "Display promoted In-App Purchases on your product page and handle purchases that users initiate on the App Store."
+        }
+      ],
+      "kind": "article"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionOffer": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/SubscriptionOffer",
+      "title": "Product.SubscriptionOffer",
+      "type": "topic",
+      "kind": "symbol",
+      "navigatorTitle": [
+        {
+          "kind": "identifier",
+          "text": "SubscriptionOffer"
+        }
+      ],
+      "url": "/documentation/storekit/product/subscriptionoffer",
+      "abstract": [
+        {
+          "text": "Information about a subscription offer that you configure in App Store Connect.",
+          "type": "text"
+        }
+      ],
+      "fragments": [
+        {
+          "text": "struct",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "SubscriptionOffer",
+          "kind": "identifier"
+        }
+      ],
+      "role": "symbol"
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/isFamilyShareable": {
+      "type": "topic",
+      "role": "symbol",
+      "url": "/documentation/storekit/product/isfamilyshareable",
+      "kind": "symbol",
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/isFamilyShareable",
+      "title": "isFamilyShareable",
+      "fragments": [
+        {
+          "kind": "keyword",
+          "text": "let"
+        },
+        {
+          "kind": "text",
+          "text": " "
+        },
+        {
+          "kind": "identifier",
+          "text": "isFamilyShareable"
+        },
+        {
+          "kind": "text",
+          "text": ": "
+        },
+        {
+          "kind": "typeIdentifier",
+          "preciseIdentifier": "s:Sb",
+          "text": "Bool"
+        }
+      ],
+      "abstract": [
+        {
+          "type": "text",
+          "text": "A Boolean value that indicates whether the product is available for Family Sharing in App Store Connect."
+        }
+      ]
+    },
+    "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-8eai6": {
+      "identifier": "doc://com.apple.storekit/documentation/StoreKit/Product/purchase(confirmIn:options:)-8eai6",
+      "role": "symbol",
+      "kind": "symbol",
+      "title": "purchase(confirmIn:options:)",
+      "abstract": [
+        {
+          "text": "Processes a purchase for the product.",
+          "type": "text"
+        }
+      ],
+      "fragments": [
+        {
+          "text": "func",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "purchase",
+          "kind": "identifier"
+        },
+        {
+          "text": "(",
+          "kind": "text"
+        },
+        {
+          "text": "confirmIn",
+          "kind": "externalParam"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "NSWindow",
+          "preciseIdentifier": "c:objc(cs)NSWindow",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ", ",
+          "kind": "text"
+        },
+        {
+          "text": "options",
+          "kind": "externalParam"
+        },
+        {
+          "text": ": ",
+          "kind": "text"
+        },
+        {
+          "text": "Set",
+          "preciseIdentifier": "s:Sh",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": "<",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseOption",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseOptionV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ">) ",
+          "kind": "text"
+        },
+        {
+          "text": "async",
+          "kind": "keyword"
+        },
+        {
+          "text": " ",
+          "kind": "text"
+        },
+        {
+          "text": "throws",
+          "kind": "keyword"
+        },
+        {
+          "text": " -> ",
+          "kind": "text"
+        },
+        {
+          "text": "Product",
+          "preciseIdentifier": "s:8StoreKit7ProductV",
+          "kind": "typeIdentifier"
+        },
+        {
+          "text": ".",
+          "kind": "text"
+        },
+        {
+          "text": "PurchaseResult",
+          "preciseIdentifier": "s:8StoreKit7ProductV14PurchaseResultO",
+          "kind": "typeIdentifier"
+        }
+      ],
+      "url": "/documentation/storekit/product/purchase(confirmin:options:)-8eai6",
+      "type": "topic"
+    }
+  },
+  "legalNotices": {
+    "copyright": "Copyright &copy; 2025 Apple Inc. All rights reserved.",
+    "termsOfUse": "https://www.apple.com/legal/internet-services/terms/site.html",
+    "privacyPolicy": "https://www.apple.com/privacy/privacy-policy"
+  }
+}

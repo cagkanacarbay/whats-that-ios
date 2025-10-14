@@ -23,7 +23,8 @@ TARGETED_DEVICE_FAMILY = 1,2
 // ==========================================
 // Info PLIST
 // ==========================================
-GENERATE_INFOPLIST_FILE = YES
+// Use the custom Info.plist so Supabase/Google keys ship with the build
+GENERATE_INFOPLIST_FILE = NO
 INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationLandscapeRight UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationPortrait
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationLandscapeRight UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
 

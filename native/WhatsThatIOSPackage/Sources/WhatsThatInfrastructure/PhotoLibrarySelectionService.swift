@@ -1,4 +1,4 @@
-#if canImport(PhotosUI)
+#if canImport(UIKit) && canImport(PhotosUI)
 import Photos
 import PhotosUI
 import UIKit

@@ -13,16 +13,19 @@ public struct RootContentView: View {
     @State private var isSettingsPresented = false
     private let feedUseCase: DiscoveryFeedUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
+    private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
 
     public init(
         feedUseCase: DiscoveryFeedUseCase,
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver = AppFlowResolver(),
-        makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
+        makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel,
+        makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self.makeCreationViewModel = makeCreationViewModel
+        self.makeVoiceoverController = makeVoiceoverController
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -89,17 +92,23 @@ public struct RootContentView: View {
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 case .main:
-                    MainTabView(
-                        feedUseCase: feedUseCase,
-                        cameraViewModel: makeCreationViewModel(.camera),
-                        uploadViewModel: makeCreationViewModel(.upload),
-                        onSignOut: {
-                            Task { try? await viewModel.signOut() }
-                        },
-                        onSettings: {
-                            isSettingsPresented = true
-                        }
-                    )
+                    if let makeVoiceoverController {
+                        MainTabView(
+                            feedUseCase: feedUseCase,
+                            cameraViewModel: makeCreationViewModel(.camera),
+                            uploadViewModel: makeCreationViewModel(.upload),
+                            voiceoverControllerFactory: makeVoiceoverController,
+                            onSignOut: {
+                                Task { try? await viewModel.signOut() }
+                            },
+                            onSettings: {
+                                isSettingsPresented = true
+                            }
+                        )
+                    } else {
+                        Text("Voiceover playback is available on iOS builds only.")
+                            .font(.headline)
+                    }
             }
         }
             .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))

@@ -32,14 +32,16 @@ The following phased plan guides delivery of the native iOS application from pro
 
 ---
 
-## Phase 3 – Discovery Consumption, Modal Animation & Voiceover
+## Phase 3 – Discovery Consumption, Detail Experience & Voiceover
 - **Objectives:**
   - Recreate the discoveries grid UI exactly (two-column layout, floating header, skeletons) and ensure scrolling/refresh behavior matches the React Native build.
-  - Implement the matched-geometry modal transition, including edge-swipe dismissal, gradient overlay, and detail sheet styling described in `feature-inventory.md`.
-  - Wire voiceover playback (local + global players) and ensure cached assets hydrate seamlessly for the seeded test account.
+- Implement the detail screen overlay (hero image, gradient, metadata, markdown body) with share/map actions.
+- Wire voiceover playback (local + global players) and ensure cached assets hydrate seamlessly for the seeded test account.
+- Surface quick action buttons (“Take another photo”, “Upload a photo”) to re-enter creation flows from the detail view.
+- **Status:** Discoveries grid + native detail screen are live in SwiftUI (`DiscoveriesHomeView`/`DiscoveryDetailView`). Voiceover playback and quick action buttons remain outstanding.
 - **Key Tasks:** Discovery repository actor, image cache manager, SwiftUI grid + sticky header, modal coordinator with custom transitions (UIKit bridge), VoiceoverRepository + AVAudioPlayer integration, playback persistence.
 - **Dependencies:** Availability of seeded Supabase test user with discovery history; design reference assets (screenshots/gifs) for pixel parity.
-- **Exit Criteria:** In simulator, test user can browse existing discoveries with smooth animations, open/close detail modal flawlessly, and play narration with persistent audio controls.
+- **Exit Criteria:** In simulator, test user can browse existing discoveries, open/close detail view, launch quick actions into creation flows, and play narration with persistent audio controls.
 
 ---
 

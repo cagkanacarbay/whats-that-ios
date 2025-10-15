@@ -15,7 +15,7 @@ This plan defines the target architecture, frameworks, and cross-cutting pattern
 
 ## Proposed Tech Stack
 - **Language / Runtime:** Swift 5.10+, iOS 17 minimum (for modern SwiftUI Observation API and StoreKit 2 features).
-- **UI:** SwiftUI + NavigationStack/TabView, bridged to UIKit where necessary (camera preview, custom gestures, matched-geometry modal).
+- **UI:** SwiftUI + NavigationStack/TabView, bridged to UIKit where necessary (camera preview, custom gestures, detail overlay coordination).
 - **State Management:** ObservableObject + @StateObject at screen scope; Domain/ViewModel layer exposes immutable state structs updated via reducers/actors and `MainActor`-isolated mutations.
 - **Networking & Backend:** `supabase-swift` 2.4.x (Auth, PostgREST, Storage) layered behind repository protocols; `URLSession` (native) for Supabase Functions + SSE with `AsyncStream` parsing, `URLSessionWebSocketTask` reserved for future realtime features. Sign-in uses Supabase OAuth flows.
 - **Authentication Bridges:** `GoogleSignIn` / `GoogleSignInSwiftSupport` 7.0.x for Google OAuth buttons; Sign in with Apple via `AuthenticationServices`.
@@ -76,7 +76,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
   - `WhatsThatShared` – configuration primitives and cross-cutting utilities used across layers.
   - Each module ships with a placeholder test target to enforce layering and provide scaffolding for future unit tests.
 
-- **Presentation Layer:** Each tab/screen has a SwiftUI view backed by a `ViewModel` (ObservableObject), injected with domain use cases. Coordinators manage navigation state & modal presentation (e.g., Discovery modal with matched geometry).
+- **Presentation Layer:** Each tab/screen has a SwiftUI view backed by a `ViewModel` (ObservableObject), injected with domain use cases. Navigation is currently driven directly from the views (e.g., `DiscoveriesHomeView` owns the selection state for the discovery detail overlay); a dedicated coordinator remains a future refinement.
 - **Domain Layer:** Protocol-oriented use cases (e.g., `CreateDiscoveryUseCase`, `FetchDiscoveriesUseCase`, `PurchaseCreditsUseCase`, `EnsureVoiceoverUseCase`). Contains pure Swift structs/enums describing states, errors, side effects (no UIKit/SwiftUI references).
 - **Data Layer:** Repositories translate domain requests into Supabase SDK calls, Storage downloads, or local cache interactions. Use actors for thread safety (e.g., `DiscoveryRepository` actor to serialize pagination).
 - Current implementation includes `SupabaseDiscoveryRepository` (backed by `supabase-swift` 2.34.0) for live data and `StubDiscoveryRepository` for previews/offline development.
@@ -94,8 +94,8 @@ Shared (Foundation utilities, image/audio cache, configuration)
 | Discovery Capture | `CaptureView` (Camera) / `LibraryPickerView` | `ImageFlowViewModel` state machine | `CameraService`, `PhotoLibraryService`, `LocationService` |
 | Confirm Screen | `ConfirmDiscoveryView` | `PrepareAnalysisUseCase`, `CreditStatusUseCase` | `CreditsRepository`, `DiscoveryHistoryRepository`, `PushTokenService` |
 | AI Streaming | `AnalysisStreamingView` with Markdown preview | `AnalysisSession` actor orchestrating SSE, retry, cancellation | `AskAIClient` (SSE), `ImageUploader`, `RequestTracker`, `SupabaseFunctionsClient` |
-| Discovery List | `DiscoveriesTabView` | `DiscoveryListViewModel` | `DiscoveryRepository` (pagination actor), `ImageCache` |
-| Discovery Detail Modal | `DiscoveryDetailView`, `ModalCoordinator` | `DiscoveryDetailViewModel` | `VoiceoverRepository`, `NavigationAnimator` |
+| Discovery List | `DiscoveriesHomeView` | `DiscoveryFeedViewModel` | `DiscoveryRepository` (pagination actor), `Nuke` image loading |
+| Discovery Detail Modal | `DiscoveryDetailView` | Selection handled via `DiscoveriesHomeView` state (no separate view model yet) | Voiceover playback TBD (currently stubbed), native share + MapKit helpers |
 | Inline Feedback | `FeedbackOverlayView` | `FeedbackViewModel` (local only for now) | Placeholder repository (no backend yet) |
 | Audio Player | `PersistentAudioPlayerView` | `AudioPlayerViewModel` (actor) | `VoiceoverRepository`, `AVAudioPlayerService`, `PlaybackStore` |
 | Credits & IAP | `PurchaseCreditsView` | `CreditsViewModel`, `PurchaseCreditsUseCase` | `StoreKitService`, `SupabaseCreditsRepository`, `ValidateReceiptClient` |
@@ -119,9 +119,10 @@ Shared (Foundation utilities, image/audio cache, configuration)
 5. Errors bubble to `AnalysisSession` → `ImageFlowViewModel`, which transitions to `.error` with retry/exit options.
 
 ### Discovery Browsing & Modal Transition
-- `DiscoveryListViewModel` maintains paginated array of `DiscoverySummary` structs, prefetch thresholds, cache states. Actor ensures only one fetch at a time.
-- Image prefetch: `ImageCache` downloads signed URLs ahead of scroll position; store metadata (expiry) to avoid stale URLs—resolve TODO notes from Expo version.
-- Upon tap, `ModalCoordinator` uses `matchedGeometryEffect` with `DiscoveryCardView` → `DiscoveryDetailView`. Detail view fetches voiceover asset lazily and exposes map/metadata/feedback UI.
+- `DiscoveryFeedViewModel` maintains a paginated array of `DiscoverySummary` structs (now enriched with `shortDescription` + `detailDescription`), handles refresh/load-more, and deduplicates pages.
+- `DiscoveriesHomeView` renders the two-column grid using SwiftUI `LazyVGrid`, injects a shared `@Namespace`, and stores selection state so the card image can be reused seamlessly inside `DiscoveryDetailView`.
+- Remote imagery is handled by Nuke/AsyncImage; placeholders mirror the RN gradient + logo treatment until the fetch completes.
+- `DiscoveryDetailView` reproduces the React Native overlay (gradient, title, subtitle, share/map buttons) and renders the Markdown body with `MarkdownUI`. Dismissal currently relies on the back button; gesture-based drag remains on the backlog alongside voiceover playback plumbing.
 
 ### Voiceover Management & Audio Playback
 - `VoiceoverRepository` actor handles signed URL generation via Supabase storage, caches audio & timing files, applies exponential backoff rules mirroring React logic.
@@ -141,7 +142,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
 
 ## Navigation & UI Details
 - **Tab Structure:** `TabView` with four tabs (Camera, Discoveries, Upload, Settings). Camera/Upload tabs auto-prompt capture flow on focus; handle “Cancel” states gracefully.
-- **Modal:** Use SwiftUI `.fullScreenCover` with custom transition or UIKit bridge for precise animation/gesture control. Match existing edge-swipe behavior via `UIPanGestureRecognizer`.
+- **Modal:** Current build keeps the overlay inside `DiscoveriesHomeView` and relies on the shared namespace to transition between list and detail; consider migrating to a dedicated coordinator or UIKit bridge if gesture/scroll conflicts emerge when we add interactive dismissal.
 - **Markdown Rendering:** Use `AttributedString` Markdown parser or integrate a lightweight renderer (e.g., `MarkdownUI`) to support headings, lists, inline styling. Hooks for feedback overlay.
 - **Feedback Overlay:** Represent as overlay view triggered on double-tap (SwiftUI `Gesture`), storing bounding boxes and presenting reaction picker.
 - **Theming:** Support dark/light theme toggles using `ColorScheme` environment and persisted preference.

@@ -28,12 +28,21 @@ public struct AppRootView: View {
         }
         #endif
 
+        #if os(iOS)
+        let voiceoverFactory: (() -> VoiceoverPlaybackController)? = {
+            container.makeVoiceoverPlaybackController()
+        }
+        #else
+        let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
+        #endif
+
         return RootContentView(
             feedUseCase: container.discoveryFeedUseCase,
             authUseCase: container.authUseCase,
             onboardingUseCase: container.onboardingUseCase,
             flowResolver: container.flowResolver,
-            makeCreationViewModel: makeViewModel
+            makeCreationViewModel: makeViewModel,
+            makeVoiceoverController: voiceoverFactory
         )
     }
 }

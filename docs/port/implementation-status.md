@@ -15,9 +15,9 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 - ✅ Added a lightweight Settings sheet within the discoveries header menu so QA can reset onboarding flags (replaying the intro + permissions without reinstalling).
 - ⬜️ Remaining: wire deep-link reset handling, finish Terms/Privacy copy, and implement Apple sign-in.
 
-## Phase 3 – Discovery Consumption, Modal Animation & Voiceover
-- 🟡 In progress. Discovery home screen now mirrors the Tamagui grid (two-column cards, skeletons, pull-to-refresh, paginated loading) with the new SwiftUI feed view and pagination logic.
-- ⬜️ Remaining: discovery detail modal/voiceover modules, signed Supabase image delivery & matched-geometry transitions.
+## Phase 3 – Discovery Consumption, Modal Voiceover & Quick Actions
+- 🟡 In progress. Discovery home screen mirrors the Tamagui grid and now presents a native detail screen (`DiscoveryDetailView`) with the hero image, gradient overlay, Markdown body, share, and map actions.
+- ⬜️ Remaining: wire the “Take another photo” / “Upload a photo” quick action buttons to the creation flows and bring the voiceover player online (detail view + global surface).
 
 ## Phase 4 – Discovery Creation Pipeline & Streaming Polish
 - ⬜️ Not started. Camera/upload flows, SSE streaming, and shared state machine pending.
@@ -37,7 +37,7 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 - ✅ **Shared Layer** – Introduced `AppConfiguration` + `AppConfiguration.fromBundle()` for runtime config; missing Supabase/Google keys now trigger a fail-fast precondition so dev environments surface configuration issues immediately.
 - ✅ **Infrastructure Layer** – Added `SupabaseClientFactory` (guarded by `USE_REMOTE_DEPS`) and a `GoogleSignInService` wrapper (conditional build); retained only the lightweight Supabase transport stub for tests (auth now requires live services).
 - ✅ **Data Layer** – Implemented `SupabaseDiscoveryRepository` using `supabase-swift`; retains `StubDiscoveryRepository` for offline/testing. Repository now returns Supabase metadata (image paths, share tokens, location), generates signed Supabase Storage URLs, and supports cursor-based pagination for the feed.
-- ✅ **Presentation Layer** – Root flow now uses `AppRootViewModel` to arbitrate onboarding/auth states before showing the discovery feed; authentication UI covers sign-in, sign-up, Google placeholder, and forgot-password messaging. Added brand-aware SwiftUI building blocks (`BrandTheme`, `BrandPrimaryButton`, social buttons, floating text fields) and RN-parity assets so onboarding/auth screens match Tamagui designs. Discovery feed has been rebuilt as the Tamagui two-column grid with skeletons, pull-to-refresh, and pagination (detail modal + matched geometry still TODO).
+- ✅ **Presentation Layer** – Root flow now uses `AppRootViewModel` to arbitrate onboarding/auth states before showing the discovery feed; authentication UI covers sign-in, sign-up, Google placeholder, and forgot-password messaging. Added brand-aware SwiftUI building blocks (`BrandTheme`, `BrandPrimaryButton`, social buttons, floating text fields) and RN-parity assets so onboarding/auth screens match Tamagui designs. Discovery feed has been rebuilt as the Tamagui two-column grid with skeletons, pull-to-refresh, and pagination, and the redesigned discovery detail screen (`DiscoveriesHomeView` → `DiscoveryDetailView`) ships with gradient overlay, metadata stack, and Markdown body rendering.
 - ⚠️ **Coordinator / Navigation** – Root gating is live, but the planned tab bar + modal coordinator remain outstanding.
 
 ---
@@ -54,7 +54,7 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 
 ## Next Suggested Steps
 1. Phase 2: Add Google sign-in, password reset deep-link handling, and tighten copy/accessibility on onboarding screens.
-2. Phase 3: Replace placeholder feed UI with the two-column grid + discovery modal plan, layering in caching/image loading via Nuke.
-3. Expand automated tests to cover live repository mappings and auth edge cases (e.g., failed sign-in, onboarding persistence across launches).
+2. Phase 3: Implement discovery quick action buttons (camera/upload) and voiceover playback (detail + persistent player), then backfill tests around the new flows.
+3. Phase 4: Begin camera/upload state machine work once voiceover parity lands, then expand automated tests to cover repository mappings and auth edge cases.
 
 This document should be updated whenever a plan item is started or completed, so it remains a parallel source of truth with the roadmap and architecture plan.

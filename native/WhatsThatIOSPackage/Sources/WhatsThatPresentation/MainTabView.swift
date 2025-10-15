@@ -11,6 +11,7 @@ struct MainTabView: View {
     @State private var selectedTab: Tab = .discoveries
     @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
+    @StateObject private var voiceoverController: VoiceoverPlaybackController
     @State private var feedRefreshToken = UUID()
 
     private let feedUseCase: DiscoveryFeedUseCase
@@ -21,6 +22,7 @@ struct MainTabView: View {
         feedUseCase: DiscoveryFeedUseCase,
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
+        voiceoverControllerFactory: @escaping () -> VoiceoverPlaybackController,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil
     ) {
@@ -29,6 +31,7 @@ struct MainTabView: View {
         self.onSettings = onSettings
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
+        _voiceoverController = StateObject(wrappedValue: voiceoverControllerFactory())
     }
 
     var body: some View {
@@ -46,6 +49,7 @@ struct MainTabView: View {
 
             DiscoveriesHomeView(
                 feedUseCase: feedUseCase,
+                voiceoverController: voiceoverController,
                 onSignOut: onSignOut,
                 onSettings: onSettings
             )

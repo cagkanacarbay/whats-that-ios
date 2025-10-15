@@ -19,6 +19,7 @@ public struct AppDependencyContainer: Sendable {
     public let flowResolver: AppFlowResolver
 #if os(iOS)
     private let discoveryCreationProvider: DiscoveryCreationDependencyProvider
+    private let voiceoverRepository: any DiscoveryVoiceoverRepository
 #endif
 
 #if os(iOS)
@@ -27,7 +28,8 @@ public struct AppDependencyContainer: Sendable {
         discoveryRepository: DiscoveryRepository,
         authService: AuthService,
         onboardingRepository: OnboardingRepository,
-        discoveryCreationProvider: DiscoveryCreationDependencyProvider
+        discoveryCreationProvider: DiscoveryCreationDependencyProvider,
+        voiceoverRepository: any DiscoveryVoiceoverRepository
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
@@ -35,6 +37,7 @@ public struct AppDependencyContainer: Sendable {
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
         self.flowResolver = AppFlowResolver()
         self.discoveryCreationProvider = discoveryCreationProvider
+        self.voiceoverRepository = voiceoverRepository
     }
 #else
     init(
@@ -124,6 +127,7 @@ public extension AppDependencyContainer {
             pushService: pushService,
             locationService: locationService
         )
+        let voiceoverRepository = SupabaseVoiceoverRepository(client: client)
         #endif
 
         #if os(iOS)
@@ -132,9 +136,10 @@ public extension AppDependencyContainer {
             discoveryRepository: discoveryRepository,
             authService: authService,
             onboardingRepository: onboardingRepository,
-            discoveryCreationProvider: discoveryCreationProvider
+            discoveryCreationProvider: discoveryCreationProvider,
+            voiceoverRepository: voiceoverRepository
         )
-        #else
+#else
         return AppDependencyContainer(
             configuration: configuration,
             discoveryRepository: discoveryRepository,
@@ -153,6 +158,11 @@ public extension AppDependencyContainer {
         for type: DiscoveryCreationFlowType
     ) -> DiscoveryCreationFlowViewModel {
         discoveryCreationProvider.makeViewModel(for: type)
+    }
+
+    @MainActor
+    func makeVoiceoverPlaybackController() -> VoiceoverPlaybackController {
+        VoiceoverPlaybackController(repository: voiceoverRepository)
     }
 }
 #endif

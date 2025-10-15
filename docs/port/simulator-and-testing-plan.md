@@ -95,7 +95,7 @@ This guide explains how we will bootstrap, exercise, and validate the native iOS
 - **Fix Implemented:**  
   1. Added a dedicated plist (`Config/AppInfo.plist`) that references the xcconfig-supplied `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `GOOGLE_CLIENT_ID`.  
   2. Split the Supabase URL into `SUPABASE_URL_SCHEME` + `SUPABASE_URL_HOST_PATH` inside the environment config (`Config/Environments/Development.xcconfig`) so build setting parsing no longer treats `//` as a comment.  
-  3. Updated `Package.swift` so remote dependencies (Supabase, Google Sign-In, Nuke, etc.) are enabled by default; set `USE_REMOTE_DEPS=0` only when explicitly opting into stubbed builds.  
+  3. Updated `Package.swift` so remote dependencies (Supabase, Google Sign-In, Nuke, etc.) stay enabled by default; disabling them (`USE_REMOTE_DEPS=0`) is only for compile-time experiments and will now crash at launch.  
   4. Removed the stub authentication fallback so bootstrapping now requires valid Supabase and Google credentials.
 - **Verification:** After the change, the simulator build authenticates successfully against Supabase, transitions through onboarding, and surfaces live auth session state. Keep these steps on hand if the issue reappears (e.g., when rotating xcconfig secrets or regenerating build settings).
 

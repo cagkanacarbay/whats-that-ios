@@ -72,7 +72,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
   - `WhatsThatPresentation` – SwiftUI views and observable view models that drive screen rendering.
   - `WhatsThatDomain` – domain models, repository protocols, and use cases (actors) coordinating business logic.
   - `WhatsThatData` – repository implementations that adapt infrastructure services to domain contracts.
-  - `WhatsThatInfrastructure` – stubs for Supabase transport, Google Sign-In bridge, StoreKit, and other external services.
+  - `WhatsThatInfrastructure` – live Supabase/Auth services plus lightweight test doubles (e.g., stub transport) scoped to unit tests.
   - `WhatsThatShared` – configuration primitives and cross-cutting utilities used across layers.
   - Each module ships with a placeholder test target to enforce layering and provide scaffolding for future unit tests.
 
@@ -80,7 +80,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
 - **Domain Layer:** Protocol-oriented use cases (e.g., `CreateDiscoveryUseCase`, `FetchDiscoveriesUseCase`, `PurchaseCreditsUseCase`, `EnsureVoiceoverUseCase`). Contains pure Swift structs/enums describing states, errors, side effects (no UIKit/SwiftUI references).
 - **Data Layer:** Repositories translate domain requests into Supabase SDK calls, Storage downloads, or local cache interactions. Use actors for thread safety (e.g., `DiscoveryRepository` actor to serialize pagination).
 - Current implementation includes `SupabaseDiscoveryRepository` (backed by `supabase-swift` 2.34.0) for live data and `StubDiscoveryRepository` for previews/offline development.
-- **Infrastructure:** Concrete services for SSE streaming, StoreKit, AVFoundation camera management, CoreLocation, APNs registration, background tasks. Provide protocol abstractions for mocking. `SupabaseClientFactory` now centralises creation of `SupabaseClient`, and `GoogleSignInService` wraps the new async `GIDSignIn` APIs while falling back to stubs when unavailable.
+- **Infrastructure:** Concrete services for SSE streaming, StoreKit, AVFoundation camera management, CoreLocation, APNs registration, background tasks. Provide protocol abstractions for mocking. `SupabaseClientFactory` now centralises creation of `SupabaseClient`, and `GoogleSignInService` wraps the new async `GIDSignIn` APIs — the production app now requires these live integrations (no stub fallbacks).
 - **Shared:** Config loader (XCConfig-driven), Logger, JSON utilities (for metadata parsing), caching helpers.
 
 ---
@@ -167,7 +167,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
 ## Configuration & Environment Management
 - Store environment values in `.xcconfig` files (Debug/Release) and expose via `Configuration` struct.
 - Provide development overrides for local Supabase projects if needed.
-- `AppConfiguration` (see `WhatsThatShared`) represents runtime values (Supabase URL/key, Google client ID) and is passed into `AppDependencyContainer.bootstrap` to decide between live services and stubs.
+- `AppConfiguration` (see `WhatsThatShared`) represents runtime values (Supabase URL/key, Google client ID) and is passed into `AppDependencyContainer.bootstrap`, which now fails fast if those values are missing.
 - Use Swift package for secrets? Keep secrets out of source control (use CI/fastlane to inject for builds). When resolving third-party packages locally/CI, export `USE_REMOTE_DEPS=1` and point module caches at a writable directory.
 
 ---

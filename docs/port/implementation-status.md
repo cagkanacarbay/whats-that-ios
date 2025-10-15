@@ -34,8 +34,8 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 ---
 
 ## Architecture Plan Alignment (ios-architecture-plan.md)
-- ✅ **Shared Layer** – Introduced `AppConfiguration` + `AppConfiguration.fromBundle()` for runtime config, with a preview fallback.
-- ✅ **Infrastructure Layer** – Added `SupabaseClientFactory` (guarded by `USE_REMOTE_DEPS`) and a `GoogleSignInService` wrapper (conditional build) plus existing stub transport.
+- ✅ **Shared Layer** – Introduced `AppConfiguration` + `AppConfiguration.fromBundle()` for runtime config; missing Supabase/Google keys now trigger a fail-fast precondition so dev environments surface configuration issues immediately.
+- ✅ **Infrastructure Layer** – Added `SupabaseClientFactory` (guarded by `USE_REMOTE_DEPS`) and a `GoogleSignInService` wrapper (conditional build); retained only the lightweight Supabase transport stub for tests (auth now requires live services).
 - ✅ **Data Layer** – Implemented `SupabaseDiscoveryRepository` using `supabase-swift`; retains `StubDiscoveryRepository` for offline/testing. Repository now returns Supabase metadata (image paths, share tokens, location), generates signed Supabase Storage URLs, and supports cursor-based pagination for the feed.
 - ✅ **Presentation Layer** – Root flow now uses `AppRootViewModel` to arbitrate onboarding/auth states before showing the discovery feed; authentication UI covers sign-in, sign-up, Google placeholder, and forgot-password messaging. Added brand-aware SwiftUI building blocks (`BrandTheme`, `BrandPrimaryButton`, social buttons, floating text fields) and RN-parity assets so onboarding/auth screens match Tamagui designs. Discovery feed has been rebuilt as the Tamagui two-column grid with skeletons, pull-to-refresh, and pagination (detail modal + matched geometry still TODO).
 - ⚠️ **Coordinator / Navigation** – Root gating is live, but the planned tab bar + modal coordinator remain outstanding.
@@ -43,7 +43,7 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 ---
 
 ## Dependency & Environment Notes
-- ✅ `USE_REMOTE_DEPS` toggles all third-party packages (Supabase Swift 2.34.0, GoogleSignIn 7.1.0, Nuke 12.8.0, MarkdownUI 2.4.1, etc.). The manifest now treats remote deps as *enabled by default*; set `USE_REMOTE_DEPS=0` only when forcing the stubbed build. See `native/WhatsThatIOSPackage/Package.swift`.
+- ✅ `USE_REMOTE_DEPS` toggles all third-party packages (Supabase Swift 2.34.0, GoogleSignIn 7.1.0, Nuke 12.8.0, MarkdownUI 2.4.1, etc.). Remote deps must remain enabled for the app to launch; `USE_REMOTE_DEPS=0` is now reserved for compilation-only experiments and will crash at runtime.
 - ✅ `Config/AppInfo.plist` replaces the generated Info.plist so Supabase/Google keys travel with every build. The Supabase URL is split into `SUPABASE_URL_SCHEME` and `SUPABASE_URL_HOST_PATH` inside the environment configs (e.g., `Config/Environments/Development.xcconfig`) to avoid `//` commenting quirks during plist substitution.
 - ⚠️ Build/Test commands (documented in README):
   - `SWIFT_MODULECACHE_PATH=.build/modulecache CLANG_MODULE_CACHE_PATH=.build/modulecache swift test`

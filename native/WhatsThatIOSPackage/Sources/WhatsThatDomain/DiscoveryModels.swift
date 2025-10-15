@@ -30,6 +30,8 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
     public let id: Int64
     public let title: String
     public let highlight: String
+    public let shortDescription: String?
+    public let detailDescription: String?
     public let capturedAt: Date
     public let imagePath: String?
     public let shareToken: UUID?
@@ -39,6 +41,8 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
         id: Int64,
         title: String,
         highlight: String,
+        shortDescription: String? = nil,
+        detailDescription: String? = nil,
         capturedAt: Date,
         imagePath: String? = nil,
         shareToken: UUID? = nil,
@@ -47,6 +51,8 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
         self.id = id
         self.title = title
         self.highlight = highlight
+        self.shortDescription = shortDescription
+        self.detailDescription = detailDescription
         self.capturedAt = capturedAt
         self.imagePath = imagePath
         self.shareToken = shareToken

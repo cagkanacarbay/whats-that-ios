@@ -1,6 +1,7 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
+import UIKit
 
 struct DiscoveriesHomeView: View {
     private let feedUseCase: DiscoveryFeedUseCase
@@ -10,10 +11,16 @@ struct DiscoveriesHomeView: View {
     @StateObject private var viewModel: DiscoveryFeedViewModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var scrollOffset: CGFloat = 0
+    @Namespace private var discoveryNamespace
+    @State private var selectedDiscovery: DiscoverySummary?
+    @State private var selectedImageURL: URL?
+    @State private var isDetailExpanded = false
 
     private let headerHeight: CGFloat = 110
-    private let collapseDistance: CGFloat = 80
-    private let gridSpacing: CGFloat = 8
+    private let collapseDistance: CGFloat = 110
+    private let gridSpacing: CGFloat = 1
+    private let gridHorizontalPadding: CGFloat = 1
+    private let gridBottomPadding: CGFloat = 16
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -28,7 +35,9 @@ struct DiscoveriesHomeView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let contentWidth = proxy.size.width
+            let _ = proxy.size // retain to keep dependency updates
+            let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
+            let contentWidth = max(gridAvailableWidth - (gridHorizontalPadding * 2), 0)
 
             ZStack(alignment: .top) {
                 backgroundColor
@@ -45,18 +54,24 @@ struct DiscoveriesHomeView: View {
                     .frame(height: 0)
 
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: headerHeight + BrandSpacing.large)
+                        Color.clear.frame(height: headerHeight)
 
                         DiscoveriesGrid(
                             viewModel: viewModel,
-                            availableWidth: contentWidth - (BrandSpacing.large * 2),
+                            availableWidth: contentWidth,
                             cardSpacing: gridSpacing,
+                            namespace: discoveryNamespace,
+                            selectedDiscovery: selectedDiscovery,
+                            isDetailExpanded: isDetailExpanded,
                             onLoadMore: { discovery in
                                 await viewModel.loadMoreIfNeeded(currentItem: discovery)
+                            },
+                            onSelect: { discovery, imageURL in
+                                handleDiscoverySelection(discovery: discovery, imageURL: imageURL)
                             }
                         )
-                        .padding(.horizontal, BrandSpacing.large)
-                        .padding(.bottom, BrandSpacing.xLarge)
+                        .padding(.horizontal, gridHorizontalPadding)
+                        .padding(.bottom, gridBottomPadding)
                     }
                 }
                 .coordinateSpace(name: "discoveriesScroll")
@@ -71,6 +86,21 @@ struct DiscoveriesHomeView: View {
                 }
 
                 header(opacity: headerOpacity)
+
+                if let detailDiscovery = selectedDiscovery {
+                    DiscoveryDetailView(
+                        discovery: detailDiscovery,
+                        imageURL: selectedImageURL,
+                        namespace: discoveryNamespace,
+                        isExpanded: isDetailExpanded,
+                        onClose: handleDetailDismissal,
+                        onShare: makeShareAction(for: detailDiscovery),
+                        onShowOptions: nil,
+                        onPlayAudio: detailAudioAction(for: detailDiscovery)
+                    )
+                    .transition(.identity)
+                    .zIndex(5)
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -107,6 +137,90 @@ struct DiscoveriesHomeView: View {
             .padding(.bottom, BrandSpacing.medium)
         }
         .animation(.easeInOut, value: viewModel.loadState)
+    }
+
+    private func handleDiscoverySelection(discovery: DiscoverySummary, imageURL: URL?) {
+        if selectedDiscovery?.id == discovery.id && isDetailExpanded {
+            return
+        }
+
+        selectedDiscovery = discovery
+        selectedImageURL = imageURL ?? self.imageURL(for: discovery)
+
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.2)) {
+            isDetailExpanded = true
+        }
+    }
+
+    private func handleDetailDismissal() {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.86, blendDuration: 0.2)) {
+            isDetailExpanded = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if !isDetailExpanded {
+                selectedDiscovery = nil
+                selectedImageURL = nil
+            }
+        }
+    }
+
+    private func detailAudioAction(for discovery: DiscoverySummary) -> (() -> Void)? {
+        {
+            #if DEBUG
+            print("Audio playback requested for discovery \(discovery.id)")
+            #endif
+        }
+    }
+
+    private func makeShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
+        guard let shareURL = shareURL(for: discovery) else { return nil }
+
+        return {
+            presentShareSheet(for: discovery, url: shareURL)
+        }
+    }
+
+    private func shareURL(for discovery: DiscoverySummary) -> URL? {
+        if let token = discovery.shareToken {
+            return URL(string: "https://whats-that.app/\(token.uuidString)")
+        }
+
+        if let path = discovery.imagePath {
+            return URL(string: path)
+        }
+
+        return nil
+    }
+
+    private func presentShareSheet(for discovery: DiscoverySummary, url: URL) {
+        let message = [
+            discovery.title,
+            discovery.shortDescription ?? discovery.highlight
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n\n")
+
+        let items: [Any] = message.isEmpty ? [url] : [message, url]
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+
+        guard let root = keyWindowRootViewController() else { return }
+        root.present(controller, animated: true)
+    }
+
+    private func keyWindowRootViewController() -> UIViewController? {
+        UIApplication.shared
+            .connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })?
+            .rootViewController
+    }
+
+    private func imageURL(for discovery: DiscoverySummary) -> URL? {
+        guard let path = discovery.imagePath else { return nil }
+        return URL(string: path)
     }
 
     private var backgroundColor: Color {
@@ -188,11 +302,21 @@ private struct DiscoveriesGrid: View {
     @ObservedObject var viewModel: DiscoveryFeedViewModel
     let availableWidth: CGFloat
     let cardSpacing: CGFloat
+    let namespace: Namespace.ID
+    let selectedDiscovery: DiscoverySummary?
+    let isDetailExpanded: Bool
     let onLoadMore: (DiscoverySummary) async -> Void
+    let onSelect: (DiscoverySummary, URL?) -> Void
+
+    private var gridColumns: [GridItem] {
+        [
+            GridItem(.fixed(cardWidth), spacing: cardSpacing, alignment: .top),
+            GridItem(.fixed(cardWidth), spacing: cardSpacing, alignment: .top)
+        ]
+    }
 
     private var cardWidth: CGFloat {
-        let spacing = cardSpacing
-        let totalSpacing = spacing
+        let totalSpacing = cardSpacing
         return max((availableWidth - totalSpacing) / 2, 120)
     }
 
@@ -228,29 +352,25 @@ private struct DiscoveriesGrid: View {
 
     private var skeletonGrid: some View {
         let placeholderItems = Array(repeating: UUID(), count: 8)
-        return LazyVGrid(
-            columns: [
-                GridItem(.fixed(cardWidth), spacing: cardSpacing),
-                GridItem(.fixed(cardWidth), spacing: cardSpacing)
-            ],
-            spacing: cardSpacing
-        ) {
+        return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
             ForEach(placeholderItems, id: \.self) { _ in
                 DiscoveryCardSkeleton(width: cardWidth, height: cardHeight)
             }
         }
+        .frame(width: availableWidth, alignment: .leading)
     }
 
     private var gridContent: some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.fixed(cardWidth), spacing: cardSpacing),
-                GridItem(.fixed(cardWidth), spacing: cardSpacing)
-            ],
-            spacing: cardSpacing
-        ) {
+        return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
             ForEach(viewModel.discoveries) { discovery in
-                DiscoveryCard(discovery: discovery, width: cardWidth, height: cardHeight)
+                DiscoveryCard(
+                    discovery: discovery,
+                    width: cardWidth,
+                    height: cardHeight,
+                    namespace: namespace,
+                    isHidden: selectedDiscovery?.id == discovery.id && isDetailExpanded,
+                    onSelect: onSelect
+                )
                     .onAppear {
                         Task {
                             await onLoadMore(discovery)
@@ -258,6 +378,7 @@ private struct DiscoveriesGrid: View {
                     }
             }
         }
+        .frame(width: availableWidth, alignment: .leading)
     }
 }
 
@@ -265,41 +386,57 @@ private struct DiscoveryCard: View {
     let discovery: DiscoverySummary
     let width: CGFloat
     let height: CGFloat
+    let namespace: Namespace.ID
+    let isHidden: Bool
+    let onSelect: (DiscoverySummary, URL?) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            DiscoveryCardImage(url: imageURL, width: width, height: height)
+        Button {
+            onSelect(discovery, imageURL)
+        } label: {
+            ZStack(alignment: .bottom) {
+                DiscoveryCardImage(
+                    discoveryId: discovery.id,
+                    url: imageURL,
+                    width: width,
+                    height: height,
+                    namespace: namespace
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(borderColor, lineWidth: 0.3)
                 }
 
-            VStack(spacing: 4) {
-                Text(discovery.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .shadow(color: Color.black.opacity(0.6), radius: 3, x: 0, y: 1)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .padding(.horizontal, 8)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0),
-                        Color.black.opacity(0.25),
-                        Color.black.opacity(0.4)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+                VStack(spacing: 4) {
+                    Text(discovery.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .shadow(color: Color.black.opacity(0.6), radius: 3, x: 0, y: 1)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0),
+                            Color.black.opacity(0.25),
+                            Color.black.opacity(0.4)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-            )
+            }
+            .frame(width: width, height: height)
         }
-        .frame(width: width, height: height)
+        .buttonStyle(.plain)
+        .opacity(isHidden ? 0 : 1)
     }
 
     private var imageURL: URL? {
@@ -313,9 +450,11 @@ private struct DiscoveryCard: View {
 }
 
 private struct DiscoveryCardImage: View {
+    let discoveryId: Int64
     let url: URL?
     let width: CGFloat
     let height: CGFloat
+    let namespace: Namespace.ID
     @State private var didFail = false
 
     var body: some View {
@@ -334,6 +473,13 @@ private struct DiscoveryCardImage: View {
         .frame(width: width, height: height)
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .clipped()
+        .matchedGeometryEffect(
+            id: "discovery-image-\(discoveryId)",
+            in: namespace,
+            properties: .frame,
+            anchor: .center,
+            isSource: false
+        )
     }
 
     private var placeholder: some View {

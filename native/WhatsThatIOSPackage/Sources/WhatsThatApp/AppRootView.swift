@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import WhatsThatDomain
 import WhatsThatPresentation
 import WhatsThatShared
 
@@ -17,11 +18,22 @@ public struct AppRootView: View {
     }
 
     public var body: some View {
-        RootContentView(
+        #if os(iOS)
+        let makeViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel = {
+            container.makeDiscoveryCreationViewModel(for: $0)
+        }
+        #else
+        let makeViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel = { _ in
+            fatalError("Discovery creation flow is only supported on iOS.")
+        }
+        #endif
+
+        return RootContentView(
             feedUseCase: container.discoveryFeedUseCase,
             authUseCase: container.authUseCase,
             onboardingUseCase: container.onboardingUseCase,
-            flowResolver: container.flowResolver
+            flowResolver: container.flowResolver,
+            makeCreationViewModel: makeViewModel
         )
     }
 }

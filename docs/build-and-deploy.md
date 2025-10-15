@@ -33,15 +33,10 @@ SwiftPM packages (Supabase, Google Sign-In, Nuke, etc.) are enabled by default. 
 
 | Scenario | Action |
 | --- | --- |
-| Full app with live services (normal case) | Do nothing. The default includes all remote packages and defines the `USE_REMOTE_DEPS` compile flag. |
-| Stubbed/offline build | Export `USE_REMOTE_DEPS=0` before building (`swift build`, `xcodebuild`, or Xcode scheme). This removes the third-party packages and falls back to stub services. |
+| Full app with live services (required) | Do nothing. The default includes all remote packages and defines the `USE_REMOTE_DEPS` compile flag. |
+| Stubbed/offline build | **Not supported.** Remote dependencies and live Supabase/Google configuration are required; setting `USE_REMOTE_DEPS=0` will cause the app to terminate at launch. |
 
 When Google Sign-In is enabled (default), confirm both `GOOGLE_CLIENT_ID` and `GOOGLE_REVERSED_CLIENT_ID` are populated in the active environment; missing values will cause the sign-in sheet to throw an exception.
-
-**Example (stubbed CLI build):**
-```bash
-USE_REMOTE_DEPS=0 swift build
-```
 
 **Example (force live deps in Xcode scheme):**
 Add an environment variable `USE_REMOTE_DEPS` with value `1` under *Scheme → Run → Environment Variables* if you need to override a shell default.
@@ -67,6 +62,6 @@ Add an environment variable `USE_REMOTE_DEPS` with value `1` under *Scheme → R
 
 - We ship one app target (`WhatsThatIOS`). No build automation beyond the standard Xcode scheme is in place yet.
 - Any TestFlight or App Store submissions should use a production environment XCConfig with live Supabase/Google credentials and `USE_REMOTE_DEPS` left at its default (enabled).
-- Keep `Config/AppInfo.plist` in sync with environment values; if a build ships without Supabase keys the app will silently revert to stub services.
+- Keep `Config/AppInfo.plist` in sync with environment values; if a build ships without Supabase keys the app will now terminate at launch so the misconfiguration is obvious.
 
 That’s the full setup we’re running today. Update this document whenever environment includes or build steps change.***

@@ -22,7 +22,7 @@ public enum SupabaseDiscoveryRepositoryError: LocalizedError {
     }
 }
 
-public struct SupabaseDiscoveryRepository: DiscoveryRepository {
+public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistoryRepository {
     private let client: SupabaseClient
 
     public init(client: SupabaseClient) {
@@ -92,6 +92,12 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository {
             supabaseDiscoveryLogger.error("Failed to fetch discoveries: \(error.localizedDescription, privacy: .public)")
             throw DiscoveryFeedError.failedToLoad
         }
+    }
+}
+
+public extension SupabaseDiscoveryRepository {
+    func fetchRecentDiscoveries(limit: Int) async throws -> [DiscoverySummary] {
+        try await fetchDiscoveries(limit: limit, before: nil)
     }
 }
 
@@ -175,11 +181,16 @@ private extension DiscoveryRecord {
 private extension SupabaseDiscoveryRepository {
     func makeDiscoverySummary(from record: DiscoveryRecord) async throws -> DiscoverySummary {
         let signedImageURL = try await loadSignedImageURL(from: record.imageURL)
+        let shortDescription = record.shortDescription?.trimmed.nonEmpty
+        let detailDescription = record.description?.trimmed.nonEmpty
+        let fallbackHighlight = shortDescription ?? detailDescription ?? "No summary available yet."
 
         return DiscoverySummary(
             id: record.id,
             title: record.title?.trimmed.nonEmpty ?? "Discovery",
-            highlight: record.shortDescription?.trimmed.nonEmpty ?? record.description?.trimmed.nonEmpty ?? "No summary available yet.",
+            highlight: fallbackHighlight,
+            shortDescription: shortDescription,
+            detailDescription: detailDescription,
             capturedAt: record.createdAt,
             imagePath: signedImageURL ?? record.imageURL?.trimmed.nonEmpty,
             shareToken: record.shareToken,

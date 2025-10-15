@@ -12,14 +12,17 @@ public struct RootContentView: View {
     @State private var authError: AuthError?
     @State private var isSettingsPresented = false
     private let feedUseCase: DiscoveryFeedUseCase
+    private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
 
     public init(
         feedUseCase: DiscoveryFeedUseCase,
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
-        flowResolver: AppFlowResolver = AppFlowResolver()
+        flowResolver: AppFlowResolver = AppFlowResolver(),
+        makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     ) {
         self.feedUseCase = feedUseCase
+        self.makeCreationViewModel = makeCreationViewModel
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -86,8 +89,10 @@ public struct RootContentView: View {
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 case .main:
-                    DiscoveriesHomeView(
+                    MainTabView(
                         feedUseCase: feedUseCase,
+                        cameraViewModel: makeCreationViewModel(.camera),
+                        uploadViewModel: makeCreationViewModel(.upload),
                         onSignOut: {
                             Task { try? await viewModel.signOut() }
                         },
@@ -95,8 +100,8 @@ public struct RootContentView: View {
                             isSettingsPresented = true
                         }
                     )
-                }
             }
+        }
             .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         }
         .animation(.easeInOut, value: viewModel.flowState)

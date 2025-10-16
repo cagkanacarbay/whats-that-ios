@@ -79,5 +79,13 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>We use your camera to capture photos for new discoveries.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We access your photo library so you can upload pictures to analyze.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>We can save the photos you capture to your library for safekeeping.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to personalize discoveries with nearby context.</string>
 </dict>
 </plist>

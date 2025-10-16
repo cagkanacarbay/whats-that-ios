@@ -714,7 +714,7 @@ private struct DiscoveriesGrid: View {
     }
 
     private var skeletonGrid: some View {
-        let placeholderItems = Array(repeating: UUID(), count: 8)
+        let placeholderItems = Array(0..<8)
         return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
             ForEach(placeholderItems, id: \.self) { _ in
                 DiscoveryCardSkeleton(width: cardWidth, height: cardHeight)
@@ -1012,12 +1012,6 @@ private struct DiscoveryHeroOverlay: View {
                         scrollOffset: $scrollOffset
                     )
                     .opacity(contentOpacity)
-
-                    DiscoveryHeroTopControls(
-                        safeAreaInsets: safeAreaInsets,
-                        onClose: onClose,
-                        onShowOptions: onShowOptions
-                    )
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(backgroundColor)
@@ -1029,6 +1023,14 @@ private struct DiscoveryHeroOverlay: View {
                     y: geometry.shadowYOffset
                 )
                 .offset(x: geometry.offset.x, y: geometry.offset.y)
+            }
+            .overlay(alignment: .topLeading) {
+                DiscoveryHeroTopControls(
+                    safeAreaInsets: safeAreaInsets,
+                    onClose: onClose,
+                    onShowOptions: onShowOptions
+                )
+                .ignoresSafeArea()
             }
         }
     }
@@ -1709,8 +1711,25 @@ private struct DiscoveryHeroTopControls: View {
             }
         }
         .padding(.horizontal, BrandSpacing.large)
-        .padding(.top, safeAreaInsets.top + 12)
+        .padding(.top, resolvedTopPadding(from: safeAreaInsets))
         .padding(.bottom, BrandSpacing.small)
+        .zIndex(2)
+    }
+
+    private func resolvedTopPadding(from insets: EdgeInsets) -> CGFloat {
+        let baseInset = insets.top
+#if canImport(UIKit)
+        if baseInset <= 0 {
+            let globalInset = UIApplication.shared
+                .connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first(where: { $0.isKeyWindow })?
+                .safeAreaInsets.top ?? 0
+            return globalInset + 12
+        }
+#endif
+        return baseInset + 12
     }
 }
 

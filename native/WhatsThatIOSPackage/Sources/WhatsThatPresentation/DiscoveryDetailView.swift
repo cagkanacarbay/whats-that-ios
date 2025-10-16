@@ -5,6 +5,9 @@ import WhatsThatShared
 import MarkdownUI
 #endif
 import MapKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct DiscoveryDetailView: View {
     let discovery: DiscoverySummary
@@ -77,7 +80,7 @@ struct DiscoveryDetailView: View {
                 .opacity(isContentVisible ? 1 : 0)
                 .animation(.easeInOut(duration: 0.25), value: isContentVisible)
 
-                headerTopControls(padding: proxy.safeAreaInsets.top + 12)
+                headerTopControls(padding: resolvedTopPadding(from: proxy.safeAreaInsets))
             }
             .onChange(of: isExpanded) { expanded in
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -287,6 +290,23 @@ struct DiscoveryDetailView: View {
         .padding(.horizontal, BrandSpacing.large)
         .padding(.top, padding)
         .padding(.bottom, BrandSpacing.small)
+        .zIndex(2)
+    }
+
+    private func resolvedTopPadding(from insets: EdgeInsets) -> CGFloat {
+        let baseInset = insets.top
+#if canImport(UIKit)
+        if baseInset <= 0 {
+            let globalInset = UIApplication.shared
+                .connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first(where: { $0.isKeyWindow })?
+                .safeAreaInsets.top ?? 0
+            return globalInset + 12
+        }
+#endif
+        return baseInset + 12
     }
 
     private func openInMaps(location: DiscoveryLocation) {

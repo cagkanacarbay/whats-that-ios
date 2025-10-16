@@ -13,6 +13,7 @@ All planning documents now live under `docs/port/`:
 - `simulator-and-testing-plan.md` – simulator workflow and test strategy with dependency validation.
 - `risks-and-gaps.md` – answered questions, constraints, and decisions.
 - `dependency-audit.md` – compatibility matrix for Swift packages/services we will adopt.
+- `theme-system.md` – overview of the user-selectable light/dark appearance and integration guidelines.
 
 ## High-Level Direction
 1. **Preserve product behavior, not Expo implementation details.** All surfaces described in the docs must be functionally equivalent (or improved) on iOS.

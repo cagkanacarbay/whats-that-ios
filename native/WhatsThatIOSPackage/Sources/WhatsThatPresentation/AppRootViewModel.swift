@@ -96,6 +96,22 @@ public final class AppRootViewModel: ObservableObject {
         }
     }
 
+    public func signInWithApple() async throws {
+        guard !isPerformingAuthAction else { return }
+
+        isPerformingAuthAction = true
+        defer { isPerformingAuthAction = false }
+
+        do {
+            let session = try await authUseCase.signInWithApple()
+            updateFlow(session: session)
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            throw AuthError.unknown
+        }
+    }
+
     public func signOut() async throws {
         try await authUseCase.signOut()
         updateFlow(session: .signedOut)

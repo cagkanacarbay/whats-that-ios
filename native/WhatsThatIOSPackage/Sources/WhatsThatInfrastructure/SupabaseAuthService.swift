@@ -1,5 +1,6 @@
 #if USE_REMOTE_DEPS && canImport(Supabase)
 import Foundation
+import OSLog
 import Supabase
 import WhatsThatDomain
 import WhatsThatShared
@@ -9,24 +10,78 @@ import UIKit
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
 import GoogleSignIn
 #endif
+#if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+import AuthenticationServices
+#endif
 
 private typealias DomainAuthError = WhatsThatDomain.AuthError
+private let supabaseAuthLogger = Logger(subsystem: "WhatsThatIOS", category: "SupabaseAuthService")
 
 public final actor SupabaseAuthService: AuthService {
     private let client: SupabaseClient
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     private let googleSignInService: GoogleSignInServicing?
 #endif
+#if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+    private let appleSignInService: SignInWithAppleServicing?
+#endif
 
-    #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
+    public init(client: SupabaseClient) {
+        self.client = client
+#if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
+        self.googleSignInService = nil
+#endif
+#if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+        self.appleSignInService = nil
+#endif
+    }
+
+#if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
     public init(
         client: SupabaseClient,
-        googleSignInService: GoogleSignInServicing? = nil
+        googleSignInService: GoogleSignInServicing?,
+        appleSignInService: SignInWithAppleServicing?
+    ) {
+        self.client = client
+        self.googleSignInService = googleSignInService
+        self.appleSignInService = appleSignInService
+    }
+#elseif USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
+    public init(
+        client: SupabaseClient,
+        googleSignInService: GoogleSignInServicing?
     ) {
         self.client = client
         self.googleSignInService = googleSignInService
     }
+#elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+    public init(
+        client: SupabaseClient,
+        appleSignInService: SignInWithAppleServicing?
+    ) {
+        self.client = client
+        self.appleSignInService = appleSignInService
+    }
+#endif
 
+#if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+    public convenience init(
+        configuration: AppConfiguration,
+        session: URLSession = .shared,
+        googleSignInService: GoogleSignInServicing? = nil,
+        appleSignInService: SignInWithAppleServicing? = nil
+    ) throws {
+        let client = try SupabaseClientFactory.makeClient(
+            configuration: configuration,
+            session: session
+        )
+        self.init(
+            client: client,
+            googleSignInService: googleSignInService,
+            appleSignInService: appleSignInService
+        )
+    }
+#elseif USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     public convenience init(
         configuration: AppConfiguration,
         session: URLSession = .shared,
@@ -36,15 +91,27 @@ public final actor SupabaseAuthService: AuthService {
             configuration: configuration,
             session: session
         )
-        self.init(client: client, googleSignInService: googleSignInService)
+        self.init(
+            client: client,
+            googleSignInService: googleSignInService
+        )
     }
-    #else
-    public init(
-        client: SupabaseClient
-    ) {
-        self.client = client
+#elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+    public convenience init(
+        configuration: AppConfiguration,
+        session: URLSession = .shared,
+        appleSignInService: SignInWithAppleServicing? = nil
+    ) throws {
+        let client = try SupabaseClientFactory.makeClient(
+            configuration: configuration,
+            session: session
+        )
+        self.init(
+            client: client,
+            appleSignInService: appleSignInService
+        )
     }
-
+#else
     public convenience init(
         configuration: AppConfiguration,
         session: URLSession = .shared
@@ -55,7 +122,7 @@ public final actor SupabaseAuthService: AuthService {
         )
         self.init(client: client)
     }
-    #endif
+#endif
 
     public func currentSession() async throws -> AuthSession {
         if let session = client.auth.currentSession {
@@ -133,6 +200,42 @@ public final actor SupabaseAuthService: AuthService {
             try await client.auth.signInWithIdToken(credentials: credentials)
             return try await currentSession()
         } catch {
+            throw mapSignInError(error)
+        }
+        #else
+        throw DomainAuthError.unknown
+        #endif
+    }
+
+    public func signInWithApple() async throws -> AuthSession {
+        #if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+        guard let appleSignInService else {
+            supabaseAuthLogger.error("Sign in with Apple unavailable: missing service instance.")
+            throw DomainAuthError.unknown
+        }
+
+        let account: SignInWithAppleAccount
+        do {
+            account = try await appleSignInService.signIn()
+        } catch {
+            if let mapped = Self.mapAppleSignInError(error) {
+                throw mapped
+            }
+            supabaseAuthLogger.error("Sign in with Apple flow failed: \(error, privacy: .public)")
+            throw DomainAuthError.unknown
+        }
+
+        do {
+            let credentials = OpenIDConnectCredentials(
+                provider: .apple,
+                idToken: account.idToken,
+                accessToken: nil,
+                nonce: account.nonce
+            )
+            try await client.auth.signInWithIdToken(credentials: credentials)
+            return try await currentSession()
+        } catch {
+            supabaseAuthLogger.error("Supabase Apple sign-in exchange failed: \(error, privacy: .public)")
             throw mapSignInError(error)
         }
         #else
@@ -232,6 +335,26 @@ public final actor SupabaseAuthService: AuthService {
            nsError.code == -5 {
             return .cancelled
         }
+        return nil
+    }
+    #endif
+
+    #if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+    private static func mapAppleSignInError(_ error: Error) -> DomainAuthError? {
+        if let serviceError = error as? SignInWithAppleServiceError {
+            switch serviceError {
+            case .cancelled:
+                return .cancelled
+            default:
+                return .unknown
+            }
+        }
+
+        if let authorizationError = error as? ASAuthorizationError,
+           authorizationError.code == .canceled {
+            return .cancelled
+        }
+
         return nil
     }
     #endif

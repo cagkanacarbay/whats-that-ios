@@ -20,6 +20,8 @@ public struct AppDependencyContainer: Sendable {
 #if os(iOS)
     private let discoveryCreationProvider: DiscoveryCreationDependencyProvider
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
+    private let creditsRepository: DiscoveryCreditsRepository
+    private let creditsStore: any CreditsStore
 #endif
 
 #if os(iOS)
@@ -29,7 +31,9 @@ public struct AppDependencyContainer: Sendable {
         authService: AuthService,
         onboardingRepository: OnboardingRepository,
         discoveryCreationProvider: DiscoveryCreationDependencyProvider,
-        voiceoverRepository: any DiscoveryVoiceoverRepository
+        voiceoverRepository: any DiscoveryVoiceoverRepository,
+        creditsRepository: DiscoveryCreditsRepository,
+        creditsStore: any CreditsStore
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
@@ -38,6 +42,8 @@ public struct AppDependencyContainer: Sendable {
         self.flowResolver = AppFlowResolver()
         self.discoveryCreationProvider = discoveryCreationProvider
         self.voiceoverRepository = voiceoverRepository
+        self.creditsRepository = creditsRepository
+        self.creditsStore = creditsStore
     }
 #else
     init(
@@ -87,18 +93,33 @@ public extension AppDependencyContainer {
         )
 
         let discoveryRepository = SupabaseDiscoveryRepository(client: client)
-        #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
+        let authService: SupabaseAuthService
+        #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
         let googleService = try configuration.googleClientID.map { clientID in
             try GoogleSignInService(clientID: clientID)
         }
-        let authService = try SupabaseAuthService(
+        let appleService = SignInWithAppleService()
+        authService = SupabaseAuthService(
+            client: client,
+            googleSignInService: googleService,
+            appleSignInService: appleService
+        )
+        #elseif USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
+        let googleService = try configuration.googleClientID.map { clientID in
+            try GoogleSignInService(clientID: clientID)
+        }
+        authService = SupabaseAuthService(
             client: client,
             googleSignInService: googleService
         )
-        #else
-        let authService = try SupabaseAuthService(
-            client: client
+        #elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
+        let appleService = SignInWithAppleService()
+        authService = SupabaseAuthService(
+            client: client,
+            appleSignInService: appleService
         )
+        #else
+        authService = SupabaseAuthService(client: client)
         #endif
         let onboardingRepository = UserDefaultsOnboardingRepository()
 
@@ -106,6 +127,13 @@ public extension AppDependencyContainer {
         let captureService = CameraCaptureService()
         let selectionService = PhotoLibrarySelectionService()
         let creditsRepository = SupabaseCreditsRepository(client: client)
+        let creditPackIdentifiers = CreditPackCatalog.standardPacks.map(\.id)
+        let creditsStore = StoreKitCreditsStore(
+            productIdentifiers: creditPackIdentifiers,
+            configuration: configuration,
+            client: client,
+            urlSession: session
+        )
         let analysisClient = SupabaseDiscoveryAnalysisClient(
             client: client,
             configuration: configuration,
@@ -137,7 +165,9 @@ public extension AppDependencyContainer {
             authService: authService,
             onboardingRepository: onboardingRepository,
             discoveryCreationProvider: discoveryCreationProvider,
-            voiceoverRepository: voiceoverRepository
+            voiceoverRepository: voiceoverRepository,
+            creditsRepository: creditsRepository,
+            creditsStore: creditsStore
         )
 #else
         return AppDependencyContainer(
@@ -163,6 +193,23 @@ public extension AppDependencyContainer {
     @MainActor
     func makeVoiceoverPlaybackController() -> VoiceoverPlaybackController {
         VoiceoverPlaybackController(repository: voiceoverRepository)
+    }
+
+    @MainActor
+    func makeCreditsViewModel() -> CreditsViewModel {
+        CreditsViewModel(
+            creditsRepository: creditsRepository,
+            store: creditsStore
+        )
+    }
+
+    func fetchCreditBalance() async -> Result<Int, Error> {
+        do {
+            let balance = try await creditsRepository.fetchCreditBalance()
+            return .success(balance)
+        } catch {
+            return .failure(error)
+        }
     }
 }
 #endif

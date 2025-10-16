@@ -30,6 +30,11 @@ public actor AuthUseCase: Sendable {
         try await service.signInWithGoogle()
     }
 
+    @discardableResult
+    public func signInWithApple() async throws -> AuthSession {
+        try await service.signInWithApple()
+    }
+
     public func signOut() async throws {
         try await service.signOut()
     }

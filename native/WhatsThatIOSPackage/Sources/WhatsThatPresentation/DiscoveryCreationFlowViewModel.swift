@@ -70,6 +70,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var currentMedia: DiscoveryCapturedMedia?
     private var analysisTask: Task<Void, Never>?
 
+    var flowType: DiscoveryCreationFlowType {
+        configuration.type
+    }
+
     public init(
         configuration: Configuration,
         captureService: DiscoveryCaptureService,
@@ -311,6 +315,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             syncFlowStateWithAnalysis()
             locationService.stopTracking()
             onDiscoveryCreated?(discoveryId)
+            hydrateDiscoverySummaryIfNeeded(for: discoveryId)
         case let .error(message):
             error = .analysisFailed(message)
             flowState = .error(message: message)
@@ -347,6 +352,25 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private func syncFlowStateWithAnalysis() {
         if let analysisState {
             flowState = .analyzing(analysisState)
+        }
+    }
+
+    private func hydrateDiscoverySummaryIfNeeded(for discoveryId: Int64) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let recents = try await self.historyRepository.fetchRecentDiscoveries(limit: max(self.configuration.recentHistoryLimit, 25))
+                guard let summary = recents.first(where: { $0.id == discoveryId }) else { return }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.analysisState = self.analysisStateUpdated { state in
+                        state.discoverySummary = summary
+                    }
+                    self.syncFlowStateWithAnalysis()
+                }
+            } catch {
+                // Intentionally ignore fetch errors; the detail view can defer to the feed refresh.
+            }
         }
     }
 

@@ -65,10 +65,25 @@ public final class VoiceoverPlaybackController: ObservableObject {
     }
 
     deinit {
-        Task { [weak self] in
-            await MainActor.run {
-                self?.teardownObservers()
+        let player = player
+        let token = timeObserverToken
+        let observation = playerItemStatusObservation
+        let observer = endPlaybackObserver
+
+        let cleanup = {
+            if let token {
+                player.removeTimeObserver(token)
             }
+            observation?.invalidate()
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+
+        if Thread.isMainThread {
+            cleanup()
+        } else {
+            DispatchQueue.main.async(execute: cleanup)
         }
     }
 }

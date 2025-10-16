@@ -32,8 +32,12 @@ public struct AppRootView: View {
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = {
             container.makeVoiceoverPlaybackController()
         }
+        let creditsFactory: (() -> CreditsViewModel)? = {
+            container.makeCreditsViewModel()
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
+        let creditsFactory: (() -> CreditsViewModel)? = nil
         #endif
 
         return RootContentView(
@@ -42,7 +46,11 @@ public struct AppRootView: View {
             onboardingUseCase: container.onboardingUseCase,
             flowResolver: container.flowResolver,
             makeCreationViewModel: makeViewModel,
-            makeVoiceoverController: voiceoverFactory
+            makeVoiceoverController: voiceoverFactory,
+            makeCreditsViewModel: creditsFactory,
+            fetchCreditBalance: {
+                await container.fetchCreditBalance()
+            }
         )
     }
 }

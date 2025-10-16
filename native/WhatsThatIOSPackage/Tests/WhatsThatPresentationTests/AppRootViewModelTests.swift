@@ -37,6 +37,24 @@ final class AppRootViewModelTests: XCTestCase {
         }
     }
 
+    func testSignInWithAppleAdvancesToPostOnboarding() async throws {
+        let viewModel = await makeViewModel()
+
+        await waitForState(in: viewModel) { $0 == .preOnboarding }
+        await viewModel.completePreOnboarding()
+        await waitForState(in: viewModel) { $0 == .authentication }
+
+        try await viewModel.signInWithApple()
+
+        await waitForState(in: viewModel) { state in
+            if case let .postOnboarding(user) = state {
+                XCTAssertEqual(user.email, "apple-user@example.com")
+                return true
+            }
+            return false
+        }
+    }
+
     // MARK: - Helpers
 
     @MainActor
@@ -129,6 +147,14 @@ private actor TestAuthService: AuthService {
 
     func signInWithGoogle() async throws -> AuthSession {
         let user = AuthenticatedUser(id: UUID(), email: "google-user@example.com")
+        currentUser = user
+        let session = AuthSession.authenticated(user)
+        notify(session: session)
+        return session
+    }
+
+    func signInWithApple() async throws -> AuthSession {
+        let user = AuthenticatedUser(id: UUID(), email: "apple-user@example.com")
         currentUser = user
         let session = AuthSession.authenticated(user)
         notify(session: session)

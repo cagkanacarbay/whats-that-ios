@@ -22,6 +22,12 @@ struct DiscoveriesHomeView: View {
     @State private var heroProgress: CGFloat = 0
     @State private var heroContentOpacity: Double = 0
     @State private var heroIsClosing = false
+    @State private var heroIsInteracting = false
+    @State private var heroDragTranslation: CGSize = .zero
+    @State private var heroDragScale: CGFloat = 1
+    @State private var heroDragRotation: Double = 0
+    @State private var heroDragShadowOpacity: Double = 0
+    @State private var heroDragCornerRadius: CGFloat = 0
     @State private var hiddenDiscovery: HiddenDiscovery?
     @State private var safeAreaBottomInset: CGFloat = 0
 
@@ -30,6 +36,23 @@ struct DiscoveriesHomeView: View {
     private let gridSpacing: CGFloat = 1
     private let gridHorizontalPadding: CGFloat = 1
     private let gridBottomPadding: CGFloat = 16
+    private let heroEdgeActivationWidth: CGFloat = 30
+    private let heroDismissalThreshold: CGFloat = 150
+    private let heroContentRevealProgress: CGFloat = 0.92
+
+    private var heroDismissalDistance: CGFloat {
+#if canImport(UIKit)
+        if let window = UIApplication.shared
+            .connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow })
+        {
+            return max(window.bounds.width, 1)
+        }
+        #endif
+        return max(UIScreen.main.bounds.width, 1)
+    }
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -117,6 +140,11 @@ struct DiscoveriesHomeView: View {
                         progress: heroProgress,
                         contentOpacity: heroContentOpacity,
                         isClosing: heroIsClosing,
+                        gestureTranslation: heroDragTranslation,
+                        gestureScale: heroDragScale,
+                        gestureRotation: heroDragRotation,
+                        gestureShadowOpacity: heroDragShadowOpacity,
+                        gestureCornerRadius: heroDragCornerRadius,
                         backgroundColor: backgroundColor,
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
@@ -125,11 +153,15 @@ struct DiscoveriesHomeView: View {
                         onShowOptions: nil
                     )
                     .transition(.identity)
+                    .highPriorityGesture(heroOverlayDragGesture)
                     .zIndex(5)
                 }
             }
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
+            }
+            .onChange(of: heroProgress) { newValue in
+                updateHeroContentVisibility(for: newValue)
             }
             .onChange(of: safeBottom) { newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
@@ -213,21 +245,14 @@ struct DiscoveriesHomeView: View {
         heroProgress = 0
         heroContentOpacity = 0
         heroIsClosing = false
+        heroIsInteracting = false
+        resetHeroInteraction(animated: false)
+        updateHeroContentVisibility(for: 0)
         voiceoverController.ensureMetadata(for: discovery)
         voiceoverController.isDetailOverlayActive = true
 
         withAnimation(.timingCurve(0.33, 1.0, 0.68, 1.0, duration: 0.5)) {
             heroProgress = 1
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            guard heroContext?.sessionId == sessionId, !heroIsClosing else { return }
-            withAnimation(.linear(duration: 0)) {
-                heroProgress = 1
-            }
-            withAnimation(.easeIn(duration: 0.12)) {
-                heroContentOpacity = 1
-            }
         }
     }
 
@@ -250,14 +275,103 @@ struct DiscoveriesHomeView: View {
         )
     }
 
+    private func resetHeroInteraction(animated: Bool) {
+        let animations = {
+            heroDragTranslation = .zero
+            heroDragScale = 1
+            heroDragRotation = 0
+            heroDragShadowOpacity = 0
+            heroDragCornerRadius = 0
+        }
+
+        if animated {
+            withAnimation(.interpolatingSpring(mass: 1, stiffness: 100, damping: 15)) {
+                animations()
+            }
+        } else {
+            animations()
+        }
+
+        heroIsInteracting = false
+    }
+
+    private func updateHeroContentVisibility(for progress: CGFloat) {
+        let shouldShow = !heroIsClosing && progress >= heroContentRevealProgress
+        let targetOpacity: Double = shouldShow ? 1 : 0
+        guard heroContentOpacity != targetOpacity else { return }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            heroContentOpacity = targetOpacity
+        }
+    }
+
+    private func handleHeroDragChanged(_ value: DragGesture.Value) {
+        guard heroContext != nil, !heroIsClosing else { return }
+
+        let horizontalTranslation = value.translation.width
+        let verticalTranslation = value.translation.height
+
+        if !heroIsInteracting {
+            guard value.startLocation.x <= heroEdgeActivationWidth else { return }
+            guard horizontalTranslation > 0 else { return }
+            guard abs(horizontalTranslation) >= abs(verticalTranslation) else { return }
+            heroIsInteracting = true
+        }
+
+        guard heroIsInteracting else { return }
+
+        let translationX = max(horizontalTranslation, 0)
+        let translationY = verticalTranslation * 0.5
+        let normalizedProgress = min(max(translationX / heroDismissalDistance, 0), 1)
+
+        let clampedScaleProgress = min(normalizedProgress, 0.5) / 0.5
+        let scaleReduction = 0.35 * clampedScaleProgress
+        let scale = max(0.65, 1 - scaleReduction)
+
+        let clampedRotationProgress = min(normalizedProgress, 0.5) / 0.5
+        let rotation = -5 * Double(clampedRotationProgress)
+
+        let borderRadius: CGFloat
+        if normalizedProgress <= 0.1 {
+            borderRadius = (normalizedProgress / 0.1) * 12
+        } else {
+            borderRadius = 12
+        }
+
+        let clampedShadowProgress = min(normalizedProgress, 0.3) / 0.3
+        let shadowOpacity = Double(clampedShadowProgress * 0.3)
+
+        heroDragTranslation = CGSize(width: translationX, height: translationY)
+        heroDragScale = scale
+        heroDragRotation = rotation
+        heroDragCornerRadius = borderRadius
+        heroDragShadowOpacity = shadowOpacity
+    }
+
+    private func handleHeroDragEnded(_ value: DragGesture.Value) {
+        guard heroIsInteracting else { return }
+        heroIsInteracting = false
+
+        let translation = max(value.translation.width, 0)
+        let predictedTranslation = max(value.predictedEndTranslation.width, translation)
+
+        let shouldDismiss = predictedTranslation > heroDismissalThreshold || translation > heroDismissalThreshold
+
+        if shouldDismiss {
+            resetHeroInteraction(animated: true)
+            handleDetailDismissal()
+        } else {
+            resetHeroInteraction(animated: true)
+        }
+    }
+
     private func handleDetailDismissal() {
         guard let context = heroContext else { return }
 
+        heroIsInteracting = false
+        resetHeroInteraction(animated: true)
         heroIsClosing = true
-
-        withAnimation(.linear(duration: 0.05)) {
-            heroContentOpacity = 0
-        }
+        updateHeroContentVisibility(for: heroProgress)
 
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.45)) {
             heroProgress = 0
@@ -276,10 +390,7 @@ struct DiscoveriesHomeView: View {
                 heroContentOpacity = 0
             }
 
-            withAnimation(.linear(duration: 0)) {
-                heroProgress = 0
-            }
-
+            heroIsInteracting = false
             if hiddenDiscovery?.sessionId == closingSessionId {
                 hiddenDiscovery = nil
             }
@@ -377,6 +488,12 @@ struct DiscoveriesHomeView: View {
         default:
             return voiceoverController.currentDiscovery != nil
         }
+    }
+
+    private var heroOverlayDragGesture: some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .global)
+            .onChanged(handleHeroDragChanged)
+            .onEnded(handleHeroDragEnded)
     }
 
     private var backgroundColor: Color {
@@ -939,6 +1056,11 @@ private struct DiscoveryHeroOverlay: View {
     let progress: CGFloat
     let contentOpacity: Double
     let isClosing: Bool
+    let gestureTranslation: CGSize
+    let gestureScale: CGFloat
+    let gestureRotation: Double
+    let gestureShadowOpacity: Double
+    let gestureCornerRadius: CGFloat
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let onClose: () -> Void
@@ -951,6 +1073,11 @@ private struct DiscoveryHeroOverlay: View {
         progress: CGFloat,
         contentOpacity: Double,
         isClosing: Bool,
+        gestureTranslation: CGSize,
+        gestureScale: CGFloat,
+        gestureRotation: Double,
+        gestureShadowOpacity: Double,
+        gestureCornerRadius: CGFloat,
         backgroundColor: Color,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
@@ -962,6 +1089,11 @@ private struct DiscoveryHeroOverlay: View {
         self.progress = progress
         self.contentOpacity = contentOpacity
         self.isClosing = isClosing
+        self.gestureTranslation = gestureTranslation
+        self.gestureScale = gestureScale
+        self.gestureRotation = gestureRotation
+        self.gestureShadowOpacity = gestureShadowOpacity
+        self.gestureCornerRadius = gestureCornerRadius
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.onClose = onClose
@@ -992,7 +1124,19 @@ private struct DiscoveryHeroOverlay: View {
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                ZStack(alignment: .top) {
+                let combinedCornerRadius = max(0, geometry.cornerRadius + gestureCornerRadius)
+                let combinedShadowOpacity = min(1, geometry.shadowOpacity + gestureShadowOpacity)
+                let gestureShadowRadius: CGFloat = gestureShadowOpacity > 0 ? 20 : 0
+                let combinedShadowRadius = max(geometry.shadowRadius, gestureShadowRadius)
+                let combinedShadowYOffset = geometry.shadowYOffset > 0
+                    ? geometry.shadowYOffset
+                    : (gestureShadowOpacity > 0 ? 12 : 0)
+                let finalOffsetX = geometry.offset.x + gestureTranslation.width
+                let finalOffsetY = geometry.offset.y + gestureTranslation.height
+                let finalScale = gestureScale
+                let rotationAngle = gestureRotation
+
+                let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
                         imageURL: context.imageURL,
                         placeholderImage: context.placeholderImage,
@@ -1015,22 +1159,28 @@ private struct DiscoveryHeroOverlay: View {
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: geometry.cornerRadius, style: .continuous))
-                .shadow(
-                    color: Color.black.opacity(geometry.shadowOpacity),
-                    radius: geometry.shadowRadius,
-                    x: 0,
-                    y: geometry.shadowYOffset
-                )
-                .offset(x: geometry.offset.x, y: geometry.offset.y)
-            }
-            .overlay(alignment: .topLeading) {
-                DiscoveryHeroTopControls(
-                    safeAreaInsets: safeAreaInsets,
-                    onClose: onClose,
-                    onShowOptions: onShowOptions
-                )
-                .ignoresSafeArea()
+                .clipShape(RoundedRectangle(cornerRadius: combinedCornerRadius, style: .continuous))
+
+                heroCard
+                    .overlay(alignment: .topLeading) {
+                        DiscoveryHeroTopControls(
+                            safeAreaInsets: safeAreaInsets,
+                            onClose: onClose,
+                            onShowOptions: onShowOptions
+                        )
+                        .opacity(contentOpacity)
+                        .animation(.easeInOut(duration: 0.12), value: contentOpacity)
+                        .ignoresSafeArea()
+                    }
+                    .shadow(
+                        color: Color.black.opacity(combinedShadowOpacity),
+                        radius: combinedShadowRadius,
+                        x: 0,
+                        y: combinedShadowYOffset
+                    )
+                    .scaleEffect(finalScale, anchor: .center)
+                    .rotation3DEffect(.degrees(rotationAngle), axis: (x: 0, y: 1, z: 0))
+                    .offset(x: finalOffsetX, y: finalOffsetY)
             }
         }
     }

@@ -15,6 +15,8 @@ public struct RootContentView: View {
     private let feedUseCase: DiscoveryFeedUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
+    private let fetchCreditBalance: () async -> Result<Int, Error>
 
     public init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -22,11 +24,15 @@ public struct RootContentView: View {
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver = AppFlowResolver(),
         makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel,
-        makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil
+        makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
+        fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) }
     ) {
         self.feedUseCase = feedUseCase
         self.makeCreationViewModel = makeCreationViewModel
         self.makeVoiceoverController = makeVoiceoverController
+        self.makeCreditsViewModel = makeCreditsViewModel
+        self.fetchCreditBalance = fetchCreditBalance
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -78,6 +84,11 @@ public struct RootContentView: View {
                             try await handleAuthOperation {
                                 try await viewModel.signInWithGoogle()
                             }
+                        },
+                        onApple: {
+                            try await handleAuthOperation {
+                                try await viewModel.signInWithApple()
+                            }
                         }
                     )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -120,6 +131,27 @@ public struct RootContentView: View {
                 onResetOnboarding: {
                     await viewModel.resetOnboarding()
                     return .success(())
+                },
+                onFetchCreditBalance: {
+                    await fetchCreditBalance()
+                },
+                makeCreditsView: { balanceUpdate in
+                    guard let makeCreditsViewModel else {
+                        return AnyView(CreditsUnavailableView())
+                    }
+                    let viewModel = makeCreditsViewModel()
+                    viewModel.onBalanceUpdated = { newBalance in
+                        balanceUpdate(newBalance)
+                    }
+                    return AnyView(CreditsView(viewModel: viewModel))
+                },
+                onSignOut: {
+                    do {
+                        try await viewModel.signOut()
+                        return .success(())
+                    } catch {
+                        return .failure(error)
+                    }
                 },
                 onClose: {
                     isSettingsPresented = false
@@ -185,6 +217,25 @@ private struct RootContentPaddingModifier: ViewModifier {
                 .padding(.top, BrandSpacing.large)
                 .padding(.bottom, BrandSpacing.xLarge)
         }
+    }
+}
+
+private struct CreditsUnavailableView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: 48, weight: .bold))
+                .foregroundStyle(.secondary)
+
+            Text("Credits unavailable")
+                .font(.system(size: 20, weight: .semibold))
+
+            Text("This build doesn’t include the credit store.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
 
@@ -321,6 +372,7 @@ private struct AuthenticationFlowView: View {
     let onSignUp: (String, String) async throws -> Void
     let onForgotPassword: (String) async -> PasswordResetResult
     let onGoogle: () async throws -> Void
+    let onApple: () async throws -> Void
 
     @State private var mode: Mode = .signIn
     @State private var globalError: String?
@@ -340,14 +392,16 @@ private struct AuthenticationFlowView: View {
                     onSubmit: handleSignIn,
                     onForgotPassword: { mode = .forgotPassword },
                     onSwitchToSignUp: { mode = .signUp },
-                    onGoogle: handleGoogle
+                    onGoogle: handleGoogle,
+                    onApple: handleApple
                 )
             case .signUp:
                 SignUpForm(
                     isPerformingAction: isPerformingAction,
                     onSubmit: handleSignUp,
                     onSwitchToSignIn: { mode = .signIn },
-                    onGoogle: handleGoogle
+                    onGoogle: handleGoogle,
+                    onApple: handleApple
                 )
             case .forgotPassword:
                 ForgotPasswordForm(
@@ -404,9 +458,20 @@ private struct AuthenticationFlowView: View {
     }
 
     private func handleGoogle(completion: @escaping (Result<Void, AuthError>) -> Void) {
+        handleSocialAuth(operation: onGoogle, completion: completion)
+    }
+
+    private func handleApple(completion: @escaping (Result<Void, AuthError>) -> Void) {
+        handleSocialAuth(operation: onApple, completion: completion)
+    }
+
+    private func handleSocialAuth(
+        operation: @escaping () async throws -> Void,
+        completion: @escaping (Result<Void, AuthError>) -> Void
+    ) {
         Task {
             do {
-                try await onGoogle()
+                try await operation()
                 await MainActor.run { completion(.success(())) }
             } catch let error as AuthError {
                 await MainActor.run { completion(.failure(error)) }
@@ -425,6 +490,7 @@ private struct LoginForm: View {
     let onForgotPassword: () -> Void
     let onSwitchToSignUp: () -> Void
     let onGoogle: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    let onApple: (@escaping (Result<Void, AuthError>) -> Void) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var email: String = ""
@@ -481,15 +547,12 @@ private struct LoginForm: View {
             DividerWithLabel(label: "or")
 
             VStack(spacing: BrandSpacing.small) {
-                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) { handleSocialAuth() }
-                BrandSocialButton(kind: .apple, isDisabled: true) { }
-                    .overlay(
-                        Text("Coming soon")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(bodyColor)
-                            .padding(.trailing, 12),
-                        alignment: .trailing
-                    )
+                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onGoogle)
+                }
+                BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onApple)
+                }
             }
 
             HStack(spacing: 4) {
@@ -556,9 +619,11 @@ private struct LoginForm: View {
         }
     }
 
-    private func handleSocialAuth() {
+    private func handleSocialAuth(
+        using handler: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    ) {
         showingLoading = true
-        onGoogle { result in
+        handler { result in
             showingLoading = false
             if case .failure(let error) = result {
                 errorMessage = error.errorDescription
@@ -574,6 +639,7 @@ private struct SignUpForm: View {
     let onSubmit: (String, String, @escaping (Result<Void, AuthError>) -> Void) -> Void
     let onSwitchToSignIn: () -> Void
     let onGoogle: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    let onApple: (@escaping (Result<Void, AuthError>) -> Void) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var email: String = ""
@@ -642,15 +708,12 @@ private struct SignUpForm: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(bodyColor.opacity(0.8))
                     .multilineTextAlignment(.center)
-                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) { handleSocialAuth() }
-                BrandSocialButton(kind: .apple, isDisabled: true) { }
-                    .overlay(
-                        Text("Coming soon")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(bodyColor)
-                            .padding(.trailing, 12),
-                        alignment: .trailing
-                    )
+                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onGoogle)
+                }
+                BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onApple)
+                }
             }
 
             HStack(spacing: 4) {
@@ -727,9 +790,11 @@ private struct SignUpForm: View {
         }
     }
 
-    private func handleSocialAuth() {
+    private func handleSocialAuth(
+        using handler: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    ) {
         isLoading = true
-        onGoogle { result in
+        handler { result in
             isLoading = false
             if case .failure(let error) = result {
                 errorMessage = error.errorDescription

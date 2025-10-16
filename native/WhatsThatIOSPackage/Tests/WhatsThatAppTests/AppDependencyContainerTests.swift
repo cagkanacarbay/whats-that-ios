@@ -47,6 +47,10 @@ private actor TestAuthService: AuthService {
         throw AuthError.unknown
     }
 
+    func signInWithApple() async throws -> AuthSession {
+        throw AuthError.unknown
+    }
+
     func signOut() async throws {}
 
     func sendPasswordReset(email _: String) async throws {}

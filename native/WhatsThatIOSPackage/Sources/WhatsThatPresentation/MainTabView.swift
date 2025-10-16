@@ -14,6 +14,7 @@ struct MainTabView: View {
     @StateObject private var voiceoverController: VoiceoverPlaybackController
     @State private var feedRefreshToken = UUID()
     @State private var pendingDiscoveryId: Int64?
+    @State private var needsFeedRefresh = false
 
     private let feedUseCase: DiscoveryFeedUseCase
     private let onSignOut: () -> Void
@@ -87,15 +88,16 @@ struct MainTabView: View {
             case .discoveries:
                 cameraViewModel.cancelFlow()
                 uploadViewModel.cancelFlow()
+                if needsFeedRefresh {
+                    feedRefreshToken = UUID()
+                    needsFeedRefresh = false
+                }
             }
         }
     }
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {
-        selectedTab = .discoveries
-        cameraViewModel.cancelFlow()
-        uploadViewModel.cancelFlow()
         pendingDiscoveryId = discoveryId
-        feedRefreshToken = UUID()
+        needsFeedRefresh = true
     }
 }

@@ -74,6 +74,7 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
     public var metadataTitle: String?
     public var metadataShortDescription: String?
     public var displayMarkdown: String
+    public var discoverySummary: DiscoverySummary?
 
     public init(
         statusMessage: String? = nil,
@@ -84,7 +85,8 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         userPromptVersion: String? = nil,
         metadataTitle: String? = nil,
         metadataShortDescription: String? = nil,
-        displayMarkdown: String = ""
+        displayMarkdown: String = "",
+        discoverySummary: DiscoverySummary? = nil
     ) {
         self.statusMessage = statusMessage
         self.streamedText = streamedText
@@ -95,6 +97,7 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         self.metadataTitle = metadataTitle
         self.metadataShortDescription = metadataShortDescription
         self.displayMarkdown = displayMarkdown
+        self.discoverySummary = discoverySummary
     }
 }
 

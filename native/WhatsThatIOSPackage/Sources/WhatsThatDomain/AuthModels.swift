@@ -58,6 +58,7 @@ public protocol AuthService: Sendable {
     func signIn(email: String, password: String) async throws -> AuthSession
     func signUp(email: String, password: String) async throws -> AuthSession
     func signInWithGoogle() async throws -> AuthSession
+    func signInWithApple() async throws -> AuthSession
     func signOut() async throws
     func sendPasswordReset(email: String) async throws
 }

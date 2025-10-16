@@ -11,6 +11,7 @@ import MarkdownUI
 struct DiscoveriesHomeView: View {
     private let feedUseCase: DiscoveryFeedUseCase
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
+    @Binding private var pendingDiscoveryId: Int64?
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
 
@@ -33,11 +34,13 @@ struct DiscoveriesHomeView: View {
     init(
         feedUseCase: DiscoveryFeedUseCase,
         voiceoverController: VoiceoverPlaybackController,
+        pendingDiscoveryId: Binding<Int64?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self._voiceoverController = ObservedObject(initialValue: voiceoverController)
+        self._pendingDiscoveryId = pendingDiscoveryId
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
@@ -94,9 +97,16 @@ struct DiscoveriesHomeView: View {
                 }
                 .task {
                     await viewModel.loadInitialIfNeeded()
+                    presentPendingDiscoveryIfNeeded()
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     scrollOffset = value
+                }
+                .onChange(of: viewModel.discoveries) { _ in
+                    presentPendingDiscoveryIfNeeded()
+                }
+                .onChange(of: pendingDiscoveryId) { _ in
+                    presentPendingDiscoveryIfNeeded()
                 }
 
                 header(opacity: headerOpacity)
@@ -212,10 +222,32 @@ struct DiscoveriesHomeView: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             guard heroContext?.sessionId == sessionId, !heroIsClosing else { return }
+            withAnimation(.linear(duration: 0)) {
+                heroProgress = 1
+            }
             withAnimation(.easeIn(duration: 0.12)) {
                 heroContentOpacity = 1
             }
         }
+    }
+
+    private func presentPendingDiscoveryIfNeeded() {
+        guard let pendingId = pendingDiscoveryId,
+              heroContext == nil
+        else {
+            return
+        }
+
+        guard let discovery = viewModel.discoveries.first(where: { $0.id == pendingId }) else {
+            return
+        }
+
+        pendingDiscoveryId = nil
+        handleDiscoverySelection(
+            discovery: discovery,
+            imageURL: imageURL(for: discovery),
+            startFrame: .zero
+        )
     }
 
     private func handleDetailDismissal() {
@@ -227,7 +259,7 @@ struct DiscoveriesHomeView: View {
             heroContentOpacity = 0
         }
 
-        withAnimation(.interpolatingSpring(mass: 1, stiffness: 100, damping: 15, initialVelocity: 0)) {
+        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.45)) {
             heroProgress = 0
         }
 
@@ -242,6 +274,10 @@ struct DiscoveriesHomeView: View {
                 heroIsClosing = false
                 heroProgress = 0
                 heroContentOpacity = 0
+            }
+
+            withAnimation(.linear(duration: 0)) {
+                heroProgress = 0
             }
 
             if hiddenDiscovery?.sessionId == closingSessionId {
@@ -363,24 +399,36 @@ struct DiscoveriesHomeView: View {
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
 
-                Menu {
-                    Button("Sign out", role: .destructive) {
-                        onSignOut()
-                    }
-
-                    if let onSettings {
-                        Button("Settings") {
-                            onSettings()
+                if let onSettings {
+                    Menu {
+                        Button("Sign out", role: .destructive) {
+                            onSignOut()
                         }
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(headerTitleColor)
+                            .padding(10)
+                            .background(headerIconBackground)
+                            .clipShape(Circle())
+                            .accessibilityLabel("Settings")
+                    } primaryAction: {
+                        onSettings()
                     }
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(headerTitleColor)
-                        .padding(10)
-                        .background(headerIconBackground)
-                        .clipShape(Circle())
-                        .accessibilityLabel("Options")
+                } else {
+                    Menu {
+                        Button("Sign out", role: .destructive) {
+                            onSignOut()
+                        }
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(headerTitleColor)
+                            .padding(10)
+                            .background(headerIconBackground)
+                            .clipShape(Circle())
+                            .accessibilityLabel("Options")
+                    }
                 }
             }
             .padding(.horizontal, BrandSpacing.large)
@@ -896,6 +944,7 @@ private struct DiscoveryHeroOverlay: View {
     let onClose: () -> Void
     let onShare: (() -> Void)?
     let onShowOptions: (() -> Void)?
+    @State private var scrollOffset: CGFloat = 0
 
     init(
         context: DiscoveryHeroContext,
@@ -924,10 +973,15 @@ private struct DiscoveryHeroOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             let containerFrame = proxy.frame(in: .global)
+            let screenBounds = UIScreen.main.bounds
+            let rawWidth = proxy.size.width == 0 ? screenBounds.width : proxy.size.width
+            let containerWidth = min(rawWidth, screenBounds.width)
+            let rawHeight = proxy.size.height == 0 ? screenBounds.height : proxy.size.height
+            let containerSize = CGSize(width: containerWidth, height: rawHeight)
             let geometry = HeroGeometry(
                 startFrame: context.startFrame,
-                containerSize: proxy.size,
-                containerOrigin: containerFrame.origin,
+                containerSize: containerSize,
+                containerOrigin: CGPoint(x: 0, y: containerFrame.origin.y),
                 progress: progress
             )
             let safeAreaInsets = proxy.safeAreaInsets
@@ -942,8 +996,10 @@ private struct DiscoveryHeroOverlay: View {
                     DiscoveryHeroImageView(
                         imageURL: context.imageURL,
                         placeholderImage: context.placeholderImage,
-                        height: geometry.imageHeight
+                        height: geometry.imageHeight,
+                        pullDownOffset: max(scrollOffset, 0)
                     )
+                    .offset(y: scrollOffset > 0 ? scrollOffset : 0)
 
                     DiscoveryHeroContentView(
                         discovery: context.discovery,
@@ -951,7 +1007,9 @@ private struct DiscoveryHeroOverlay: View {
                         backgroundColor: backgroundColor,
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
-                        onShare: onShare
+                        containerWidth: containerWidth,
+                        onShare: onShare,
+                        scrollOffset: $scrollOffset
                     )
                     .opacity(contentOpacity)
 
@@ -1038,6 +1096,7 @@ private struct DiscoveryHeroImageView: View {
     let imageURL: URL?
     let placeholderImage: UIImage?
     let height: CGFloat
+    let pullDownOffset: CGFloat
     @State private var didFail = false
     @State private var hasLoaded = false
 
@@ -1077,7 +1136,7 @@ private struct DiscoveryHeroImageView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: height)
+        .frame(height: height + pullDownOffset)
         .clipped()
     }
 }
@@ -1087,8 +1146,10 @@ private struct DiscoveryHeroContentView: View {
     let imageHeight: CGFloat
     let backgroundColor: Color
     let colorScheme: ColorScheme
+    let containerWidth: CGFloat
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let onShare: (() -> Void)?
+    @Binding var scrollOffset: CGFloat
 
     init(
         discovery: DiscoverySummary,
@@ -1096,18 +1157,35 @@ private struct DiscoveryHeroContentView: View {
         backgroundColor: Color,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
-        onShare: (() -> Void)?
+        containerWidth: CGFloat,
+        onShare: (() -> Void)?,
+        scrollOffset: Binding<CGFloat>
     ) {
         self.discovery = discovery
         self.imageHeight = imageHeight
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
+        self.containerWidth = containerWidth
         self.onShare = onShare
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
+        _scrollOffset = scrollOffset
+    }
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
     }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: HeroScrollOffsetPreferenceKey.self,
+                        value: proxy.frame(in: .named("hero-scroll")).minY
+                    )
+            }
+            .frame(height: 0)
+
             VStack(spacing: 0) {
                 Color.clear
                     .frame(height: imageHeight)
@@ -1117,7 +1195,8 @@ private struct DiscoveryHeroContentView: View {
                 VStack(alignment: .leading, spacing: BrandSpacing.large) {
                     VoiceoverDetailButton(
                         discovery: discovery,
-                        controller: voiceoverController
+                        controller: voiceoverController,
+                        palette: palette
                     )
 
                     VStack(alignment: .leading, spacing: BrandSpacing.medium) {
@@ -1138,21 +1217,28 @@ private struct DiscoveryHeroContentView: View {
                 .background(backgroundColor)
             }
         }
+        .id(discovery.id)
+        .coordinateSpace(name: "hero-scroll")
+        .frame(width: containerWidth)
+        .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
+            scrollOffset = max(value, 0)
+        }
         .onAppear {
             voiceoverController.ensureMetadata(for: discovery)
+        }
+        .onChange(of: discovery.id) { _ in
+            scrollOffset = 0
         }
     }
 
     private var headerOverlay: some View {
         ZStack(alignment: .bottom) {
             LinearGradient(
-                colors: [
-                    Color.black.opacity(0.0),
-                    Color.black.opacity(0.0),
-                    colorScheme == .dark
-                        ? BrandColors.Dark.background.opacity(0.92)
-                        : BrandColors.Light.background.opacity(0.95)
-                ],
+                gradient: Gradient(stops: [
+                    .init(color: Color.clear, location: 0.0),
+                    .init(color: palette.overlayMidtone, location: 0.7),
+                    .init(color: palette.background, location: 1.0)
+                ]),
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -1160,17 +1246,17 @@ private struct DiscoveryHeroContentView: View {
             VStack(spacing: BrandSpacing.small) {
                 Text(discovery.title)
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(palette.textPrimary)
                     .multilineTextAlignment(.center)
 
                 Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.85))
+                    .foregroundStyle(palette.textSecondary)
 
                 if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
                     Text(shortDescription)
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(palette.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, BrandSpacing.large)
                 }
@@ -1204,17 +1290,21 @@ private struct DiscoveryHeroContentView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(palette.overlayButtonForeground)
                 .padding(16)
-                .background(Color.black.opacity(0.55))
+                .background(palette.overlayButtonBackground)
                 .clipShape(Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(palette.overlayButtonBorder, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
-        .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(palette.overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
     }
 
     private var textColor: Color {
-        colorScheme == .dark ? BrandColors.Dark.accentText : BrandColors.Light.accentText
+        palette.textPrimary
     }
 
     private var additionalBottomPadding: CGFloat {
@@ -1231,19 +1321,17 @@ private struct DiscoveryHeroContentView: View {
         if let description = discovery.detailDescription, !description.isEmpty {
             #if canImport(MarkdownUI)
             Markdown(description)
-                .markdownTextStyle {
-                    ForegroundColor(textColor.opacity(0.88))
-                }
+                .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
                 .textSelection(.enabled)
             #else
             Text(description)
                 .font(.system(size: 16))
-                .foregroundStyle(textColor.opacity(0.88))
+                .foregroundStyle(palette.textSecondary)
             #endif
         } else {
             Text(discovery.highlight)
                 .font(.system(size: 16))
-                .foregroundStyle(textColor.opacity(0.75))
+                .foregroundStyle(palette.textSecondary)
         }
     }
 
@@ -1259,12 +1347,22 @@ private struct DiscoveryHeroContentView: View {
     }
 }
 
+private struct HeroScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private struct VoiceoverDetailButton: View {
     let discovery: DiscoverySummary
     @ObservedObject private var controller: VoiceoverPlaybackController
+    let palette: BrandTheme.Palette
 
-    init(discovery: DiscoverySummary, controller: VoiceoverPlaybackController) {
+    init(discovery: DiscoverySummary, controller: VoiceoverPlaybackController, palette: BrandTheme.Palette) {
         self.discovery = discovery
+        self.palette = palette
         _controller = ObservedObject(initialValue: controller)
     }
 
@@ -1274,16 +1372,16 @@ private struct VoiceoverDetailButton: View {
                 if isLoading {
                     ProgressView()
                         .progressViewStyle(.circular)
-                        .tint(Color.white)
+                        .tint(palette.overlayButtonForeground)
                 } else {
                     Image(systemName: playbackIconName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(iconOpacity))
+                        .foregroundStyle(palette.overlayButtonForeground.opacity(iconOpacity))
                 }
 
                 Text(buttonTitle)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(titleOpacity))
+                    .foregroundStyle(palette.overlayButtonForeground.opacity(titleOpacity))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -1352,7 +1450,7 @@ private struct VoiceoverDetailButton: View {
     }
 
     private var buttonBackground: some View {
-        BrandColors.Dark.primaryAction
+        palette.primaryAction
             .opacity(isUnavailable ? 0.55 : 1.0)
     }
 
@@ -1635,6 +1733,7 @@ struct DiscoveriesHomeView: View {
     init(
         feedUseCase: DiscoveryFeedUseCase,
         voiceoverController _: VoiceoverPlaybackController,
+        pendingDiscoveryId _: Binding<Int64?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil
     ) {

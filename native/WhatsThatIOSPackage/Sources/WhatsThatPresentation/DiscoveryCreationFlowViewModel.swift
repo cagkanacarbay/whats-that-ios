@@ -65,6 +65,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private let imageEncoder: DiscoveryImageEncodingService
     private let pushService: DiscoveryPushService
     private let locationService: DiscoveryLocationService
+    private let analysisParser = DiscoveryAnalysisParser()
 
     private var currentMedia: DiscoveryCapturedMedia?
     private var analysisTask: Task<Void, Never>?
@@ -248,24 +249,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     private func performAnalysis(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
         defer { analysisTask = nil }
-        flowState = .analyzing(
-            DiscoveryAnalysisState(
-                statusMessage: "Preparing analysis…",
-                streamedText: "",
-                isStreaming: true,
-                discoveryIdentifier: nil,
-                systemPromptVersion: nil,
-                userPromptVersion: nil
-            )
-        )
-        analysisState = DiscoveryAnalysisState(
+        let initialState = DiscoveryAnalysisState(
             statusMessage: "Preparing analysis…",
             streamedText: "",
-            isStreaming: true,
-            discoveryIdentifier: nil,
-            systemPromptVersion: nil,
-            userPromptVersion: nil
+            isStreaming: true
         )
+        analysisState = initialState
+        flowState = .analyzing(initialState)
 
         do {
             let payload = DiscoveryAnalysisPayload(
@@ -303,13 +293,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             analysisState = analysisStateUpdated { state in
                 state.statusMessage = message
             }
-            flowState = .analyzing(analysisState ?? DiscoveryAnalysisState(statusMessage: message, streamedText: "", isStreaming: true))
+            syncFlowStateWithAnalysis()
         case let .token(token):
             analysisState = analysisStateUpdated { state in
                 state.streamedText.append(token)
                 state.isStreaming = true
             }
-            flowState = .analyzing(analysisState ?? DiscoveryAnalysisState(statusMessage: nil, streamedText: token, isStreaming: true))
+            syncFlowStateWithAnalysis()
         case let .complete(discoveryId, systemVersion, userVersion):
             analysisState = analysisStateUpdated { state in
                 state.discoveryIdentifier = discoveryId
@@ -318,12 +308,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 state.systemPromptVersion = systemVersion
                 state.userPromptVersion = userVersion
             }
-            flowState = .analyzing(analysisState ?? DiscoveryAnalysisState(statusMessage: "Completed", streamedText: "", isStreaming: false, discoveryIdentifier: discoveryId, systemPromptVersion: systemVersion, userPromptVersion: userVersion))
+            syncFlowStateWithAnalysis()
             locationService.stopTracking()
             onDiscoveryCreated?(discoveryId)
         case let .error(message):
             error = .analysisFailed(message)
             flowState = .error(message: message)
+            locationService.stopTracking()
         case .end:
             break
         }
@@ -339,8 +330,24 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     private func analysisStateUpdated(_ transform: (inout DiscoveryAnalysisState) -> Void) -> DiscoveryAnalysisState {
         var existing = analysisState ?? DiscoveryAnalysisState()
+        let previousStream = existing.streamedText
         transform(&existing)
+        if existing.streamedText != previousStream {
+            if let parsed = analysisParser.parse(existing.streamedText) {
+                existing.displayMarkdown = parsed.markdown
+                existing.metadataTitle = parsed.metadata?.title ?? existing.metadataTitle
+                existing.metadataShortDescription = parsed.metadata?.shortDescription ?? existing.metadataShortDescription
+            } else {
+                existing.displayMarkdown = existing.streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
         return existing
+    }
+
+    private func syncFlowStateWithAnalysis() {
+        if let analysisState {
+            flowState = .analyzing(analysisState)
+        }
     }
 
     static func makeLocationDescription(from location: DiscoveryLocation?) -> String? {

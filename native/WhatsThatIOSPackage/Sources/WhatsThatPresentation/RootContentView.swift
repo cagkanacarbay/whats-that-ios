@@ -11,6 +11,7 @@ public struct RootContentView: View {
     @StateObject private var viewModel: AppRootViewModel
     @State private var authError: AuthError?
     @State private var isSettingsPresented = false
+    @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let feedUseCase: DiscoveryFeedUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
@@ -137,10 +138,26 @@ public struct RootContentView: View {
         ) {
             Button("OK", role: .cancel) {}
         }
+        .preferredColorScheme(appearance.colorScheme)
+        .onAppear(perform: syncBrandTheme)
+        .onChange(of: storedAppearance) { _, _ in
+            syncBrandTheme()
+        }
     }
 
     private var backgroundColor: Color {
         colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
+    }
+
+    private var appearance: AppAppearance {
+        AppAppearance(rawValue: storedAppearance) ?? .system
+    }
+
+    private func syncBrandTheme() {
+        let mode = appearance.brandMode
+        if BrandTheme.activeMode != mode {
+            BrandTheme.activeMode = mode
+        }
     }
 
     private func handleAuthOperation(_ operation: @escaping () async throws -> Void) async throws {

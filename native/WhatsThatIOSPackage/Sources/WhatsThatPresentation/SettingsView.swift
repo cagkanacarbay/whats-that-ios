@@ -1,4 +1,5 @@
 import SwiftUI
+import WhatsThatShared
 
 struct SettingsView: View {
     enum AlertState: Equatable {
@@ -12,30 +13,13 @@ struct SettingsView: View {
 
     @State private var isProcessing = false
     @State private var alertState: AlertState?
+    @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
 
     var body: some View {
         NavigationStack {
             List {
-                Section(header: Text("Cache & Onboarding")) {
-                    Button(role: .destructive) {
-                        alertState = .confirmReset
-                    } label: {
-                        HStack {
-                            if isProcessing {
-                                ProgressView()
-                                    .progressViewStyle(.circular)
-                            }
-                            Text("Reset onboarding experience")
-                        }
-                    }
-                    .disabled(isProcessing)
-                    .accessibilityIdentifier("settings.resetOnboarding")
-
-                    Text("Clears saved onboarding state so you can replay the intro slides and permission prompts. Your account stays signed in.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 4)
-                }
+                appearanceSection
+                onboardingSection
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -73,6 +57,61 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var appearanceSection: some View {
+        Section(header: Text("Appearance")) {
+            Picker("Theme", selection: appearanceBinding) {
+                ForEach(AppAppearance.allCases) { mode in
+                    Label(mode.displayName, systemImage: mode.symbolName)
+                        .tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+            .accessibilityIdentifier("settings.appearancePicker")
+
+            Text(appearance.description)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+        }
+    }
+
+    private var onboardingSection: some View {
+        Section(header: Text("Cache & Onboarding")) {
+            Button(role: .destructive) {
+                alertState = .confirmReset
+            } label: {
+                HStack {
+                    if isProcessing {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    }
+                    Text("Reset onboarding experience")
+                }
+            }
+            .disabled(isProcessing)
+            .accessibilityIdentifier("settings.resetOnboarding")
+
+            Text("Clears saved onboarding state so you can replay the intro slides and permission prompts. Your account stays signed in.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+        }
+    }
+
+    private var appearance: AppAppearance {
+        AppAppearance(rawValue: storedAppearance) ?? .system
+    }
+
+    private var appearanceBinding: Binding<AppAppearance> {
+        Binding(
+            get: { appearance },
+            set: { newValue in
+                storedAppearance = newValue.rawValue
+                BrandTheme.activeMode = newValue.brandMode
+            }
+        )
     }
 
     private func performReset() async {

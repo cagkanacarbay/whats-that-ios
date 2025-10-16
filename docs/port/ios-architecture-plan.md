@@ -94,8 +94,8 @@ Shared (Foundation utilities, image/audio cache, configuration)
 | Discovery Capture | `CaptureView` (Camera) / `LibraryPickerView` | `ImageFlowViewModel` state machine | `CameraService`, `PhotoLibraryService`, `LocationService` |
 | Confirm Screen | `ConfirmDiscoveryView` | `PrepareAnalysisUseCase`, `CreditStatusUseCase` | `CreditsRepository`, `DiscoveryHistoryRepository`, `PushTokenService` |
 | AI Streaming | `AnalysisStreamingView` with Markdown preview | `AnalysisSession` actor orchestrating SSE, retry, cancellation | `AskAIClient` (SSE), `ImageUploader`, `RequestTracker`, `SupabaseFunctionsClient` |
-| Discovery List | `DiscoveriesHomeView` | `DiscoveryFeedViewModel` | `DiscoveryRepository` (pagination actor), `Nuke` image loading |
-| Discovery Detail Modal | `DiscoveryDetailView` | Selection handled via `DiscoveriesHomeView` state (no separate view model yet) | Voiceover playback TBD (currently stubbed), native share + MapKit helpers |
+| Discovery List | `DiscoveriesHomeView` | `DiscoveryFeedViewModel` | `DiscoveryRepository` (pagination actor), `Nuke` image loading, discovery hero cache |
+| Discovery Detail Modal | `DiscoveryDetailView` + hero overlay container | Selection handled via `DiscoveriesHomeView` hero context (no separate view model yet) | `SupabaseVoiceoverRepository`, `VoiceoverPlaybackController`, native share + MapKit helpers |
 | Inline Feedback | `FeedbackOverlayView` | `FeedbackViewModel` (local only for now) | Placeholder repository (no backend yet) |
 | Audio Player | `PersistentAudioPlayerView` | `AudioPlayerViewModel` (actor) | `VoiceoverRepository`, `AVAudioPlayerService`, `PlaybackStore` |
 | Credits & IAP | `PurchaseCreditsView` | `CreditsViewModel`, `PurchaseCreditsUseCase` | `StoreKitService`, `SupabaseCreditsRepository`, `ValidateReceiptClient` |
@@ -120,7 +120,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
 
 ### Discovery Browsing & Modal Transition
 - `DiscoveryFeedViewModel` maintains a paginated array of `DiscoverySummary` structs (now enriched with `shortDescription` + `detailDescription`), handles refresh/load-more, and deduplicates pages.
-- `DiscoveriesHomeView` renders the two-column grid using SwiftUI `LazyVGrid`, injects a shared `@Namespace`, and stores selection state so the card image can be reused seamlessly inside `DiscoveryDetailView`.
+- `DiscoveriesHomeView` renders the two-column grid using SwiftUI `LazyVGrid`, measures each card frame via a preference key, caches an image snapshot, and drives the hero overlay state so the tapped card animates smoothly into the full-screen container.
 - Remote imagery is handled by Nuke/AsyncImage; placeholders mirror the RN gradient + logo treatment until the fetch completes.
 - `DiscoveryDetailView` reproduces the React Native overlay (gradient, title, subtitle, share/map buttons) and renders the Markdown body with `MarkdownUI`. Dismissal currently relies on the back button; gesture-based drag remains on the backlog alongside voiceover playback plumbing.
 
@@ -142,7 +142,7 @@ Shared (Foundation utilities, image/audio cache, configuration)
 
 ## Navigation & UI Details
 - **Tab Structure:** `TabView` with four tabs (Camera, Discoveries, Upload, Settings). Camera/Upload tabs auto-prompt capture flow on focus; handle “Cancel” states gracefully.
-- **Modal:** Current build keeps the overlay inside `DiscoveriesHomeView` and relies on the shared namespace to transition between list and detail; consider migrating to a dedicated coordinator or UIKit bridge if gesture/scroll conflicts emerge when we add interactive dismissal.
+- **Modal:** Current build keeps the overlay inside `DiscoveriesHomeView`, using timing-curve animations over the measured card frame plus cached imagery to match the RN hero transition. A dedicated coordinator or UIKit bridge may still be required when we add interactive dismissal gestures.
 - **Markdown Rendering:** Use `AttributedString` Markdown parser or integrate a lightweight renderer (e.g., `MarkdownUI`) to support headings, lists, inline styling. Hooks for feedback overlay.
 - **Feedback Overlay:** Represent as overlay view triggered on double-tap (SwiftUI `Gesture`), storing bounding boxes and presenting reaction picker.
 - **Theming:** Support dark/light theme toggles using `ColorScheme` environment and persisted preference.

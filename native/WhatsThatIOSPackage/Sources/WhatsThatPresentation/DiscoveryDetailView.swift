@@ -17,9 +17,45 @@ struct DiscoveryDetailView: View {
     let onPlayAudio: (() -> Void)?
 
     @State private var isContentVisible = false
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorScheme) private var systemColorScheme
 
     private let headerHeightFactor: CGFloat = 0.72
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: systemColorScheme)
+    }
+
+    private var overlayGradientStops: [Gradient.Stop] {
+        [
+            .init(color: Color.clear, location: 0.0),
+            .init(color: palette.overlayMidtone, location: 0.7),
+            .init(color: palette.background, location: 1.0)
+        ]
+    }
+
+    private var overlayTitleColor: Color {
+        palette.textPrimary
+    }
+
+    private var overlaySupportingColor: Color {
+        palette.textSecondary
+    }
+
+    private var overlayButtonBackground: Color {
+        palette.overlayButtonBackground
+    }
+
+    private var overlayButtonForeground: Color {
+        palette.overlayButtonForeground
+    }
+
+    private var overlayButtonBorder: Color {
+        palette.overlayButtonBorder
+    }
+
+    private var overlayButtonShadowOpacity: Double {
+        palette.overlayButtonShadowOpacity
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -37,6 +73,7 @@ struct DiscoveryDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .id(discovery.id)
                 .opacity(isContentVisible ? 1 : 0)
                 .animation(.easeInOut(duration: 0.25), value: isContentVisible)
 
@@ -56,7 +93,7 @@ struct DiscoveryDetailView: View {
     }
 
     private var backgroundColor: Color {
-        colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
+        palette.background
     }
 
     @ViewBuilder
@@ -114,25 +151,23 @@ struct DiscoveryDetailView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(overlayButtonForeground)
                 .padding(16)
-                .background(Color.black.opacity(0.55))
+                .background(overlayButtonBackground)
                 .clipShape(Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(overlayButtonBorder, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
-        .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
     }
 
     private func headerOverlay(height: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             LinearGradient(
-                colors: [
-                    Color.black.opacity(0.0),
-                    Color.black.opacity(0.0),
-                    colorScheme == .dark
-                        ? BrandColors.Dark.background.opacity(0.92)
-                        : BrandColors.Light.background.opacity(0.95)
-                ],
+                gradient: Gradient(stops: overlayGradientStops),
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -140,17 +175,17 @@ struct DiscoveryDetailView: View {
             VStack(spacing: BrandSpacing.small) {
                 Text(discovery.title)
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(overlayTitleColor)
                     .multilineTextAlignment(.center)
 
                 Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.85))
+                    .foregroundStyle(overlaySupportingColor)
 
                 if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
                     Text(shortDescription)
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(overlaySupportingColor)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, BrandSpacing.large)
                 }
@@ -173,7 +208,7 @@ struct DiscoveryDetailView: View {
                         Spacer()
                     }
                     .padding()
-                    .background(BrandColors.Dark.primaryAction)
+                    .background(palette.primaryAction)
                     .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
                 }
                 .buttonStyle(.plain)
@@ -190,7 +225,7 @@ struct DiscoveryDetailView: View {
     }
 
     private var textColor: Color {
-        colorScheme == .dark ? BrandColors.Dark.accentText : BrandColors.Light.accentText
+        palette.textPrimary
     }
 
     @ViewBuilder
@@ -198,19 +233,17 @@ struct DiscoveryDetailView: View {
         if let description = discovery.detailDescription, !description.isEmpty {
             #if canImport(MarkdownUI)
             Markdown(description)
-                .markdownTextStyle {
-                    ForegroundColor(textColor.opacity(0.88))
-                }
+                .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
                 .textSelection(.enabled)
             #else
             Text(description)
                 .font(.system(size: 16))
-                .foregroundStyle(textColor.opacity(0.88))
+                .foregroundStyle(palette.textSecondary)
             #endif
         } else {
             Text(discovery.highlight)
                 .font(.system(size: 16))
-                .foregroundStyle(textColor.opacity(0.75))
+                .foregroundStyle(palette.textSecondary)
         }
     }
 
@@ -219,13 +252,17 @@ struct DiscoveryDetailView: View {
             Button(action: onClose) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(overlayButtonForeground)
                     .padding(14)
-                    .background(Color.black.opacity(0.6))
+                    .background(overlayButtonBackground)
                     .clipShape(Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(overlayButtonBorder, lineWidth: 1)
+                    }
             }
             .buttonStyle(.plain)
-            .shadow(color: Color.black.opacity(0.35), radius: 8, x: 0, y: 4)
+            .shadow(color: Color.black.opacity(overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
 
             Spacer()
 
@@ -234,13 +271,17 @@ struct DiscoveryDetailView: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 20, weight: .bold))
                         .rotationEffect(.degrees(90))
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(overlayButtonForeground)
                         .padding(14)
-                        .background(Color.black.opacity(0.6))
+                        .background(overlayButtonBackground)
                         .clipShape(Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(overlayButtonBorder, lineWidth: 1)
+                        }
                 }
                 .buttonStyle(.plain)
-                .shadow(color: Color.black.opacity(0.35), radius: 8, x: 0, y: 4)
+                .shadow(color: Color.black.opacity(overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
             }
         }
         .padding(.horizontal, BrandSpacing.large)
@@ -268,6 +309,11 @@ private struct DiscoveryImagePlaceholderView: View {
     let discoveryId: Int64
 
     @State private var didFail = false
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: systemColorScheme)
+    }
 
     var body: some View {
         ZStack {
@@ -287,7 +333,7 @@ private struct DiscoveryImagePlaceholderView: View {
                     case .empty:
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(Color.white)
+                            .tint(palette.primaryAction)
                     @unknown default:
                         Color.clear
                     }

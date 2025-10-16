@@ -65,8 +65,11 @@ public final class VoiceoverPlaybackController: ObservableObject {
     }
 
     deinit {
-        Task { @MainActor [weak self] in
-            self?.teardownObservers()
+        Task {
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.teardownObservers()
+            }
         }
     }
 }

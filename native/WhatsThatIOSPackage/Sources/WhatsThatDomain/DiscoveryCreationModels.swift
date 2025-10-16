@@ -71,6 +71,9 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
     public var discoveryIdentifier: Int64?
     public var systemPromptVersion: String?
     public var userPromptVersion: String?
+    public var metadataTitle: String?
+    public var metadataShortDescription: String?
+    public var displayMarkdown: String
 
     public init(
         statusMessage: String? = nil,
@@ -78,7 +81,10 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         isStreaming: Bool = true,
         discoveryIdentifier: Int64? = nil,
         systemPromptVersion: String? = nil,
-        userPromptVersion: String? = nil
+        userPromptVersion: String? = nil,
+        metadataTitle: String? = nil,
+        metadataShortDescription: String? = nil,
+        displayMarkdown: String = ""
     ) {
         self.statusMessage = statusMessage
         self.streamedText = streamedText
@@ -86,6 +92,9 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         self.discoveryIdentifier = discoveryIdentifier
         self.systemPromptVersion = systemPromptVersion
         self.userPromptVersion = userPromptVersion
+        self.metadataTitle = metadataTitle
+        self.metadataShortDescription = metadataShortDescription
+        self.displayMarkdown = displayMarkdown
     }
 }
 

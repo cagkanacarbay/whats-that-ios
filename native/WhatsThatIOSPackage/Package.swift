@@ -52,6 +52,7 @@ var appDependencies: [Target.Dependency] = [
     "WhatsThatDomain",
     "WhatsThatShared"
 ]
+var sharedDependencies: [Target.Dependency] = []
 
 var packageDependencies: [Package.Dependency] = []
 var targetSwiftSettings: [SwiftSetting] = []
@@ -74,6 +75,9 @@ if useRemoteDependencies {
         .product(name: "Nuke", package: "Nuke")
     ]
     appDependencies += [
+        .product(name: "MarkdownUI", package: "MarkdownUI")
+    ]
+    sharedDependencies += [
         .product(name: "MarkdownUI", package: "MarkdownUI")
     ]
 
@@ -101,6 +105,7 @@ var package = Package(
     targets: [
         .target(
             name: "WhatsThatShared",
+            dependencies: sharedDependencies,
             path: "Sources/WhatsThatShared",
             swiftSettings: targetSwiftSettings
         ),

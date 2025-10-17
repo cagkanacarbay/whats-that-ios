@@ -544,6 +544,12 @@ private struct AnalysisStateView: View {
         static let minimumHeaderWidth: CGFloat = 320
     }
 
+    #if DEBUG
+    private let debugLoggingEnabled = true
+    #else
+    private let debugLoggingEnabled = false
+    #endif
+
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
     }
@@ -568,8 +574,12 @@ private struct AnalysisStateView: View {
         return shuffledMessages[index]
     }
 
-    private var sanitizedNarrative: String {
-        DiscoveryStreamFormatter.narrative(from: state.streamedText)
+    private var currentMarkdown: String {
+        let trimmed = state.displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return DiscoveryStreamFormatter.narrative(from: state.streamedText)
     }
 
     private var shouldShowLoader: Bool {
@@ -621,7 +631,7 @@ private struct AnalysisStateView: View {
                         updateDisplayedMarkdown()
                     }
                     .onChange(of: state.streamedText) { _ in
-                        evaluateLoaderCleared(with: sanitizedNarrative)
+                        evaluateLoaderCleared(with: currentMarkdown)
                     }
                     .onChange(of: state.metadataTitle) { _ in
                         evaluateMetadataVisibility()
@@ -637,6 +647,7 @@ private struct AnalysisStateView: View {
                         }
                     }
                     .onChange(of: loaderCleared) { cleared in
+                        debugLog("loaderCleared changed -> \(cleared)")
                         if cleared {
                             stopMessageRotation()
                             scrollToContent(using: scrollProxy)
@@ -654,17 +665,18 @@ private struct AnalysisStateView: View {
         shuffledMessages = AnalysisStateView.loadingMessages.shuffled()
         currentMessageIndex = 0
         metadataVisible = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
-        let initialNarrative = sanitizedNarrative
+        let initialNarrative = currentMarkdown
         displayedMarkdown = initialNarrative
         loaderCleared = loaderShouldBeCleared(for: initialNarrative)
         hasScrolledToContent = false
         if shouldShowLoader {
             triggerCharacterAnimation()
         }
+        debugLog("resetState loaderCleared=\(loaderCleared) initialMarkdownLength=\(initialNarrative.count) metadataTitle=\(state.metadataTitle ?? "nil")")
     }
 
     private func updateDisplayedMarkdown() {
-        let newValue = sanitizedNarrative
+        let newValue = currentMarkdown
         guard newValue != displayedMarkdown else {
             evaluateLoaderCleared(with: newValue)
             return
@@ -701,26 +713,31 @@ private struct AnalysisStateView: View {
 
     private func loaderShouldBeCleared(for text: String) -> Bool {
         if let title = state.metadataTitle, !title.isEmpty {
+            debugLog("loaderShouldBeCleared -> true via metadataTitle")
             return true
         }
         if let short = state.metadataShortDescription, !short.isEmpty {
+            debugLog("loaderShouldBeCleared -> true via metadataShortDescription")
             return true
         }
         if !state.isStreaming {
             let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
             if visibleLength > 0 {
+                debugLog("loaderShouldBeCleared -> true via finished stream length \(visibleLength)")
                 return true
             }
-            return !state.streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return false
         }
         let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
         if visibleLength >= AnalysisStateView.streamContentThreshold {
+            debugLog("loaderShouldBeCleared -> true via content threshold length \(visibleLength)")
             return true
         }
         if visibleLength >= AnalysisStateView.streamRevealThreshold {
+            debugLog("loaderShouldBeCleared -> true via reveal threshold length \(visibleLength)")
             return true
         }
-        return !state.streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return false
     }
 
     private func evaluateLoaderCleared(with text: String) {
@@ -729,6 +746,7 @@ private struct AnalysisStateView: View {
         }
         if loaderShouldBeCleared(for: text) {
             loaderCleared = true
+            debugLog("loaderCleared set to true (textLength=\(text.count), isStreaming=\(state.isStreaming), metadataTitle=\(state.metadataTitle ?? "nil"))")
         }
     }
 
@@ -984,6 +1002,11 @@ private struct AnalysisStateView: View {
         return nil
     }
 
+    private func debugLog(_ message: String) {
+        guard debugLoggingEnabled else { return }
+        print("[AnalysisStateView] \(message)")
+    }
+
     private func presentShareSheet(for discovery: DiscoverySummary, url: URL) {
         #if canImport(UIKit)
         let message = [
@@ -1063,98 +1086,6 @@ private struct LoadingMessageView: View {
         #else
         return 1
         #endif
-    }
-}
-
-private enum DiscoveryStreamFormatter {
-    private static let userResponseDelimiter = "=== USER RESPONSE ==="
-    private static let confidencePrefix = "confidence level"
-    private static let metadataHeadingRegex = try? NSRegularExpression(
-        pattern: #"###\s*metadata_json"#,
-        options: [.caseInsensitive]
-    )
-
-    static func narrative(from source: String) -> String {
-        guard !source.isEmpty else { return "" }
-
-        var working = source
-
-        if let delimiterRange = working.range(of: userResponseDelimiter) {
-            let afterDelimiter = working[delimiterRange.upperBound...]
-            working = String(afterDelimiter).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if working.lowercased().hasPrefix(confidencePrefix) {
-                if let newlineIndex = working.firstIndex(of: "\n") {
-                    let trimmed = working[newlineIndex...].dropFirst()
-                    working = String(trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
-                } else {
-                    working = ""
-                }
-            }
-        }
-
-        working = removeMetadataSection(from: working)
-        working = working.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let headingRange = working.range(of: #"##\s+"#, options: .regularExpression) {
-            working = String(working[headingRange.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return working.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func visibleLength(for text: String) -> Int {
-        narrative(from: text).trimmingCharacters(in: .whitespacesAndNewlines).count
-    }
-
-    private static func removeMetadataSection(from source: String) -> String {
-        guard
-            let regex = metadataHeadingRegex,
-            let match = regex.firstMatch(
-                in: source,
-                options: [],
-                range: NSRange(location: 0, length: source.utf16.count)
-            ),
-            let headingRange = Range(match.range, in: source)
-        else {
-            return source
-        }
-
-        if let jsonRange = findJsonBounds(in: source, startingAt: headingRange.upperBound) {
-            var mutable = source
-            mutable.removeSubrange(headingRange.lowerBound..<jsonRange.upperBound)
-            return mutable
-        } else {
-            var mutable = source
-            mutable.removeSubrange(headingRange.lowerBound..<mutable.endIndex)
-            return mutable
-        }
-    }
-
-    private static func findJsonBounds(in source: String, startingAt startIndex: String.Index) -> Range<String.Index>? {
-        guard let start = source[startIndex...].firstIndex(of: "{") else {
-            return nil
-        }
-
-        var index = start
-        var depth = 0
-
-        while index < source.endIndex {
-            let character = source[index]
-            if character == "{" {
-                depth += 1
-            } else if character == "}" {
-                depth -= 1
-                if depth == 0 {
-                    let end = source.index(after: index)
-                    return start..<end
-                }
-            }
-
-            index = source.index(after: index)
-        }
-
-        return nil
     }
 }
 

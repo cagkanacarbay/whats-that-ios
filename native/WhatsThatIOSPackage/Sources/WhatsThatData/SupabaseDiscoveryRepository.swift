@@ -24,9 +24,17 @@ public enum SupabaseDiscoveryRepositoryError: LocalizedError {
 
 public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistoryRepository {
     private let client: SupabaseClient
+    private let assetCache: DiscoveryAssetCache
+    private let signedURLTTL: TimeInterval
 
-    public init(client: SupabaseClient) {
+    public init(
+        client: SupabaseClient,
+        assetCache: DiscoveryAssetCache = .shared,
+        signedURLTTL: TimeInterval = 60 * 60 * 24 * 7
+    ) {
         self.client = client
+        self.assetCache = assetCache
+        self.signedURLTTL = signedURLTTL
     }
 
     public init(
@@ -180,7 +188,10 @@ private extension DiscoveryRecord {
 
 private extension SupabaseDiscoveryRepository {
     func makeDiscoverySummary(from record: DiscoveryRecord) async throws -> DiscoverySummary {
-        let signedImageURL = try await loadSignedImageURL(from: record.imageURL)
+        let signedImageURL = try await loadSignedImageURL(
+            for: record.id,
+            from: record.imageURL
+        )
         let shortDescription = record.shortDescription?.trimmed.nonEmpty
         let detailDescription = record.description?.trimmed.nonEmpty
         let fallbackHighlight = shortDescription ?? detailDescription ?? "No summary available yet."
@@ -198,21 +209,48 @@ private extension SupabaseDiscoveryRepository {
         )
     }
 
-    func loadSignedImageURL(from imagePath: String?) async throws -> String? {
+    func loadSignedImageURL(
+        for discoveryId: Int64,
+        from imagePath: String?
+    ) async throws -> String? {
         guard let imagePath,
               !imagePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
+        }
+
+        let trimmedPath = imagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let url = URL(string: trimmedPath), url.scheme != nil, url.host != nil {
+            return trimmedPath
+        }
+
+        if let cachedURL = await assetCache.cachedSignedURL(
+            for: discoveryId,
+            storagePath: trimmedPath
+        ) {
+            return cachedURL.absoluteString
         }
 
         do {
             let signedURL = try await client.storage
                 .from("discovery_images")
                 .createSignedURL(
-                    path: imagePath,
-                    expiresIn: 60 * 60 * 24 * 7 // 7 days
+                    path: trimmedPath,
+                    expiresIn: Int(signedURLTTL)
                 )
+
+            let expirationDate = Date().addingTimeInterval(signedURLTTL)
+            await assetCache.storeSignedURL(
+                signedURL,
+                expiresAt: expirationDate,
+                discoveryId: discoveryId,
+                storagePath: trimmedPath
+            )
+
             return signedURL.absoluteString
         } catch {
+            supabaseDiscoveryLogger.error("Failed to create signed URL for \(trimmedPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            await assetCache.invalidateSignedURL(for: discoveryId)
             return nil
         }
     }

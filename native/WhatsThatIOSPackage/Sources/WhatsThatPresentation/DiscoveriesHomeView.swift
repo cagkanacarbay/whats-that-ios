@@ -39,7 +39,7 @@ struct DiscoveriesHomeView: View {
     private let gridBottomPadding: CGFloat = 16
     private let heroEdgeActivationWidth: CGFloat = 30
     private let heroDismissalThreshold: CGFloat = 150
-    private let heroContentReadyThreshold: CGFloat = 0.995
+    private let heroOpenAnimationDuration: TimeInterval = 0.5
 
     private var heroDismissalDistance: CGFloat {
 #if canImport(UIKit)
@@ -142,6 +142,7 @@ struct DiscoveriesHomeView: View {
                         contentOpacity: heroContentOpacity,
                         isContentReady: heroIsSettled,
                         isClosing: heroIsClosing,
+                        isInteracting: heroIsInteracting,
                         gestureTranslation: heroDragTranslation,
                         gestureScale: heroDragScale,
                         gestureRotation: heroDragRotation,
@@ -155,15 +156,12 @@ struct DiscoveriesHomeView: View {
                         onShowOptions: nil
                     )
                     .transition(.identity)
-                    .highPriorityGesture(heroOverlayDragGesture)
+                    .simultaneousGesture(heroEdgeDragGesture, including: .gesture)
                     .zIndex(5)
                 }
             }
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
-            }
-            .onChange(of: heroProgress) { newValue in
-                updateHeroSettledState(for: newValue)
             }
             .onChange(of: safeBottom) { newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
@@ -250,13 +248,14 @@ struct DiscoveriesHomeView: View {
         heroIsClosing = false
         heroIsInteracting = false
         resetHeroInteraction(animated: false)
-        updateHeroContentVisibility(for: 0)
+        updateHeroPresentationVisibility()
         voiceoverController.ensureMetadata(for: discovery)
         voiceoverController.isDetailOverlayActive = true
 
-        withAnimation(.timingCurve(0.33, 1.0, 0.68, 1.0, duration: 0.5)) {
+        withAnimation(.timingCurve(0.33, 1.0, 0.68, 1.0, duration: heroOpenAnimationDuration)) {
             heroProgress = 1
         }
+        scheduleHeroSettled(for: sessionId)
     }
 
     private func presentPendingDiscoveryIfNeeded() {
@@ -298,13 +297,27 @@ struct DiscoveriesHomeView: View {
         heroIsInteracting = false
     }
 
-    private func updateHeroContentVisibility(for _: CGFloat) {
+    private func updateHeroPresentationVisibility() {
         let shouldShow = !heroIsClosing && heroIsSettled
         let targetOpacity: Double = shouldShow ? 1 : 0
         guard heroContentOpacity != targetOpacity else { return }
 
         withAnimation(.easeInOut(duration: 0.18)) {
             heroContentOpacity = targetOpacity
+        }
+    }
+
+    private func scheduleHeroSettled(for sessionId: UUID) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + heroOpenAnimationDuration) {
+            guard heroContext?.sessionId == sessionId,
+                  !heroIsClosing,
+                  !heroIsInteracting
+            else { return }
+
+            if !heroIsSettled {
+                heroIsSettled = true
+                updateHeroPresentationVisibility()
+            }
         }
     }
 
@@ -319,6 +332,10 @@ struct DiscoveriesHomeView: View {
             guard horizontalTranslation > 0 else { return }
             guard abs(horizontalTranslation) >= abs(verticalTranslation) else { return }
             heroIsInteracting = true
+            if heroIsSettled {
+                heroIsSettled = false
+                updateHeroPresentationVisibility()
+            }
         }
 
         guard heroIsInteracting else { return }
@@ -365,6 +382,9 @@ struct DiscoveriesHomeView: View {
             handleDetailDismissal()
         } else {
             resetHeroInteraction(animated: true)
+            if let sessionId = heroContext?.sessionId {
+                scheduleHeroSettled(for: sessionId)
+            }
         }
     }
 
@@ -375,7 +395,7 @@ struct DiscoveriesHomeView: View {
         resetHeroInteraction(animated: true)
         heroIsClosing = true
         heroIsSettled = false
-        updateHeroContentVisibility(for: heroProgress)
+        updateHeroPresentationVisibility()
 
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.45)) {
             heroProgress = 0
@@ -401,28 +421,6 @@ struct DiscoveriesHomeView: View {
                 hiddenDiscovery = nil
             }
             voiceoverController.isDetailOverlayActive = false
-        }
-    }
-
-    private func updateHeroSettledState(for progress: CGFloat) {
-        let clamped = max(0, min(progress, 1))
-
-        if heroIsClosing || heroIsInteracting {
-            if heroIsSettled {
-                heroIsSettled = false
-                updateHeroContentVisibility(for: progress)
-            }
-            return
-        }
-
-        if clamped >= heroContentReadyThreshold {
-            if !heroIsSettled {
-                heroIsSettled = true
-                updateHeroContentVisibility(for: progress)
-            }
-        } else if heroIsSettled && clamped < max(heroContentReadyThreshold - 0.05, 0) {
-            heroIsSettled = false
-            updateHeroContentVisibility(for: progress)
         }
     }
 
@@ -518,10 +516,12 @@ struct DiscoveriesHomeView: View {
         }
     }
 
-    private var heroOverlayDragGesture: some Gesture {
-        DragGesture(minimumDistance: 5, coordinateSpace: .global)
-            .onChanged(handleHeroDragChanged)
-            .onEnded(handleHeroDragEnded)
+    private var heroEdgeDragGesture: AnyGesture<DragGesture.Value> {
+        AnyGesture(
+            DragGesture(minimumDistance: 5, coordinateSpace: .global)
+                .onChanged(handleHeroDragChanged)
+                .onEnded(handleHeroDragEnded)
+        )
     }
 
     private var backgroundColor: Color {
@@ -1085,6 +1085,7 @@ private struct DiscoveryHeroOverlay: View {
     let contentOpacity: Double
     let isContentReady: Bool
     let isClosing: Bool
+    let isInteracting: Bool
     let gestureTranslation: CGSize
     let gestureScale: CGFloat
     let gestureRotation: Double
@@ -1103,6 +1104,7 @@ private struct DiscoveryHeroOverlay: View {
         contentOpacity: Double,
         isContentReady: Bool,
         isClosing: Bool,
+        isInteracting: Bool,
         gestureTranslation: CGSize,
         gestureScale: CGFloat,
         gestureRotation: Double,
@@ -1120,6 +1122,7 @@ private struct DiscoveryHeroOverlay: View {
         self.contentOpacity = contentOpacity
         self.isContentReady = isContentReady
         self.isClosing = isClosing
+        self.isInteracting = isInteracting
         self.gestureTranslation = gestureTranslation
         self.gestureScale = gestureScale
         self.gestureRotation = gestureRotation
@@ -1166,7 +1169,8 @@ private struct DiscoveryHeroOverlay: View {
                 let finalOffsetY = geometry.offset.y + gestureTranslation.height
                 let finalScale = gestureScale
                 let rotationAngle = gestureRotation
-                let shouldRenderDetail = isContentReady || contentOpacity > 0.001
+                let isChromeReady = isContentReady && !isClosing
+                let detailOpacity = isChromeReady ? contentOpacity : 0
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
@@ -1177,21 +1181,20 @@ private struct DiscoveryHeroOverlay: View {
                     )
                     .offset(y: scrollOffset > 0 ? scrollOffset : 0)
 
-                    if shouldRenderDetail {
-                        DiscoveryHeroContentView(
-                            discovery: context.discovery,
-                            imageHeight: geometry.imageHeight,
-                            backgroundColor: backgroundColor,
-                            colorScheme: colorScheme,
-                            voiceoverController: voiceoverController,
-                            containerWidth: containerWidth,
-                            onShare: onShare,
-                            isMarkdownReady: isContentReady,
-                            scrollOffset: $scrollOffset
-                        )
-                        .opacity(contentOpacity)
-                        .transition(.opacity)
-                    }
+                    DiscoveryHeroContentView(
+                        discovery: context.discovery,
+                        imageHeight: geometry.imageHeight,
+                        backgroundColor: backgroundColor,
+                        colorScheme: colorScheme,
+                        voiceoverController: voiceoverController,
+                        containerWidth: containerWidth,
+                        onShare: onShare,
+                        contentOpacity: detailOpacity,
+                        isChromeReady: isChromeReady,
+                        isMarkdownReady: isChromeReady,
+                        isScrollDisabled: isInteracting || isClosing,
+                        scrollOffset: $scrollOffset
+                    )
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(backgroundColor)
@@ -1199,14 +1202,14 @@ private struct DiscoveryHeroOverlay: View {
 
                 heroCard
                     .overlay(alignment: .topLeading) {
-                        if shouldRenderDetail {
+                        if isChromeReady {
                             DiscoveryHeroTopControls(
                                 safeAreaInsets: safeAreaInsets,
                                 onClose: onClose,
                                 onShowOptions: onShowOptions
                             )
-                            .opacity(contentOpacity)
-                            .animation(.easeInOut(duration: 0.12), value: contentOpacity)
+                            .opacity(detailOpacity)
+                            .animation(.easeInOut(duration: 0.12), value: detailOpacity)
                             .ignoresSafeArea()
                         }
                     }
@@ -1259,7 +1262,7 @@ private struct DiscoveryHeroOverlay: View {
             let height = HeroGeometry.lerp(startFrame.height, containerSize.height, clamped)
             let x = HeroGeometry.lerp(startX, 0, clamped)
             let y = HeroGeometry.lerp(startY, 0, clamped)
-            let headerHeightFactor: CGFloat = 0.72
+            let headerHeightFactor: CGFloat = 0.8
             let targetImageHeight = containerSize.height * headerHeightFactor
             let imageHeight = HeroGeometry.lerp(startFrame.height, targetImageHeight, clamped)
 
@@ -1302,15 +1305,6 @@ private struct DiscoveryHeroImageView: View {
                 Image(uiImage: placeholderImage)
                     .resizable()
                     .scaledToFill()
-            } else {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#20293A"),
-                        Color(hex: "#141927")
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
             }
 
             if let imageURL, !didFail {
@@ -1329,6 +1323,15 @@ private struct DiscoveryHeroImageView: View {
                         EmptyView()
                     }
                 }
+            } else if !hasLoaded {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(hex: "#20293A"),
+                        Color(hex: "#141927")
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             }
         }
         .frame(maxWidth: .infinity)
@@ -1343,7 +1346,10 @@ private struct DiscoveryHeroContentView: View {
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let containerWidth: CGFloat
+    let contentOpacity: Double
+    let isChromeReady: Bool
     let isMarkdownReady: Bool
+    let isScrollDisabled: Bool
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let onShare: (() -> Void)?
     @Binding var scrollOffset: CGFloat
@@ -1356,7 +1362,10 @@ private struct DiscoveryHeroContentView: View {
         voiceoverController: VoiceoverPlaybackController,
         containerWidth: CGFloat,
         onShare: (() -> Void)?,
+        contentOpacity: Double,
+        isChromeReady: Bool,
         isMarkdownReady: Bool,
+        isScrollDisabled: Bool,
         scrollOffset: Binding<CGFloat>
     ) {
         self.discovery = discovery
@@ -1364,7 +1373,10 @@ private struct DiscoveryHeroContentView: View {
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.containerWidth = containerWidth
+        self.contentOpacity = contentOpacity
+        self.isChromeReady = isChromeReady
         self.isMarkdownReady = isMarkdownReady
+        self.isScrollDisabled = isScrollDisabled
         self.onShare = onShare
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
@@ -1388,37 +1400,46 @@ private struct DiscoveryHeroContentView: View {
             VStack(spacing: 0) {
                 Color.clear
                     .frame(height: imageHeight)
-                    .overlay(headerOverlay, alignment: .bottom)
-                    .overlay(headerButtons, alignment: .bottom)
+                    .overlay(headerOverlay(opacity: contentOpacity), alignment: .bottom)
+                    .overlay(headerButtons(opacity: contentOpacity), alignment: .bottom)
 
-                VStack(alignment: .leading, spacing: BrandSpacing.large) {
-                    VoiceoverDetailButton(
-                        discovery: discovery,
-                        controller: voiceoverController,
-                        palette: palette
-                    )
+                if isChromeReady {
+                    VStack(alignment: .leading, spacing: BrandSpacing.large) {
+                        VoiceoverDetailButton(
+                            discovery: discovery,
+                            controller: voiceoverController,
+                            palette: palette
+                        )
 
-                    VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-                        Text(discovery.title)
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(textColor)
+                        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
+                            Text(discovery.title)
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(textColor)
 
-                        detailDescriptionView(isReady: isMarkdownReady)
+                            detailDescriptionView(isReady: isMarkdownReady)
+                        }
                     }
+                    .padding(.top, BrandSpacing.large)
+                    .padding(.horizontal, BrandSpacing.large)
+                    .padding(
+                        .bottom,
+                        BrandSpacing.xLarge * 2 + additionalBottomPadding
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(backgroundColor)
+                    .opacity(contentOpacity)
+                } else {
+                    Rectangle()
+                        .fill(backgroundColor)
+                        .frame(height: BrandSpacing.large)
+                        .frame(maxWidth: .infinity)
                 }
-                .padding(.top, BrandSpacing.large)
-                .padding(.horizontal, BrandSpacing.large)
-                .padding(
-                    .bottom,
-                    BrandSpacing.xLarge * 2 + additionalBottomPadding
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(backgroundColor)
             }
         }
         .id(discovery.id)
         .coordinateSpace(name: "hero-scroll")
         .frame(width: containerWidth)
+        .conditionalScrollDisabled(isScrollDisabled)
         .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
             scrollOffset = max(value, 0)
         }
@@ -1430,59 +1451,68 @@ private struct DiscoveryHeroContentView: View {
         }
     }
 
-    private var headerOverlay: some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
-                gradient: Gradient(stops: [
-                    .init(color: Color.clear, location: 0.0),
-                    .init(color: palette.overlayMidtone, location: 0.7),
-                    .init(color: palette.background, location: 1.0)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
+    private func headerOverlay(opacity: Double) -> some View {
+        Group {
+            if isChromeReady {
+                ZStack(alignment: .bottom) {
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: Color.clear, location: 0.0),
+                            .init(color: palette.overlayMidtone, location: 0.7),
+                            .init(color: palette.background, location: 1.0)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
 
-            VStack(spacing: BrandSpacing.small) {
-                Text(discovery.title)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(palette.textPrimary)
-                    .multilineTextAlignment(.center)
+                    VStack(spacing: BrandSpacing.small) {
+                        Text(discovery.title)
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(palette.textPrimary)
+                            .multilineTextAlignment(.center)
 
-                Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(palette.textSecondary)
+                        Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(palette.textSecondary)
 
-                if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
-                    Text(shortDescription)
-                        .font(.system(size: 14))
-                        .foregroundStyle(palette.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, BrandSpacing.large)
+                        if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
+                            Text(shortDescription)
+                                .font(.system(size: 14))
+                                .foregroundStyle(palette.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, BrandSpacing.large)
+                        }
+                    }
+                    .padding(.bottom, BrandSpacing.xLarge)
+                    .padding(.horizontal, BrandSpacing.large)
+                    .opacity(opacity)
                 }
+            } else {
+                Color.clear
             }
-            .padding(.bottom, BrandSpacing.xLarge)
-            .padding(.horizontal, BrandSpacing.large)
         }
-        .background(Color.clear)
     }
 
     @ViewBuilder
-    private var headerButtons: some View {
-        HStack {
-            if let location = discovery.location {
-                buttonCircle(systemName: "mappin.and.ellipse") {
-                    openInMaps(location: location)
+    private func headerButtons(opacity: Double) -> some View {
+        if isChromeReady {
+            HStack {
+                if let location = discovery.location {
+                    buttonCircle(systemName: "mappin.and.ellipse") {
+                        openInMaps(location: location)
+                    }
+                }
+
+                Spacer()
+
+                if let onShare {
+                    buttonCircle(systemName: "square.and.arrow.up", action: onShare)
                 }
             }
-
-            Spacer()
-
-            if let onShare {
-                buttonCircle(systemName: "square.and.arrow.up", action: onShare)
-            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, 28)
+            .opacity(opacity)
         }
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.bottom, 28)
     }
 
     private func buttonCircle(systemName: String, action: @escaping () -> Void) -> some View {
@@ -1929,6 +1959,17 @@ private struct DiscoveryHeroTopControls: View {
         }
 #endif
         return baseInset + 12
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func conditionalScrollDisabled(_ disabled: Bool) -> some View {
+        if #available(iOS 16.0, *) {
+            scrollDisabled(disabled)
+        } else {
+            self
+        }
     }
 }
 

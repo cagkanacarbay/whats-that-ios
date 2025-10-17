@@ -116,6 +116,7 @@ public enum DiscoveryCreationFlowState: Equatable, Sendable {
 
 public enum DiscoveryAnalysisEvent: Sendable, Equatable {
     case status(String)
+    case metadata(title: String?, shortDescription: String?)
     case token(String)
     case complete(discoveryId: Int64, systemPromptVersion: String?, userPromptVersion: String?)
     case error(message: String)

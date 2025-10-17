@@ -8,6 +8,9 @@ import MapKit
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct DiscoveryDetailView: View {
     let discovery: DiscoverySummary
@@ -22,7 +25,7 @@ struct DiscoveryDetailView: View {
     @State private var isContentVisible = false
     @Environment(\.colorScheme) private var systemColorScheme
 
-    private let headerHeightFactor: CGFloat = 0.72
+    private let headerHeightFactor: CGFloat = 0.8
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: systemColorScheme)
@@ -334,19 +337,48 @@ private struct DiscoveryImagePlaceholderView: View {
     let namespace: Namespace.ID
     let discoveryId: Int64
 
-    @State private var didFail = false
+    @StateObject private var loader: DiscoveryDetailImageLoader
     @Environment(\.colorScheme) private var systemColorScheme
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: systemColorScheme)
     }
 
+    init(
+        imageURL: URL?,
+        height: CGFloat,
+        cornerRadius: CGFloat,
+        namespace: Namespace.ID,
+        discoveryId: Int64
+    ) {
+        self.imageURL = imageURL
+        self.height = height
+        self.cornerRadius = cornerRadius
+        self.namespace = namespace
+        self.discoveryId = discoveryId
+        _loader = StateObject(
+            wrappedValue: DiscoveryDetailImageLoader(
+                discoveryId: discoveryId,
+                remoteURL: imageURL
+            )
+        )
+    }
+
     var body: some View {
         ZStack {
             placeholder
 
-            if let imageURL, !didFail {
-                AsyncImage(url: imageURL) { phase in
+            if let platformImage = loader.image {
+                Image(platformImage: platformImage)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity)
+            } else if loader.isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(palette.primaryAction)
+            } else if loader.didFail, let fallbackURL = imageURL {
+                AsyncImage(url: fallbackURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -355,7 +387,6 @@ private struct DiscoveryImagePlaceholderView: View {
                             .transition(.opacity)
                     case .failure:
                         Color.clear
-                            .onAppear { didFail = true }
                     case .empty:
                         ProgressView()
                             .progressViewStyle(.circular)
@@ -371,6 +402,14 @@ private struct DiscoveryImagePlaceholderView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .contentShape(Rectangle())
         .matchedGeometryEffect(id: geometryId, in: namespace, properties: .frame, anchor: .center, isSource: true)
+        .onAppear {
+            loader.updateRemoteURL(imageURL)
+            loader.loadIfNeeded()
+        }
+        .onChange(of: imageURL) { newValue in
+            loader.updateRemoteURL(newValue)
+            loader.loadIfNeeded()
+        }
     }
 
     private var geometryId: String {
@@ -387,6 +426,110 @@ private struct DiscoveryImagePlaceholderView: View {
             endPoint: .bottomTrailing
         )
     }
+}
+
+#if canImport(UIKit)
+private typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
+private typealias PlatformImage = NSImage
+#endif
+
+@MainActor
+private final class DiscoveryDetailImageLoader: ObservableObject {
+    @Published private(set) var image: PlatformImage?
+    @Published private(set) var isLoading = false
+    @Published private(set) var didFail = false
+
+    private let discoveryId: Int64
+    private let cache: DiscoveryAssetCache
+    private let session: URLSession
+    private var remoteURL: URL?
+
+    init(
+        discoveryId: Int64,
+        remoteURL: URL?,
+        cache: DiscoveryAssetCache = .shared,
+        session: URLSession = .shared
+    ) {
+        self.discoveryId = discoveryId
+        self.remoteURL = remoteURL
+        self.cache = cache
+        self.session = session
+    }
+
+    func updateRemoteURL(_ url: URL?) {
+        guard remoteURL != url else { return }
+        remoteURL = url
+        image = nil
+        didFail = false
+    }
+
+    func loadIfNeeded() {
+        guard image == nil, !isLoading else { return }
+
+        isLoading = true
+
+        Task {
+            await loadImage()
+        }
+    }
+
+    private func loadImage() async {
+        defer { isLoading = false }
+
+        if let cached = await loadCachedImage() {
+            image = cached
+            return
+        }
+
+        guard let remoteURL else {
+            didFail = true
+            return
+        }
+
+        _ = await cache.ensureImageCached(
+            for: discoveryId,
+            signedURL: remoteURL,
+            session: session
+        )
+
+        if let cached = await loadCachedImage() {
+            image = cached
+        } else {
+            didFail = true
+        }
+    }
+
+    private func loadCachedImage() async -> PlatformImage? {
+        guard let fileURL = await cache.cachedImageURL(for: discoveryId) else {
+            return nil
+        }
+
+        do {
+            let data = try await readData(from: fileURL)
+            return PlatformImage(data: data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func readData(from url: URL) async throws -> Data {
+        try await Task.detached(priority: .utility) {
+            try Data(contentsOf: url, options: [.mappedIfSafe])
+        }.value
+    }
+}
+
+private extension Image {
+#if canImport(UIKit)
+    init(platformImage: PlatformImage) {
+        self = Image(uiImage: platformImage)
+    }
+#elseif canImport(AppKit)
+    init(platformImage: PlatformImage) {
+        self = Image(nsImage: platformImage)
+    }
+#endif
 }
 
 private extension String {

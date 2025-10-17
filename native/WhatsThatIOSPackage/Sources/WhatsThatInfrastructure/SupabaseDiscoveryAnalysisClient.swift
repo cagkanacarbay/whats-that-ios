@@ -25,6 +25,15 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
     private let client: SupabaseClient
     private let configuration: AppConfiguration
     private let urlSession: URLSession
+    private let tokenRegex = try? NSRegularExpression(
+        pattern: #"\"text\"\s*:\s*\"((?:\\.|[^"\\])*)\""#,
+        options: []
+    )
+    #if DEBUG
+    private let isDebugLoggingEnabled = true
+    #else
+    private let isDebugLoggingEnabled = false
+    #endif
 
     public init(
         client: SupabaseClient,
@@ -71,10 +80,12 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
                 }
             }
 
-            continuation.onTermination = { _ in
+            continuation.onTermination = { termination in
                 task.cancel()
-                Task {
-                    await cancellationHandler()
+                if case .cancelled = termination {
+                    Task {
+                        await cancellationHandler()
+                    }
                 }
             }
         }
@@ -175,10 +186,29 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         switch eventType {
         case "status":
             if let message = parseMessage(from: dataString) {
+                debugLog("status", dataString)
                 return .status(message)
             }
+        case "metadata":
+            if let info = parseDictionary(from: dataString) {
+                let title = (info["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let short = (info["shortDescription"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                debugLog("metadata", dataString)
+                return .metadata(title: title, shortDescription: short)
+            } else {
+                debugLog("metadata", dataString)
+                return .metadata(title: nil, shortDescription: nil)
+            }
         case "token":
-            return .token(dataString)
+            let tokens = parseTokenText(from: dataString)
+            if tokens.isEmpty {
+                debugLog("token(raw)", dataString)
+                return .token(dataString)
+            } else {
+                let combined = tokens.joined()
+                debugLog("token(parsed)", combined)
+                return .token(tokens.joined())
+            }
         case "complete":
             if let info = parseDictionary(from: dataString),
                let identifier = parseIdentifier(from: info["discoveryId"]) {
@@ -194,6 +224,66 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             return .end
         default:
             break
+        }
+
+        return nil
+    }
+
+    private func debugLog(_ event: String, _ payload: String) {
+        guard isDebugLoggingEnabled else { return }
+        print("[SupabaseDiscoveryAnalysisClient] event=\(event) payload=\(payload)")
+    }
+
+    private func parseTokenText(from data: String) -> [String] {
+        if let dictionary = parseDictionary(from: data) {
+            if let text = dictionary["text"] as? String {
+                return [text]
+            }
+            if
+                let choices = dictionary["choices"] as? [[String: Any]],
+                let firstChoice = choices.first,
+                let delta = firstChoice["delta"] as? [String: Any],
+                let content = delta["content"] as? String
+            {
+                return [content]
+            }
+        }
+
+        guard let tokenRegex else {
+            return data.isEmpty ? [] : [data]
+        }
+
+        let range = NSRange(location: 0, length: (data as NSString).length)
+        var results: [String] = []
+        tokenRegex.enumerateMatches(in: data, options: [], range: range) { match, _, _ in
+            guard let match,
+                  match.numberOfRanges >= 2
+            else {
+                return
+            }
+            let captured = (data as NSString).substring(with: match.range(at: 1))
+            if let decoded = decodeJSONString(captured) {
+                results.append(decoded)
+            } else {
+                results.append(captured)
+            }
+        }
+
+        if results.isEmpty, !data.isEmpty {
+            results.append(data)
+        }
+
+        return results
+    }
+
+    private func decodeJSONString(_ fragment: String) -> String? {
+        let wrapped = "\"\(fragment)\""
+        guard let wrappedData = wrapped.data(using: .utf8) else {
+            return nil
+        }
+
+        if let decoded = try? JSONSerialization.jsonObject(with: wrappedData, options: []) as? String {
+            return decoded
         }
 
         return nil

@@ -21,6 +21,7 @@ struct DiscoveriesHomeView: View {
     @State private var heroContext: DiscoveryHeroContext?
     @State private var heroProgress: CGFloat = 0
     @State private var heroContentOpacity: Double = 0
+    @State private var heroIsSettled = false
     @State private var heroIsClosing = false
     @State private var heroIsInteracting = false
     @State private var heroDragTranslation: CGSize = .zero
@@ -38,7 +39,7 @@ struct DiscoveriesHomeView: View {
     private let gridBottomPadding: CGFloat = 16
     private let heroEdgeActivationWidth: CGFloat = 30
     private let heroDismissalThreshold: CGFloat = 150
-    private let heroContentRevealProgress: CGFloat = 0.92
+    private let heroContentReadyThreshold: CGFloat = 0.995
 
     private var heroDismissalDistance: CGFloat {
 #if canImport(UIKit)
@@ -139,6 +140,7 @@ struct DiscoveriesHomeView: View {
                         context: context,
                         progress: heroProgress,
                         contentOpacity: heroContentOpacity,
+                        isContentReady: heroIsSettled,
                         isClosing: heroIsClosing,
                         gestureTranslation: heroDragTranslation,
                         gestureScale: heroDragScale,
@@ -161,7 +163,7 @@ struct DiscoveriesHomeView: View {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
             }
             .onChange(of: heroProgress) { newValue in
-                updateHeroContentVisibility(for: newValue)
+                updateHeroSettledState(for: newValue)
             }
             .onChange(of: safeBottom) { newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
@@ -244,6 +246,7 @@ struct DiscoveriesHomeView: View {
         )
         heroProgress = 0
         heroContentOpacity = 0
+        heroIsSettled = false
         heroIsClosing = false
         heroIsInteracting = false
         resetHeroInteraction(animated: false)
@@ -295,8 +298,8 @@ struct DiscoveriesHomeView: View {
         heroIsInteracting = false
     }
 
-    private func updateHeroContentVisibility(for progress: CGFloat) {
-        let shouldShow = !heroIsClosing && progress >= heroContentRevealProgress
+    private func updateHeroContentVisibility(for _: CGFloat) {
+        let shouldShow = !heroIsClosing && heroIsSettled
         let targetOpacity: Double = shouldShow ? 1 : 0
         guard heroContentOpacity != targetOpacity else { return }
 
@@ -371,6 +374,7 @@ struct DiscoveriesHomeView: View {
         heroIsInteracting = false
         resetHeroInteraction(animated: true)
         heroIsClosing = true
+        heroIsSettled = false
         updateHeroContentVisibility(for: heroProgress)
 
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.45)) {
@@ -384,10 +388,12 @@ struct DiscoveriesHomeView: View {
                 heroIsClosing = false
                 heroProgress = 0
                 heroContentOpacity = 0
+                heroIsSettled = false
             } else if heroContext == nil {
                 heroIsClosing = false
                 heroProgress = 0
                 heroContentOpacity = 0
+                heroIsSettled = false
             }
 
             heroIsInteracting = false
@@ -395,6 +401,28 @@ struct DiscoveriesHomeView: View {
                 hiddenDiscovery = nil
             }
             voiceoverController.isDetailOverlayActive = false
+        }
+    }
+
+    private func updateHeroSettledState(for progress: CGFloat) {
+        let clamped = max(0, min(progress, 1))
+
+        if heroIsClosing || heroIsInteracting {
+            if heroIsSettled {
+                heroIsSettled = false
+                updateHeroContentVisibility(for: progress)
+            }
+            return
+        }
+
+        if clamped >= heroContentReadyThreshold {
+            if !heroIsSettled {
+                heroIsSettled = true
+                updateHeroContentVisibility(for: progress)
+            }
+        } else if heroIsSettled && clamped < max(heroContentReadyThreshold - 0.05, 0) {
+            heroIsSettled = false
+            updateHeroContentVisibility(for: progress)
         }
     }
 
@@ -1055,6 +1083,7 @@ private struct DiscoveryHeroOverlay: View {
     let context: DiscoveryHeroContext
     let progress: CGFloat
     let contentOpacity: Double
+    let isContentReady: Bool
     let isClosing: Bool
     let gestureTranslation: CGSize
     let gestureScale: CGFloat
@@ -1072,6 +1101,7 @@ private struct DiscoveryHeroOverlay: View {
         context: DiscoveryHeroContext,
         progress: CGFloat,
         contentOpacity: Double,
+        isContentReady: Bool,
         isClosing: Bool,
         gestureTranslation: CGSize,
         gestureScale: CGFloat,
@@ -1088,6 +1118,7 @@ private struct DiscoveryHeroOverlay: View {
         self.context = context
         self.progress = progress
         self.contentOpacity = contentOpacity
+        self.isContentReady = isContentReady
         self.isClosing = isClosing
         self.gestureTranslation = gestureTranslation
         self.gestureScale = gestureScale
@@ -1135,6 +1166,7 @@ private struct DiscoveryHeroOverlay: View {
                 let finalOffsetY = geometry.offset.y + gestureTranslation.height
                 let finalScale = gestureScale
                 let rotationAngle = gestureRotation
+                let shouldRenderDetail = isContentReady || contentOpacity > 0.001
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
@@ -1145,17 +1177,21 @@ private struct DiscoveryHeroOverlay: View {
                     )
                     .offset(y: scrollOffset > 0 ? scrollOffset : 0)
 
-                    DiscoveryHeroContentView(
-                        discovery: context.discovery,
-                        imageHeight: geometry.imageHeight,
-                        backgroundColor: backgroundColor,
-                        colorScheme: colorScheme,
-                        voiceoverController: voiceoverController,
-                        containerWidth: containerWidth,
-                        onShare: onShare,
-                        scrollOffset: $scrollOffset
-                    )
-                    .opacity(contentOpacity)
+                    if shouldRenderDetail {
+                        DiscoveryHeroContentView(
+                            discovery: context.discovery,
+                            imageHeight: geometry.imageHeight,
+                            backgroundColor: backgroundColor,
+                            colorScheme: colorScheme,
+                            voiceoverController: voiceoverController,
+                            containerWidth: containerWidth,
+                            onShare: onShare,
+                            isMarkdownReady: isContentReady,
+                            scrollOffset: $scrollOffset
+                        )
+                        .opacity(contentOpacity)
+                        .transition(.opacity)
+                    }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(backgroundColor)
@@ -1163,14 +1199,16 @@ private struct DiscoveryHeroOverlay: View {
 
                 heroCard
                     .overlay(alignment: .topLeading) {
-                        DiscoveryHeroTopControls(
-                            safeAreaInsets: safeAreaInsets,
-                            onClose: onClose,
-                            onShowOptions: onShowOptions
-                        )
-                        .opacity(contentOpacity)
-                        .animation(.easeInOut(duration: 0.12), value: contentOpacity)
-                        .ignoresSafeArea()
+                        if shouldRenderDetail {
+                            DiscoveryHeroTopControls(
+                                safeAreaInsets: safeAreaInsets,
+                                onClose: onClose,
+                                onShowOptions: onShowOptions
+                            )
+                            .opacity(contentOpacity)
+                            .animation(.easeInOut(duration: 0.12), value: contentOpacity)
+                            .ignoresSafeArea()
+                        }
                     }
                     .shadow(
                         color: Color.black.opacity(combinedShadowOpacity),
@@ -1181,6 +1219,12 @@ private struct DiscoveryHeroOverlay: View {
                     .scaleEffect(finalScale, anchor: .center)
                     .rotation3DEffect(.degrees(rotationAngle), axis: (x: 0, y: 1, z: 0))
                     .offset(x: finalOffsetX, y: finalOffsetY)
+            }
+        }
+        .onChange(of: isClosing) { closing in
+            guard closing, scrollOffset != 0 else { return }
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.2)) {
+                scrollOffset = 0
             }
         }
     }
@@ -1299,6 +1343,7 @@ private struct DiscoveryHeroContentView: View {
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let containerWidth: CGFloat
+    let isMarkdownReady: Bool
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let onShare: (() -> Void)?
     @Binding var scrollOffset: CGFloat
@@ -1311,6 +1356,7 @@ private struct DiscoveryHeroContentView: View {
         voiceoverController: VoiceoverPlaybackController,
         containerWidth: CGFloat,
         onShare: (() -> Void)?,
+        isMarkdownReady: Bool,
         scrollOffset: Binding<CGFloat>
     ) {
         self.discovery = discovery
@@ -1318,6 +1364,7 @@ private struct DiscoveryHeroContentView: View {
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.containerWidth = containerWidth
+        self.isMarkdownReady = isMarkdownReady
         self.onShare = onShare
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
@@ -1356,7 +1403,7 @@ private struct DiscoveryHeroContentView: View {
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(textColor)
 
-                        detailDescriptionView
+                        detailDescriptionView(isReady: isMarkdownReady)
                     }
                 }
                 .padding(.top, BrandSpacing.large)
@@ -1469,17 +1516,19 @@ private struct DiscoveryHeroContentView: View {
     }
 
     @ViewBuilder
-    private var detailDescriptionView: some View {
+    private func detailDescriptionView(isReady: Bool) -> some View {
         if let description = discovery.detailDescription, !description.isEmpty {
-            #if canImport(MarkdownUI)
-            Markdown(description)
-                .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
-                .textSelection(.enabled)
-            #else
-            Text(description)
-                .font(.system(size: 16))
-                .foregroundStyle(palette.textSecondary)
-            #endif
+            if isReady {
+                #if canImport(MarkdownUI)
+                Markdown(description)
+                    .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
+                    .textSelection(.enabled)
+                #else
+                Text(description)
+                    .font(.system(size: 16))
+                    .foregroundStyle(palette.textSecondary)
+                #endif
+            }
         } else {
             Text(discovery.highlight)
                 .font(.system(size: 16))

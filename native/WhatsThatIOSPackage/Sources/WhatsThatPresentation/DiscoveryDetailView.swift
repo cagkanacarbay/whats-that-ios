@@ -81,6 +81,8 @@ struct DiscoveryDetailView: View {
                 .animation(.easeInOut(duration: 0.25), value: isContentVisible)
 
                 headerTopControls(padding: resolvedTopPadding(from: proxy.safeAreaInsets))
+                    .opacity(isContentVisible ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.12), value: isContentVisible)
             }
             .onChange(of: isExpanded) { expanded in
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -222,7 +224,7 @@ struct DiscoveryDetailView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(textColor)
 
-                detailDescriptionView
+                detailDescriptionView(isReady: isContentVisible)
             }
         }
     }
@@ -232,17 +234,21 @@ struct DiscoveryDetailView: View {
     }
 
     @ViewBuilder
-    private var detailDescriptionView: some View {
+    private func detailDescriptionView(isReady: Bool) -> some View {
         if let description = discovery.detailDescription, !description.isEmpty {
-            #if canImport(MarkdownUI)
-            Markdown(description)
-                .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
-                .textSelection(.enabled)
-            #else
-            Text(description)
-                .font(.system(size: 16))
-                .foregroundStyle(palette.textSecondary)
-            #endif
+            if isReady {
+                #if canImport(MarkdownUI)
+                Markdown(description)
+                    .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
+                    .textSelection(.enabled)
+                #else
+                Text(description)
+                    .font(.system(size: 16))
+                    .foregroundStyle(palette.textSecondary)
+                #endif
+            } else {
+                EmptyView()
+            }
         } else {
             Text(discovery.highlight)
                 .font(.system(size: 16))

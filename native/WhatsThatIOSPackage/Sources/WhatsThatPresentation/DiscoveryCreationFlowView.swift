@@ -538,6 +538,12 @@ private struct AnalysisStateView: View {
     @State private var hasScrolledToContent = false
     @Namespace private var detailNamespace
 
+    private enum Layout {
+        static let headerHeightFactor: CGFloat = 0.72
+        static let minimumHeaderHeight: CGFloat = 360
+        static let minimumHeaderWidth: CGFloat = 320
+    }
+
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
     }
@@ -591,7 +597,7 @@ private struct AnalysisStateView: View {
                 ScrollViewReader { scrollProxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            imageSection(height: max(proxy.size.height * 0.78, 360))
+                            imageSection(size: proxy.size)
                             markdownSection
                                 .id(ScrollTarget.markdown)
                         }
@@ -613,6 +619,9 @@ private struct AnalysisStateView: View {
                     }
                     .onChange(of: state.displayMarkdown) { _ in
                         updateDisplayedMarkdown()
+                    }
+                    .onChange(of: state.streamedText) { _ in
+                        evaluateLoaderCleared(with: sanitizedNarrative)
                     }
                     .onChange(of: state.metadataTitle) { _ in
                         evaluateMetadataVisibility()
@@ -698,9 +707,20 @@ private struct AnalysisStateView: View {
             return true
         }
         if !state.isStreaming {
+            let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
+            if visibleLength > 0 {
+                return true
+            }
+            return !state.streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
+        if visibleLength >= AnalysisStateView.streamContentThreshold {
             return true
         }
-        return DiscoveryStreamFormatter.visibleLength(for: text) >= AnalysisStateView.streamContentThreshold
+        if visibleLength >= AnalysisStateView.streamRevealThreshold {
+            return true
+        }
+        return !state.streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func evaluateLoaderCleared(with text: String) {
@@ -792,19 +812,26 @@ private struct AnalysisStateView: View {
     }
 
     @ViewBuilder
-    private func imageSection(height: CGFloat) -> some View {
+    private func imageSection(size: CGSize) -> some View {
+        let height = max(size.height * Layout.headerHeightFactor, Layout.minimumHeaderHeight)
+        let width = max(size.width, Layout.minimumHeaderWidth)
         ZStack(alignment: .bottom) {
             if let image = previewImage {
                 image
                     .resizable()
                     .scaledToFill()
-                    .frame(height: height)
-                    .frame(maxWidth: .infinity)
+                    .frame(width: width, height: height)
                     .clipped()
             } else {
-                Rectangle()
-                    .fill(palette.border.opacity(0.18))
-                    .frame(height: height)
+                LinearGradient(
+                    colors: [
+                        Color(hex: "#20293A"),
+                        Color(hex: "#141927")
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(width: width, height: height)
                     .overlay {
                         VStack(spacing: 10) {
                             Image(systemName: "photo")
@@ -818,44 +845,36 @@ private struct AnalysisStateView: View {
             }
 
             LinearGradient(
-                colors: [
-                    Color.clear,
-                    palette.overlayMidtone,
-                    palette.background
-                ],
+                gradient: Gradient(stops: [
+                    .init(color: Color.clear, location: 0.0),
+                    .init(color: palette.overlayMidtone, location: 0.7),
+                    .init(color: palette.background, location: 1.0)
+                ]),
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: height)
+            .frame(width: width, height: height)
             .allowsHitTesting(false)
 
-            overlayContent
+            overlayContent(width: width)
                 .padding(.horizontal, BrandSpacing.large)
                 .padding(.bottom, BrandSpacing.large * CGFloat(1.2))
         }
+        .frame(width: width, height: height)
+        .clipped()
     }
 
-    private var overlayContent: some View {
-        VStack(spacing: BrandSpacing.medium) {
+    private func overlayContent(width: CGFloat) -> some View {
+        let availableWidth = max(width - (BrandSpacing.large * 2), 0)
+        return VStack(spacing: BrandSpacing.medium) {
             if shouldShowLoader {
                 if !currentLoadingMessage.isEmpty {
-                    HStack(spacing: 0) {
-                        ForEach(Array(currentLoadingMessage.enumerated()), id: \.offset) { index, character in
-                            Text(character == " " ? "\u{00A0}" : String(character))
-                                .font(.system(size: 30, weight: .bold))
-                                .foregroundStyle(Color.white)
-                                .opacity(animateCharacters ? 1 : 0.25)
-                                .animation(
-                                    .interpolatingSpring(stiffness: 160, damping: 16)
-                                        .delay(Double(index) * 0.05),
-                                    value: animateCharacters
-                                )
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-                    .opacity(messageOpacity)
-                    .animation(.easeInOut(duration: 0.35), value: messageOpacity)
+                    LoadingMessageView(
+                        message: currentLoadingMessage,
+                        animateCharacters: animateCharacters,
+                        availableWidth: availableWidth,
+                        opacity: messageOpacity
+                    )
                 }
 
                 if let status = state.statusMessage, !status.isEmpty {
@@ -937,6 +956,7 @@ private struct AnalysisStateView: View {
         "Translating squirrel chatter…"
     ]
 
+    private static let streamRevealThreshold: Int = 12
     private static let streamContentThreshold: Int = 40
 
     private enum ScrollTarget {
@@ -994,6 +1014,56 @@ private struct AnalysisStateView: View {
             .rootViewController
     }
     #endif
+}
+
+private struct LoadingMessageView: View {
+    let message: String
+    let animateCharacters: Bool
+    let availableWidth: CGFloat
+    let opacity: Double
+    private let fontSize: CGFloat = 30
+
+    var body: some View {
+        let scale = scaleFactor(for: availableWidth)
+        return HStack(spacing: 0) {
+            ForEach(Array(message.enumerated()), id: \.offset) { index, character in
+                Text(character == " " ? "\u{00A0}" : String(character))
+                    .font(.system(size: fontSize, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .opacity(animateCharacters ? 1 : 0.25)
+                    .animation(
+                        .interpolatingSpring(stiffness: 160, damping: 16)
+                            .delay(Double(index) * 0.05),
+                        value: animateCharacters
+                    )
+            }
+        }
+        .scaleEffect(scale, anchor: .center)
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
+        .opacity(opacity)
+        .animation(.easeInOut(duration: 0.35), value: opacity)
+    }
+
+    private func scaleFactor(for width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 1 }
+        #if canImport(UIKit)
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+        let textWidth = (message as NSString).size(withAttributes: [.font: font]).width
+        guard textWidth > 0 else { return 1 }
+        if textWidth <= width {
+            return 1
+        }
+        let adjusted = max(width - 12, 0)
+        if adjusted <= 0 {
+            return 0.65
+        }
+        let scaled = adjusted / textWidth
+        return max(0.65, scaled)
+        #else
+        return 1
+        #endif
+    }
 }
 
 private enum DiscoveryStreamFormatter {

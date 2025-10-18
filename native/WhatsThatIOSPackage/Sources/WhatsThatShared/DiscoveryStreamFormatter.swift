@@ -4,8 +4,8 @@ public enum DiscoveryStreamFormatter {
     private static let userResponseDelimiter = "=== USER RESPONSE ==="
     private static let confidencePrefix = "confidence level"
     private static let metadataHeadingRegex = try? NSRegularExpression(
-        pattern: #"###\s*metadata_json"#,
-        options: [.caseInsensitive]
+        pattern: #"^\s*(?:#{1,6}\s*)?metadata_json\b[:\-]?"#,
+        options: [.caseInsensitive, .anchorsMatchLines]
     )
 
     public static func narrative(from source: String) -> String {

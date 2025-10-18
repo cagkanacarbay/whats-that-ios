@@ -60,6 +60,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     @Published private(set) var pushToken: String?
 
     var onDiscoveryCreated: ((Int64) -> Void)?
+    var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
 
     private let configuration: Configuration
     private let captureService: DiscoveryCaptureService
@@ -447,12 +448,38 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             do {
                 let recents = try await self.historyRepository.fetchRecentDiscoveries(limit: max(self.configuration.recentHistoryLimit, 25))
                 guard let summary = recents.first(where: { $0.id == discoveryId }) else { return }
+
+                let capturedData = await MainActor.run { self.currentMedia?.data }
+                if let capturedData {
+                    let storedURL = await DiscoveryAssetCache.shared.storeImageData(
+                        capturedData,
+                        discoveryId: discoveryId
+                    )
+                    await MainActor.run { self.currentMedia = nil }
+
+                    if storedURL == nil,
+                       let path = summary.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       let remoteURL = URL(string: path) {
+                        _ = await DiscoveryAssetCache.shared.ensureImageCached(
+                            for: discoveryId,
+                            signedURL: remoteURL
+                        )
+                    }
+                } else if let path = summary.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          let remoteURL = URL(string: path) {
+                    _ = await DiscoveryAssetCache.shared.ensureImageCached(
+                        for: discoveryId,
+                        signedURL: remoteURL
+                    )
+                }
+
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.analysisState = self.analysisStateUpdated { state in
                         state.discoverySummary = summary
                     }
                     self.syncFlowStateWithAnalysis()
+                    self.onDiscoverySummaryReady?(summary)
                 }
             } catch {
                 // Intentionally ignore fetch errors; the detail view can defer to the feed refresh.

@@ -144,6 +144,17 @@ private extension Array where Element == DiscoverySummary {
     }
 }
 
+public extension DiscoveryFeedViewModel {
+    func upsert(_ summary: DiscoverySummary) {
+        var updated = discoveries.filter { $0.id != summary.id }
+        updated.insert(summary, at: 0)
+        updated.sort { $0.capturedAt > $1.capturedAt }
+        discoveries = updated
+        loadState = discoveries.isEmpty ? .idle : .loaded
+        hasMore = true
+    }
+}
+
 private extension DiscoveryFeedViewModel {
     enum FetchMode {
         case initial

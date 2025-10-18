@@ -13,14 +13,14 @@ public struct DiscoveryAnalysisContent: Equatable, Sendable {
 public struct DiscoveryAnalysisParser: Sendable {
     private static let userResponseDelimiter = "=== USER RESPONSE ==="
     private static let confidencePrefix = "confidence level"
-    private static let metadataHeadingPattern = #"###\s*metadata_json"#
+    private static let metadataHeadingPattern = #"^\s*(?:#{1,6}\s*)?metadata_json\b[:\-]?"#
 
     private let metadataHeadingRegex: NSRegularExpression?
 
     public init() {
         metadataHeadingRegex = try? NSRegularExpression(
             pattern: Self.metadataHeadingPattern,
-            options: [.caseInsensitive]
+            options: [.caseInsensitive, .anchorsMatchLines]
         )
     }
 
@@ -83,27 +83,32 @@ public struct DiscoveryAnalysisParser: Sendable {
         let jsonSubstring = working[jsonRange]
         working.removeSubrange(headingRange.lowerBound..<jsonRange.upperBound)
 
-        guard
+        if
             let data = jsonSubstring.data(using: .utf8),
             let object = try? JSONSerialization.jsonObject(with: data, options: []),
             let dictionary = object as? [String: Any]
-        else {
-            return nil
+        {
+            let title = dictionary["title"].flatMap(Self.stringValue)
+            let shortDescription =
+                dictionary["shortDescription"].flatMap(Self.stringValue)
+                ?? dictionary["short_description"].flatMap(Self.stringValue)
+
+            if title == nil, shortDescription == nil {
+                return nil
+            }
+
+            return DiscoveryAnalysisContent.Metadata(
+                title: title,
+                shortDescription: shortDescription
+            )
         }
 
-        let title = dictionary["title"].flatMap(Self.stringValue)
-        let shortDescription =
-            dictionary["shortDescription"].flatMap(Self.stringValue)
-            ?? dictionary["short_description"].flatMap(Self.stringValue)
-
-        if title == nil, shortDescription == nil {
-            return nil
+        // Fallback: attempt to extract string fields even if other values are invalid JSON.
+        if let fallback = fallbackMetadata(from: jsonSubstring) {
+            return fallback
         }
 
-        return DiscoveryAnalysisContent.Metadata(
-            title: title,
-            shortDescription: shortDescription
-        )
+        return nil
     }
 
     private func jsonBounds(in source: String, searchStart: String.Index) -> Range<String.Index>? {
@@ -138,5 +143,48 @@ public struct DiscoveryAnalysisParser: Sendable {
             return trimmed.isEmpty ? nil : trimmed
         }
         return nil
+    }
+
+    private func fallbackMetadata(from json: Substring) -> DiscoveryAnalysisContent.Metadata? {
+        let source = String(json)
+        let title = captureString(for: "title", in: source)
+        let short =
+            captureString(for: "shortDescription", in: source)
+            ?? captureString(for: "short_description", in: source)
+
+        if title == nil, short == nil {
+            return nil
+        }
+
+        return DiscoveryAnalysisContent.Metadata(
+            title: title,
+            shortDescription: short
+        )
+    }
+
+    private func captureString(for key: String, in source: String) -> String? {
+        let pattern = #"\"\#(key)\"\s*:\s*\"((?:\\.|[^"\\])*)\""#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+
+        let range = NSRange(location: 0, length: (source as NSString).length)
+        guard
+            let match = regex.firstMatch(in: source, options: [], range: range),
+            match.numberOfRanges >= 3
+        else {
+            return nil
+        }
+
+        let captured = (source as NSString).substring(with: match.range(at: 2))
+        let wrapped = "\"\(captured)\""
+        guard let data = wrapped.data(using: .utf8),
+              let decoded = try? JSONSerialization.jsonObject(with: data, options: []) as? String
+        else {
+            return nil
+        }
+
+        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

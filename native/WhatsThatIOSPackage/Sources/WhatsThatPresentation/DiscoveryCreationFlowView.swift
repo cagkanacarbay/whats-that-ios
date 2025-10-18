@@ -7,6 +7,8 @@ import MarkdownUI
 #endif
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 #if canImport(MapKit)
 import MapKit
@@ -19,18 +21,39 @@ struct DiscoveryCreationFlowView: View {
         static let cornerRadius: CGFloat = 20
     }
 
-    @ObservedObject var viewModel: DiscoveryCreationFlowViewModel
+    @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
+    @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let placeholderEmoji: String
     let ctaTitle: String
     let retryTitle: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(
+        viewModel: DiscoveryCreationFlowViewModel,
+        placeholderEmoji: String,
+        ctaTitle: String,
+        retryTitle: String,
+        voiceoverController: VoiceoverPlaybackController
+    ) {
+        _viewModel = ObservedObject(initialValue: viewModel)
+        _voiceoverController = ObservedObject(initialValue: voiceoverController)
+        self.placeholderEmoji = placeholderEmoji
+        self.ctaTitle = ctaTitle
+        self.retryTitle = retryTitle
+    }
 
     var body: some View {
-        VStack(spacing: BrandSpacing.large) {
-            content
+        ZStack {
+            mainContent
+
+            if let finalState = finalDetailState {
+                finalDetailView(for: finalState)
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.vertical, BrandSpacing.large)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(backgroundColor.ignoresSafeArea())
         .alert(
             item: Binding(
                 get: { viewModel.error.map(IdentifiedError.init) },
@@ -43,6 +66,16 @@ struct DiscoveryCreationFlowView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+    }
+
+    private var mainContent: some View {
+        VStack(spacing: BrandSpacing.large) {
+            content
+        }
+        .padding(.horizontal, BrandSpacing.large)
+        .padding(.vertical, BrandSpacing.large)
+        .opacity(finalDetailState == nil ? 1 : 0)
+        .allowsHitTesting(finalDetailState == nil)
     }
 
     @ViewBuilder
@@ -74,13 +107,115 @@ struct DiscoveryCreationFlowView: View {
                 onCancel: { viewModel.cancelFlow() }
             )
         case let .analyzing(state):
-            AnalysisStateView(
-                state: state,
-                imageData: viewModel.confirmationState?.displayImageData,
-                onCancel: { viewModel.cancelFlow() }
-            )
+            makeAnalysisView(for: state)
         }
     }
+
+    private var finalDetailState: DiscoveryAnalysisState? {
+        guard case let .analyzing(state) = viewModel.flowState,
+              state.discoverySummary != nil,
+              !state.isStreaming
+        else { return nil }
+        return state
+    }
+
+    private var backgroundColor: Color {
+        BrandTheme.palette(for: colorScheme).background
+    }
+
+#if canImport(UIKit)
+    private var capturedPreviewImage: UIImage? {
+        viewModel.confirmationState.flatMap { UIImage(data: $0.displayImageData) }
+    }
+#elseif canImport(AppKit)
+    private var capturedPreviewImage: NSImage? {
+        viewModel.confirmationState.flatMap { NSImage(data: $0.displayImageData) }
+    }
+#endif
+
+    private func makeAnalysisView(for state: DiscoveryAnalysisState) -> AnalysisStateView {
+        AnalysisStateView(
+            state: state,
+            imageData: viewModel.confirmationState?.displayImageData,
+            onCancel: { viewModel.cancelFlow() }
+        )
+    }
+
+    private func finalDetailView(for state: DiscoveryAnalysisState) -> some View {
+        GeometryReader { proxy in
+            Group {
+                if let summary = state.discoverySummary {
+                    DiscoveryCreationDetailView(
+                        discovery: summary,
+                        previewImage: capturedPreviewImage,
+                        remoteImageURL: summary.imagePath.flatMap(URL.init(string:)),
+                        voiceoverController: voiceoverController,
+                        onClose: { viewModel.cancelFlow() },
+                        onShare: makeDetailShareAction(for: summary),
+                        onShowOptions: nil
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                } else {
+                    EmptyView()
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            .background(backgroundColor.ignoresSafeArea())
+            .ignoresSafeArea()
+        }
+    }
+
+    private func makeDetailShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
+        guard let shareURL = detailShareURL(for: discovery) else { return nil }
+        return {
+            presentDetailShareSheet(for: discovery, url: shareURL)
+        }
+    }
+
+    private func detailShareURL(for discovery: DiscoverySummary) -> URL? {
+        if let token = discovery.shareToken {
+            return URL(string: "https://whats-that.app/\(token.uuidString)")
+        }
+
+        if let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !path.isEmpty,
+           let url = URL(string: path) {
+            return url
+        }
+
+        return nil
+    }
+
+    private func presentDetailShareSheet(for discovery: DiscoverySummary, url: URL) {
+        #if canImport(UIKit)
+        let message = [
+            discovery.title,
+            discovery.shortDescription ?? discovery.highlight
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n\n")
+
+        let items: [Any] = message.isEmpty ? [url] : [message, url]
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+
+        guard let root = keyWindowRootViewController() else { return }
+        DispatchQueue.main.async {
+            root.present(controller, animated: true)
+        }
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private func keyWindowRootViewController() -> UIViewController? {
+        UIApplication.shared
+            .connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })?
+            .rootViewController
+    }
+    #endif
 }
 
 private struct IdleStateView: View {
@@ -536,12 +671,18 @@ private struct AnalysisStateView: View {
     @State private var messageTimer: Timer?
     @State private var metadataVisible: Bool = false
     @State private var hasScrolledToContent = false
-    @Namespace private var detailNamespace
 
     private enum Layout {
         static let headerHeightFactor: CGFloat = 0.72
         static let minimumHeaderHeight: CGFloat = 360
         static let minimumHeaderWidth: CGFloat = 320
+    }
+
+    private enum AnimationConstants {
+        static let minimumCharacterDelay: Double = 0.002
+        static let maximumCharacterDelay: Double = 0.02
+        static let speedMultiplier: Double = 1.0 / 3.0
+        static let minimumAcceleratedDelay = minimumCharacterDelay * speedMultiplier
     }
 
     #if DEBUG
@@ -587,74 +728,57 @@ private struct AnalysisStateView: View {
     }
 
     var body: some View {
-        if let summary = state.discoverySummary, !state.isStreaming {
-            DiscoveryDetailView(
-                discovery: summary,
-                imageURL: summary.imagePath.flatMap(URL.init(string:)),
-                namespace: detailNamespace,
-                isExpanded: true,
-                onClose: onCancel,
-                onShare: makeShareAction(for: summary),
-                onShowOptions: nil,
-                onPlayAudio: nil
-            )
-            .background(palette.background.ignoresSafeArea())
-            .onAppear {
-                stopMessageRotation()
-            }
-        } else {
-            GeometryReader { proxy in
-                ScrollViewReader { scrollProxy in
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            imageSection(size: proxy.size)
-                            markdownSection
-                                .id(ScrollTarget.markdown)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        GeometryReader { proxy in
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        imageSection(size: proxy.size)
+                        markdownSection
+                            .id(ScrollTarget.markdown)
                     }
-                    .background(palette.background.ignoresSafeArea())
-                    .onAppear {
-                        resetStateForInitialRender()
-                        startMessageRotationIfNeeded()
-                        if loaderCleared {
-                            DispatchQueue.main.async {
-                                scrollToContent(using: scrollProxy, animated: false)
-                            }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(palette.background.ignoresSafeArea())
+                .onAppear {
+                    resetStateForInitialRender()
+                    startMessageRotationIfNeeded()
+                    if loaderCleared {
+                        DispatchQueue.main.async {
+                            scrollToContent(using: scrollProxy, animated: false)
                         }
                     }
-                    .onDisappear {
-                        markdownAnimationTask?.cancel()
+                }
+                .onDisappear {
+                    markdownAnimationTask?.cancel()
+                    stopMessageRotation()
+                }
+                .onChange(of: state.displayMarkdown) { _ in
+                    updateDisplayedMarkdown()
+                }
+                .onChange(of: state.streamedText) { _ in
+                    evaluateLoaderCleared(with: currentMarkdown)
+                }
+                .onChange(of: state.metadataTitle) { _ in
+                    evaluateMetadataVisibility()
+                    evaluateLoaderCleared(with: displayedMarkdown)
+                }
+                .onChange(of: state.metadataShortDescription) { _ in
+                    evaluateMetadataVisibility()
+                    evaluateLoaderCleared(with: displayedMarkdown)
+                }
+                .onChange(of: state.isStreaming) { isStreaming in
+                    if !isStreaming {
+                        loaderCleared = true
+                    }
+                }
+                .onChange(of: loaderCleared) { cleared in
+                    debugLog("loaderCleared changed -> \(cleared)")
+                    if cleared {
                         stopMessageRotation()
-                    }
-                    .onChange(of: state.displayMarkdown) { _ in
-                        updateDisplayedMarkdown()
-                    }
-                    .onChange(of: state.streamedText) { _ in
-                        evaluateLoaderCleared(with: currentMarkdown)
-                    }
-                    .onChange(of: state.metadataTitle) { _ in
-                        evaluateMetadataVisibility()
-                        evaluateLoaderCleared(with: displayedMarkdown)
-                    }
-                    .onChange(of: state.metadataShortDescription) { _ in
-                        evaluateMetadataVisibility()
-                        evaluateLoaderCleared(with: displayedMarkdown)
-                    }
-                    .onChange(of: state.isStreaming) { isStreaming in
-                        if !isStreaming {
-                            loaderCleared = true
-                        }
-                    }
-                    .onChange(of: loaderCleared) { cleared in
-                        debugLog("loaderCleared changed -> \(cleared)")
-                        if cleared {
-                            stopMessageRotation()
-                            scrollToContent(using: scrollProxy)
-                        } else {
-                            hasScrolledToContent = false
-                            startMessageRotationIfNeeded()
-                        }
+                        scrollToContent(using: scrollProxy)
+                    } else {
+                        hasScrolledToContent = false
+                        startMessageRotationIfNeeded()
                     }
                 }
             }
@@ -810,8 +934,15 @@ private struct AnalysisStateView: View {
 
     private func animationDelay(for count: Int) -> UInt64 {
         let characters = max(1, count)
-        let perCharacter = min(0.08, max(0.014, 0.9 / Double(characters)))
-        return UInt64(perCharacter * 1_000_000_000)
+        let baseDelay = min(
+            AnimationConstants.maximumCharacterDelay,
+            max(AnimationConstants.minimumCharacterDelay, 0.3 / Double(characters))
+        )
+        let acceleratedDelay = max(
+            AnimationConstants.minimumAcceleratedDelay,
+            baseDelay * AnimationConstants.speedMultiplier
+        )
+        return UInt64(acceleratedDelay * 1_000_000_000)
     }
 
     private func scrollToContent(using proxy: ScrollViewProxy, animated: Bool = true) {

@@ -14,7 +14,10 @@ struct MainTabView: View {
     @StateObject private var voiceoverController: VoiceoverPlaybackController
     @State private var feedRefreshToken = UUID()
     @State private var pendingDiscoveryId: Int64?
+    @State private var pendingCreatedSummary: DiscoverySummary?
     @State private var needsFeedRefresh = false
+    @State private var awaitingSummaryId: Int64?
+    @State private var summaryFallbackTask: Task<Void, Never>?
 
     private let feedUseCase: DiscoveryFeedUseCase
     private let onSignOut: () -> Void
@@ -42,7 +45,8 @@ struct MainTabView: View {
                 viewModel: cameraViewModel,
                 placeholderEmoji: "📷",
                 ctaTitle: "Take a photo to discover",
-                retryTitle: "Try again"
+                retryTitle: "Try again",
+                voiceoverController: voiceoverController
             )
             .tag(Tab.camera)
             .tabItem {
@@ -53,6 +57,7 @@ struct MainTabView: View {
                 feedUseCase: feedUseCase,
                 voiceoverController: voiceoverController,
                 pendingDiscoveryId: $pendingDiscoveryId,
+                pendingCreatedSummary: $pendingCreatedSummary,
                 onSignOut: onSignOut,
                 onSettings: onSettings
             )
@@ -66,7 +71,8 @@ struct MainTabView: View {
                 viewModel: uploadViewModel,
                 placeholderEmoji: "📤",
                 ctaTitle: "Upload a photo to analyze",
-                retryTitle: "Select again"
+                retryTitle: "Select again",
+                voiceoverController: voiceoverController
             )
             .tag(Tab.upload)
             .tabItem {
@@ -76,6 +82,11 @@ struct MainTabView: View {
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
             uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
+            cameraViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
+            uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
+        }
+        .onDisappear {
+            summaryFallbackTask?.cancel()
         }
         .onChange(of: selectedTab) { newValue in
             switch newValue {
@@ -98,6 +109,24 @@ struct MainTabView: View {
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {
         pendingDiscoveryId = discoveryId
-        needsFeedRefresh = true
+        awaitingSummaryId = discoveryId
+        summaryFallbackTask?.cancel()
+        summaryFallbackTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if awaitingSummaryId == discoveryId {
+                    needsFeedRefresh = true
+                }
+            }
+        }
+    }
+
+    private func handleDiscoverySummaryReady(_ summary: DiscoverySummary) {
+        summaryFallbackTask?.cancel()
+        awaitingSummaryId = nil
+        pendingCreatedSummary = summary
+        pendingDiscoveryId = summary.id
+        needsFeedRefresh = false
     }
 }

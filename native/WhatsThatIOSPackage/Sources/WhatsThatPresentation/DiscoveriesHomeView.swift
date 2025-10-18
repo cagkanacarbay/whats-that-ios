@@ -12,6 +12,7 @@ struct DiscoveriesHomeView: View {
     private let feedUseCase: DiscoveryFeedUseCase
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var pendingDiscoveryId: Int64?
+    @Binding private var pendingCreatedSummary: DiscoverySummary?
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
 
@@ -59,12 +60,14 @@ struct DiscoveriesHomeView: View {
         feedUseCase: DiscoveryFeedUseCase,
         voiceoverController: VoiceoverPlaybackController,
         pendingDiscoveryId: Binding<Int64?>,
+        pendingCreatedSummary: Binding<DiscoverySummary?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self._voiceoverController = ObservedObject(initialValue: voiceoverController)
         self._pendingDiscoveryId = pendingDiscoveryId
+        self._pendingCreatedSummary = pendingCreatedSummary
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
@@ -131,6 +134,11 @@ struct DiscoveriesHomeView: View {
                 }
                 .onChange(of: pendingDiscoveryId) { _ in
                     presentPendingDiscoveryIfNeeded()
+                }
+                .onChange(of: pendingCreatedSummary) { summary in
+                    guard let summary else { return }
+                    viewModel.upsert(summary)
+                    pendingCreatedSummary = nil
                 }
 
                 header(opacity: headerOpacity)
@@ -240,7 +248,8 @@ struct DiscoveriesHomeView: View {
             discovery: discovery,
             imageURL: resolvedImageURL,
             startFrame: resolvedFrame,
-            placeholderImage: snapshot
+            placeholderImage: snapshot,
+            cardAspectRatio: resolvedFrame.height / max(resolvedFrame.width, 1)
         )
         heroProgress = 0
         heroContentOpacity = 0
@@ -425,20 +434,32 @@ struct DiscoveriesHomeView: View {
     }
 
     private func makeShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
-        guard let shareURL = shareURL(for: discovery) else { return nil }
+        guard discovery.shareToken != nil || discovery.imagePath != nil else {
+            return nil
+        }
 
         return {
-            presentShareSheet(for: discovery, url: shareURL)
+            Task {
+                guard let shareURL = await resolveShareURL(for: discovery) else { return }
+                await MainActor.run {
+                    presentShareSheet(for: discovery, url: shareURL)
+                }
+            }
         }
     }
 
-    private func shareURL(for discovery: DiscoverySummary) -> URL? {
+    private func resolveShareURL(for discovery: DiscoverySummary) async -> URL? {
         if let token = discovery.shareToken {
             return URL(string: "https://whats-that.app/\(token.uuidString)")
         }
 
-        if let path = discovery.imagePath {
-            return URL(string: path)
+        if let cached = await DiscoveryAssetCache.shared.cachedImageURL(for: discovery.id) {
+            return cached
+        }
+
+        if let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: path) {
+            return url
         }
 
         return nil
@@ -925,30 +946,7 @@ private struct DiscoveryCard: View {
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(borderColor, lineWidth: 0.3)
                 }
-
-                VStack(spacing: 4) {
-                    Text(discovery.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.white)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .shadow(color: Color.black.opacity(0.6), radius: 3, x: 0, y: 1)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0),
-                            Color.black.opacity(0.25),
-                            Color.black.opacity(0.4)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                DiscoveryCardChrome(discovery: discovery)
             }
             .frame(width: width, height: height)
         }
@@ -971,30 +969,28 @@ private struct DiscoveryCardImage: View {
     let url: URL?
     let width: CGFloat
     let height: CGFloat
-    @State private var didFail = false
-    @State private var cached = false
+    @State private var didCacheSnapshot = false
 
     var body: some View {
-        ZStack {
-            placeholder
+        DiscoveryCachedImage(
+            discoveryId: discoveryId,
+            remoteURL: url
+        ) { phase in
+            ZStack {
+                placeholder
 
-            if let url, !didFail {
-                AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .onAppear {
-                                cacheIfNeeded(image: image)
-                            }
-                    case .failure:
-                        Color.clear.onAppear { didFail = true }
-                    case .empty:
-                        EmptyView()
-                    @unknown default:
-                        EmptyView()
-                    }
+                switch phase {
+                case .success(let platformImage):
+                    Image(uiImage: platformImage)
+                        .resizable()
+                        .scaledToFill()
+                        .onAppear {
+                            cacheIfNeeded(image: platformImage)
+                        }
+                case .loading, .empty:
+                    EmptyView()
+                case .failure:
+                    EmptyView()
                 }
             }
         }
@@ -1003,23 +999,36 @@ private struct DiscoveryCardImage: View {
         .clipped()
     }
 
-    private func cacheIfNeeded(image: Image) {
-        guard !cached else { return }
-        cached = true
+    private func cacheIfNeeded(image: DiscoveryPlatformImage) {
+        guard !didCacheSnapshot else { return }
+        didCacheSnapshot = true
 
-        let rendered = image
-            .resizable()
-            .scaledToFill()
-            .frame(width: width, height: height)
-            .clipped()
+#if canImport(UIKit)
+        let rendererFormat = UIGraphicsImageRendererFormat.default()
+        rendererFormat.scale = UIScreen.main.scale
+        let targetSize = CGSize(width: width, height: height)
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: rendererFormat)
+        let snapshot = renderer.image { _ in
+            UIColor.clear.setFill()
+            UIBezierPath(rect: CGRect(origin: .zero, size: targetSize)).fill()
 
-        let renderer = ImageRenderer(content: rendered)
-        renderer.proposedSize = ProposedViewSize(width: width, height: height)
-        renderer.scale = UIScreen.main.scale
+            let sourceSize = image.size
+            guard sourceSize.width > 0 && sourceSize.height > 0 else {
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+                return
+            }
 
-        if let snapshot = renderer.uiImage {
-            DiscoveryHeroImageCache.shared.store(snapshot, for: discoveryId)
+            let scale = max(targetSize.width / sourceSize.width, targetSize.height / sourceSize.height)
+            let scaledSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+            let origin = CGPoint(
+                x: (targetSize.width - scaledSize.width) / 2,
+                y: (targetSize.height - scaledSize.height) / 2
+            )
+            let drawRect = CGRect(origin: origin, size: scaledSize)
+            image.draw(in: drawRect)
         }
+        DiscoveryHeroImageCache.shared.store(snapshot, for: discoveryId)
+#endif
     }
 
     private var placeholder: some View {
@@ -1041,12 +1050,43 @@ private struct DiscoveryCardImage: View {
         }
     }
 }
+
+private struct DiscoveryCardChrome: View {
+    let discovery: DiscoverySummary
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(discovery.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .shadow(color: Color.black.opacity(0.6), radius: 3, x: 0, y: 1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0),
+                    Color.black.opacity(0.25),
+                    Color.black.opacity(0.4)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+}
 private struct DiscoveryHeroContext: Identifiable {
     let sessionId: UUID
     let discovery: DiscoverySummary
     let imageURL: URL?
     let startFrame: CGRect
     let placeholderImage: UIImage?
+    let cardAspectRatio: CGFloat
 
     var id: UUID { sessionId }
 }
@@ -1148,6 +1188,7 @@ private struct DiscoveryHeroOverlay: View {
                 startFrame: context.startFrame,
                 containerSize: containerSize,
                 containerOrigin: CGPoint(x: 0, y: containerFrame.origin.y),
+                targetAspectRatio: context.cardAspectRatio,
                 progress: progress
             )
             let safeAreaInsets = proxy.safeAreaInsets
@@ -1174,11 +1215,18 @@ private struct DiscoveryHeroOverlay: View {
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
+                        discoveryId: context.discovery.id,
                         imageURL: context.imageURL,
                         placeholderImage: context.placeholderImage,
                         height: geometry.imageHeight,
                         pullDownOffset: max(scrollOffset, 0)
                     )
+                    .overlay(alignment: .bottom) {
+                        DiscoveryCardChrome(discovery: context.discovery)
+                            .frame(width: geometry.size.width)
+                            .opacity(cardChromeOpacity(for: progress, isClosing: isClosing))
+                            .allowsHitTesting(false)
+                    }
                     .offset(y: scrollOffset > 0 ? scrollOffset : 0)
 
                     DiscoveryHeroContentView(
@@ -1192,7 +1240,7 @@ private struct DiscoveryHeroOverlay: View {
                         contentOpacity: detailOpacity,
                         isChromeReady: isChromeReady,
                         isMarkdownReady: isChromeReady,
-                        isScrollDisabled: isInteracting || isClosing,
+                        isScrollDisabled: !isChromeReady || isInteracting || isClosing,
                         scrollOffset: $scrollOffset
                     )
                 }
@@ -1245,6 +1293,13 @@ private struct DiscoveryHeroOverlay: View {
         }
     }
 
+    private func cardChromeOpacity(for progress: CGFloat, isClosing: Bool) -> Double {
+        if isClosing { return 0 }
+
+        let clamped = max(0, min(progress, 1))
+        return clamped < 0.001 ? 1 : 0
+    }
+
     private struct HeroGeometry {
         let size: CGSize
         let offset: CGPoint
@@ -1254,7 +1309,7 @@ private struct DiscoveryHeroOverlay: View {
         let shadowRadius: CGFloat
         let shadowYOffset: CGFloat
 
-        init(startFrame: CGRect, containerSize: CGSize, containerOrigin: CGPoint, progress: CGFloat) {
+        init(startFrame: CGRect, containerSize: CGSize, containerOrigin: CGPoint, targetAspectRatio: CGFloat, progress: CGFloat) {
             let clamped = max(0, min(progress, 1))
             let startX = startFrame.minX - containerOrigin.x
             let startY = startFrame.minY - containerOrigin.y
@@ -1262,8 +1317,11 @@ private struct DiscoveryHeroOverlay: View {
             let height = HeroGeometry.lerp(startFrame.height, containerSize.height, clamped)
             let x = HeroGeometry.lerp(startX, 0, clamped)
             let y = HeroGeometry.lerp(startY, 0, clamped)
-            let headerHeightFactor: CGFloat = 0.8
-            let targetImageHeight = containerSize.height * headerHeightFactor
+            let aspectRatio = targetAspectRatio.isFinite && targetAspectRatio > 0.1
+                ? targetAspectRatio
+                : startFrame.height / max(startFrame.width, 1)
+            let resolvedTargetHeight = min(containerSize.height, containerSize.width * aspectRatio)
+            let targetImageHeight = max(startFrame.height, resolvedTargetHeight)
             let imageHeight = HeroGeometry.lerp(startFrame.height, targetImageHeight, clamped)
 
             self.size = CGSize(width: width, height: height)
@@ -1292,38 +1350,48 @@ private struct DiscoveryHeroOverlay: View {
 }
 
 private struct DiscoveryHeroImageView: View {
+    let discoveryId: Int64
     let imageURL: URL?
     let placeholderImage: UIImage?
     let height: CGFloat
     let pullDownOffset: CGFloat
-    @State private var didFail = false
-    @State private var hasLoaded = false
 
     var body: some View {
-        ZStack {
-            if let placeholderImage, !hasLoaded {
+        DiscoveryCachedImage(
+            discoveryId: discoveryId,
+            remoteURL: imageURL
+        ) { phase in
+            Group {
+                switch phase {
+                case .success(let platformImage):
+                    Image(uiImage: platformImage)
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    placeholderView
+                case .loading, .empty:
+                    if let placeholderImage {
+                        Image(uiImage: placeholderImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        placeholderView
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height + pullDownOffset)
+        .clipped()
+    }
+
+    private var placeholderView: some View {
+        Group {
+            if let placeholderImage {
                 Image(uiImage: placeholderImage)
                     .resizable()
                     .scaledToFill()
-            }
-
-            if let imageURL, !didFail {
-                AsyncImage(url: imageURL, transaction: Transaction(animation: .none)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .onAppear { hasLoaded = true }
-                    case .failure:
-                        Color.clear.onAppear { didFail = true }
-                    case .empty:
-                        EmptyView()
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-            } else if !hasLoaded {
+            } else {
                 LinearGradient(
                     gradient: Gradient(colors: [
                         Color(hex: "#20293A"),
@@ -1334,9 +1402,6 @@ private struct DiscoveryHeroImageView: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: height + pullDownOffset)
-        .clipped()
     }
 }
 
@@ -1586,114 +1651,6 @@ private struct HeroScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
-private struct VoiceoverDetailButton: View {
-    let discovery: DiscoverySummary
-    @ObservedObject private var controller: VoiceoverPlaybackController
-    let palette: BrandTheme.Palette
-
-    init(discovery: DiscoverySummary, controller: VoiceoverPlaybackController, palette: BrandTheme.Palette) {
-        self.discovery = discovery
-        self.palette = palette
-        _controller = ObservedObject(initialValue: controller)
-    }
-
-    var body: some View {
-        Button(action: { controller.togglePlayback(for: discovery) }) {
-            HStack(spacing: BrandSpacing.small) {
-                if isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(palette.overlayButtonForeground)
-                } else {
-                    Image(systemName: playbackIconName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(palette.overlayButtonForeground.opacity(iconOpacity))
-                }
-
-                Text(buttonTitle)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(palette.overlayButtonForeground.opacity(titleOpacity))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(buttonBackground)
-            .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(isLoading)
-    }
-
-    private var asset: DiscoveryVoiceoverAsset? {
-        controller.assetStates[discovery.id]
-    }
-
-    private var isLoading: Bool {
-        controller.isLoading(discoveryId: discovery.id) && asset == nil
-    }
-
-    private var isUnavailable: Bool {
-        asset?.status == .missing
-    }
-
-    private var playbackIconName: String {
-        switch controller.playbackState {
-        case let .playing(id) where id == discovery.id:
-            return "pause.fill"
-        case let .paused(id) where id == discovery.id:
-            return "play.fill"
-        case let .failed(id, _ ) where id == discovery.id:
-            return "arrow.clockwise"
-        default:
-            return "play.fill"
-        }
-    }
-
-    private var buttonTitle: String {
-        if isLoading {
-            return "Loading narration..."
-        }
-
-        if let playback = controller.playbackState.discoveryId,
-           playback == discovery.id {
-            switch controller.playbackState {
-            case .playing:
-                return "Pause Audio"
-            case .paused:
-                return "Resume Audio"
-            case .failed:
-                return "Retry Audio"
-            default:
-                break
-            }
-        }
-
-        if isUnavailable {
-            return "Narration unavailable"
-        }
-
-        if case let .failed(id, _) = controller.playbackState, id == discovery.id {
-            return "Retry Audio"
-        }
-
-        return "Play Audio Narration"
-    }
-
-    private var buttonBackground: some View {
-        palette.primaryAction
-            .opacity(isUnavailable ? 0.55 : 1.0)
-    }
-
-    private var iconOpacity: Double {
-        isUnavailable ? 0.7 : 1.0
-    }
-
-    private var titleOpacity: Double {
-        isUnavailable ? 0.75 : 1.0
-    }
-}
-
 private struct VoiceoverPlayerBar: View {
     @ObservedObject private var controller: VoiceoverPlaybackController
     let discovery: DiscoverySummary
@@ -1795,32 +1752,35 @@ private struct VoiceoverPlayerBar: View {
                 .fill(Color.gray.opacity(0.25))
 
             if let imageURL {
-                AsyncImage(url: imageURL) { phase in
+                DiscoveryCachedImage(
+                    discoveryId: discovery.id,
+                    remoteURL: imageURL
+                ) { phase in
                     switch phase {
-                    case .success(let image):
-                        image
+                    case .success(let platformImage):
+                        Image(uiImage: platformImage)
                             .resizable()
                             .scaledToFill()
                     case .failure:
-                        Image(systemName: "waveform")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Color.secondary)
-                    case .empty:
+                        fallbackIcon
+                    case .loading, .empty:
                         ProgressView()
                             .progressViewStyle(.circular)
-                    @unknown default:
-                        EmptyView()
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                Image(systemName: "waveform")
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color.secondary)
+                fallbackIcon
             }
         }
         .frame(width: 60, height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var fallbackIcon: some View {
+        Image(systemName: "waveform")
+            .font(.system(size: 18))
+            .foregroundStyle(Color.secondary)
     }
 
     private var sliderRangeUpperBound: Double {

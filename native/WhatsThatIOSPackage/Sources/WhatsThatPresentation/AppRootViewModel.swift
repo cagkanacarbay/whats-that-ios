@@ -1,5 +1,6 @@
 import Foundation
 import WhatsThatDomain
+import WhatsThatShared
 
 @MainActor
 public final class AppRootViewModel: ObservableObject {
@@ -22,6 +23,10 @@ public final class AppRootViewModel: ObservableObject {
         self.authUseCase = authUseCase
         self.onboardingUseCase = onboardingUseCase
         self.flowResolver = flowResolver
+
+        Task(priority: .utility) {
+            await DiscoveryAssetCache.shared.purgeExpiredEntries()
+        }
 
         Task {
             await bootstrap()
@@ -114,6 +119,7 @@ public final class AppRootViewModel: ObservableObject {
 
     public func signOut() async throws {
         try await authUseCase.signOut()
+        await DiscoveryAssetCache.shared.clearAll()
         updateFlow(session: .signedOut)
     }
 

@@ -1212,6 +1212,7 @@ private struct DiscoveryHeroOverlay: View {
                 let rotationAngle = gestureRotation
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
+                let cardHeight = isChromeReady ? geometry.size.height : geometry.imageHeight
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
@@ -1244,7 +1245,7 @@ private struct DiscoveryHeroOverlay: View {
                         scrollOffset: $scrollOffset
                     )
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                .frame(width: geometry.size.width, height: cardHeight)
                 .background(backgroundColor)
                 .clipShape(RoundedRectangle(cornerRadius: combinedCornerRadius, style: .continuous))
 
@@ -1270,6 +1271,7 @@ private struct DiscoveryHeroOverlay: View {
                     .scaleEffect(finalScale, anchor: .center)
                     .rotation3DEffect(.degrees(rotationAngle), axis: (x: 0, y: 1, z: 0))
                     .offset(x: finalOffsetX, y: finalOffsetY)
+                    .animation(.easeInOut(duration: 0.24), value: isChromeReady)
             }
         }
         .onChange(of: isClosing) { closing in
@@ -1493,11 +1495,6 @@ private struct DiscoveryHeroContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(backgroundColor)
                     .opacity(contentOpacity)
-                } else {
-                    Rectangle()
-                        .fill(backgroundColor)
-                        .frame(height: BrandSpacing.large)
-                        .frame(maxWidth: .infinity)
                 }
             }
         }

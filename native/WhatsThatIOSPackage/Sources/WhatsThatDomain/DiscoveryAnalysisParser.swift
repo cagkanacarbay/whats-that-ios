@@ -45,7 +45,11 @@ public struct DiscoveryAnalysisParser: Sendable {
             }
         }
 
-        let metadataResult = extractMetadata(from: &working)
+        var metadataResult = extractMetadata(from: &working)
+        // If no explicit metadata section was found, attempt an inline JSON extraction.
+        if metadataResult == nil {
+            metadataResult = extractInlineMetadata(from: &working)
+        }
         working = working.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let headingRange = working.range(of: #"##\s+"#, options: .regularExpression) {
@@ -109,6 +113,61 @@ public struct DiscoveryAnalysisParser: Sendable {
         }
 
         return nil
+    }
+
+    // Some streams may emit the metadata JSON early without the `metadata_json` heading.
+    // This fallback scans for a JSON object that contains `title` and/or `shortDescription`
+    // and removes it from the working string while returning the parsed fields.
+    private func extractInlineMetadata(from working: inout String) -> DiscoveryAnalysisContent.Metadata? {
+        guard let jsonRange = inlineMetadataJSONRange(in: working) else {
+            return nil
+        }
+
+        let jsonSubstring = working[jsonRange]
+
+        // Remove JSON from the narrative body, also trim any trailing comma and whitespace.
+        var removalEnd = jsonRange.upperBound
+        if removalEnd < working.endIndex, working[removalEnd] == "," {
+            removalEnd = working.index(after: removalEnd)
+        }
+        working.removeSubrange(jsonRange.lowerBound..<removalEnd)
+
+        // Parse into dictionary and extract fields.
+        if let data = String(jsonSubstring).data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data, options: []),
+           let dictionary = object as? [String: Any] {
+            let title = dictionary["title"].flatMap(Self.stringValue)
+            let short =
+                dictionary["shortDescription"].flatMap(Self.stringValue)
+                ?? dictionary["short_description"].flatMap(Self.stringValue)
+
+            if title == nil, short == nil { return nil }
+            return DiscoveryAnalysisContent.Metadata(title: title, shortDescription: short)
+        }
+
+        // Best-effort fallback for partially-streamed JSON content.
+        if let fallback = fallbackMetadata(from: jsonSubstring) {
+            return fallback
+        }
+        return nil
+    }
+
+    private func inlineMetadataJSONRange(in source: String) -> Range<String.Index>? {
+        // Find likely metadata keys first
+        let candidates = ["\"title\"", "\"shortDescription\"", "\"short_description\""]
+        guard let keyRange = candidates
+            .compactMap({ source.range(of: $0) })
+            .sorted(by: { $0.lowerBound < $1.lowerBound })
+            .first
+        else {
+            return nil
+        }
+
+        // Walk backwards from key to the nearest '{'
+        guard let openBrace = source[..<keyRange.lowerBound].lastIndex(of: "{") else {
+            return nil
+        }
+        return jsonBounds(in: source, searchStart: openBrace)
     }
 
     private func jsonBounds(in source: String, searchStart: String.Index) -> Range<String.Index>? {

@@ -64,14 +64,26 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
                     }
 
                     var buffer = Data()
+                    var streamedText = ""
+                    var didEmitMetadata = false
 
                     for try await chunk in bytes {
                         buffer.append(chunk)
-                        try await parseAvailableEvents(from: &buffer, continuation: continuation)
+                        try await parseAvailableEvents(
+                            from: &buffer,
+                            continuation: continuation,
+                            streamedText: &streamedText,
+                            didEmitMetadata: &didEmitMetadata
+                        )
                     }
 
                     if !buffer.isEmpty {
-                        try await parseAvailableEvents(from: &buffer, continuation: continuation)
+                        try await parseAvailableEvents(
+                            from: &buffer,
+                            continuation: continuation,
+                            streamedText: &streamedText,
+                            didEmitMetadata: &didEmitMetadata
+                        )
                     }
 
                     continuation.finish()
@@ -149,7 +161,9 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
 
     private func parseAvailableEvents(
         from buffer: inout Data,
-        continuation: AsyncThrowingStream<DiscoveryAnalysisEvent, Error>.Continuation
+        continuation: AsyncThrowingStream<DiscoveryAnalysisEvent, Error>.Continuation,
+        streamedText: inout String,
+        didEmitMetadata: inout Bool
     ) async throws {
         let delimiter = Data("\n\n".utf8)
 
@@ -162,6 +176,23 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             }
 
             continuation.yield(event)
+
+            // Opportunistically emit a metadata event as soon as we can parse it from
+            // the token stream, mirroring the RN client's behavior. This lets the UI
+            // show title/shortDescription immediately rather than waiting for the server
+            // 'metadata' event (which arrives much later).
+            if case let .token(tokenText) = event {
+                streamedText.append(tokenText)
+                if didEmitMetadata == false {
+                    let parser = DiscoveryAnalysisParser()
+                    if let content = parser.parse(streamedText),
+                       let title = content.metadata?.title, !title.isEmpty,
+                       let short = content.metadata?.shortDescription, !short.isEmpty {
+                        continuation.yield(.metadata(title: title, shortDescription: short))
+                        didEmitMetadata = true
+                    }
+                }
+            }
         }
     }
 

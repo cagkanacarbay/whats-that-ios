@@ -22,7 +22,6 @@ struct DiscoveryCreationFlowView: View {
     }
 
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
-    @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let placeholderEmoji: String
     let ctaTitle: String
     let retryTitle: String
@@ -32,26 +31,16 @@ struct DiscoveryCreationFlowView: View {
         viewModel: DiscoveryCreationFlowViewModel,
         placeholderEmoji: String,
         ctaTitle: String,
-        retryTitle: String,
-        voiceoverController: VoiceoverPlaybackController
+        retryTitle: String
     ) {
         _viewModel = ObservedObject(initialValue: viewModel)
-        _voiceoverController = ObservedObject(initialValue: voiceoverController)
         self.placeholderEmoji = placeholderEmoji
         self.ctaTitle = ctaTitle
         self.retryTitle = retryTitle
     }
 
     var body: some View {
-        ZStack {
-            mainContent
-
-            if let finalState = finalDetailState {
-                finalDetailView(for: finalState)
-                    .transition(.opacity)
-                    .zIndex(1)
-            }
-        }
+        mainContent
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(backgroundColor.ignoresSafeArea())
         .alert(
@@ -68,14 +57,19 @@ struct DiscoveryCreationFlowView: View {
         }
     }
 
+    @ViewBuilder
     private var mainContent: some View {
-        VStack(spacing: BrandSpacing.large) {
+        switch viewModel.flowState {
+        case .confirming, .analyzing:
+            // Full-bleed overlays should not inherit outer padding.
             content
+        default:
+            VStack(spacing: BrandSpacing.large) {
+                content
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.vertical, BrandSpacing.large)
         }
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.vertical, BrandSpacing.large)
-        .opacity(finalDetailState == nil ? 1 : 0)
-        .allowsHitTesting(finalDetailState == nil)
     }
 
     @ViewBuilder
@@ -111,111 +105,18 @@ struct DiscoveryCreationFlowView: View {
         }
     }
 
-    private var finalDetailState: DiscoveryAnalysisState? {
-        guard case let .analyzing(state) = viewModel.flowState,
-              state.discoverySummary != nil,
-              !state.isStreaming
-        else { return nil }
-        return state
-    }
-
     private var backgroundColor: Color {
         BrandTheme.palette(for: colorScheme).background
     }
-
-#if canImport(UIKit)
-    private var capturedPreviewImage: UIImage? {
-        viewModel.confirmationState.flatMap { UIImage(data: $0.displayImageData) }
-    }
-#elseif canImport(AppKit)
-    private var capturedPreviewImage: NSImage? {
-        viewModel.confirmationState.flatMap { NSImage(data: $0.displayImageData) }
-    }
-#endif
 
     private func makeAnalysisView(for state: DiscoveryAnalysisState) -> AnalysisStateView {
         AnalysisStateView(
             state: state,
             imageData: viewModel.confirmationState?.displayImageData,
+            capturedAt: viewModel.confirmationState?.media.createdAt,
             onCancel: { viewModel.cancelFlow() }
         )
     }
-
-    private func finalDetailView(for state: DiscoveryAnalysisState) -> some View {
-        GeometryReader { proxy in
-            Group {
-                if let summary = state.discoverySummary {
-                    DiscoveryCreationDetailView(
-                        discovery: summary,
-                        previewImage: capturedPreviewImage,
-                        remoteImageURL: summary.imagePath.flatMap(URL.init(string:)),
-                        voiceoverController: voiceoverController,
-                        onClose: { viewModel.cancelFlow() },
-                        onShare: makeDetailShareAction(for: summary),
-                        onShowOptions: nil
-                    )
-                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                } else {
-                    EmptyView()
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-            .background(backgroundColor.ignoresSafeArea())
-            .ignoresSafeArea()
-        }
-    }
-
-    private func makeDetailShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
-        guard let shareURL = detailShareURL(for: discovery) else { return nil }
-        return {
-            presentDetailShareSheet(for: discovery, url: shareURL)
-        }
-    }
-
-    private func detailShareURL(for discovery: DiscoverySummary) -> URL? {
-        if let token = discovery.shareToken {
-            return URL(string: "https://whats-that.app/\(token.uuidString)")
-        }
-
-        if let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !path.isEmpty,
-           let url = URL(string: path) {
-            return url
-        }
-
-        return nil
-    }
-
-    private func presentDetailShareSheet(for discovery: DiscoverySummary, url: URL) {
-        #if canImport(UIKit)
-        let message = [
-            discovery.title,
-            discovery.shortDescription ?? discovery.highlight
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n\n")
-
-        let items: [Any] = message.isEmpty ? [url] : [message, url]
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-
-        guard let root = keyWindowRootViewController() else { return }
-        DispatchQueue.main.async {
-            root.present(controller, animated: true)
-        }
-        #endif
-    }
-
-    #if canImport(UIKit)
-    private func keyWindowRootViewController() -> UIViewController? {
-        UIApplication.shared
-            .connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap { $0.windows }
-            .first(where: { $0.isKeyWindow })?
-            .rootViewController
-    }
-    #endif
 }
 
 private struct IdleStateView: View {
@@ -368,7 +269,7 @@ private struct ConfirmationStateView: View {
     }
 
     private var isContinueDisabled: Bool {
-        creditBalance == nil
+        creditBalance == 0
     }
 
     private var retakeTitle: String {
@@ -444,13 +345,13 @@ private struct ConfirmationStateView: View {
             image
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: size.width * 0.92)
+                .frame(maxWidth: size.width) // full width, no side squeeze
                 .frame(height: targetHeight)
                 .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
         } else {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(palette.border.opacity(0.1))
-                .frame(width: size.width * 0.75, height: targetHeight)
+                .frame(width: size.width * 0.9, height: targetHeight)
                 .overlay {
                     VStack(spacing: 10) {
                         Image(systemName: "photo")
@@ -658,6 +559,7 @@ private struct ConfirmationStateView: View {
 private struct AnalysisStateView: View {
     let state: DiscoveryAnalysisState
     let imageData: Data?
+    let capturedAt: Date?
     let onCancel: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -716,6 +618,11 @@ private struct AnalysisStateView: View {
     }
 
     private var currentMarkdown: String {
+        // Mirror RN gating: do not reveal any narrative until metadata is parsed
+        // to avoid showing the metadata JSON in the description area.
+        let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
+        guard hasMetadata else { return "" }
+
         let trimmed = state.displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             return trimmed
@@ -752,10 +659,35 @@ private struct AnalysisStateView: View {
                     markdownAnimationTask?.cancel()
                     stopMessageRotation()
                 }
+                .overlay(alignment: .topLeading) {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 48, height: 48)
+                            .foregroundStyle(palette.overlayButtonForeground)
+                            .background(
+                                Circle()
+                                    .fill(palette.overlayButtonBackground)
+                            )
+                            .overlay {
+                                Circle()
+                                    .stroke(palette.overlayButtonBorder, lineWidth: 1)
+                            }
+                            .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 8)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, BrandSpacing.large)
+                    .padding(.top, BrandSpacing.xLarge)
+                }
                 .onChange(of: state.displayMarkdown) { _ in
                     updateDisplayedMarkdown()
                 }
                 .onChange(of: state.streamedText) { _ in
+                    // Throttle noisy updates: only consider stream text for clearing
+                    // the loader if we still have no metadata and the loader is visible.
+                    guard !loaderCleared,
+                          (state.metadataTitle?.isEmpty ?? true) && (state.metadataShortDescription?.isEmpty ?? true)
+                    else { return }
                     evaluateLoaderCleared(with: currentMarkdown)
                 }
                 .onChange(of: state.metadataTitle) { _ in
@@ -768,6 +700,11 @@ private struct AnalysisStateView: View {
                 }
                 .onChange(of: state.isStreaming) { isStreaming in
                     if !isStreaming {
+                        // Streaming ended: snap to final text (no animation) to avoid cut-offs
+                        markdownAnimationTask?.cancel()
+                        let final = currentMarkdown
+                        displayedMarkdown = final
+                        evaluateLoaderCleared(with: final)
                         loaderCleared = true
                     }
                 }
@@ -812,6 +749,7 @@ private struct AnalysisStateView: View {
         markdownAnimationTask?.cancel()
         let current = displayedMarkdown
 
+        // If the change is very small, just apply it instantly.
         if target.count <= current.count + 2 {
             displayedMarkdown = target
             evaluateLoaderCleared(with: target)
@@ -819,47 +757,46 @@ private struct AnalysisStateView: View {
         }
 
         let delta = target.dropFirst(current.count)
-        let delay = animationDelay(for: delta.count)
+        let deltaCount = delta.count
+
+        // Stream quickly in smooth chunks to avoid flicker and long waits.
+        // Aim to reveal a typical sentence (< ~120 chars) in ~0.35–0.5s.
+        let targetDuration: Double = 0.42
+        let minDelay: Double = 0.016   // ~60 FPS lower bound
+        let maxDelay: Double = 0.06
+        let steps = max(3, min(12, (deltaCount + 23) / 24))
+        let chunkSize = max(1, deltaCount / steps)
+        let stepDelay = max(minDelay, min(maxDelay, targetDuration / Double(steps)))
+        let delayNs = UInt64(stepDelay * 1_000_000_000)
 
         markdownAnimationTask = Task {
             var buffer = current
-            for character in delta {
+            var idx = delta.startIndex
+            while idx < delta.endIndex {
                 if Task.isCancelled { return }
-                buffer.append(character)
+                let nextIdx = delta.index(idx, offsetBy: chunkSize, limitedBy: delta.endIndex) ?? delta.endIndex
+                buffer.append(contentsOf: delta[idx..<nextIdx])
+                idx = nextIdx
                 await MainActor.run {
                     displayedMarkdown = buffer
                     evaluateLoaderCleared(with: buffer)
                 }
-                try? await Task.sleep(nanoseconds: delay)
+                if idx < delta.endIndex {
+                    try? await Task.sleep(nanoseconds: delayNs)
+                }
             }
         }
     }
 
     private func loaderShouldBeCleared(for text: String) -> Bool {
-        if let title = state.metadataTitle, !title.isEmpty {
-            debugLog("loaderShouldBeCleared -> true via metadataTitle")
-            return true
-        }
-        if let short = state.metadataShortDescription, !short.isEmpty {
-            debugLog("loaderShouldBeCleared -> true via metadataShortDescription")
-            return true
-        }
+        // Follow RN behavior: keep loader and overlay messages until metadata
+        // is parsed, then clear. If the stream ends without metadata, clear if
+        // there is any visible content.
+        if let title = state.metadataTitle, !title.isEmpty { return true }
+        if let short = state.metadataShortDescription, !short.isEmpty { return true }
         if !state.isStreaming {
             let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
-            if visibleLength > 0 {
-                debugLog("loaderShouldBeCleared -> true via finished stream length \(visibleLength)")
-                return true
-            }
-            return false
-        }
-        let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
-        if visibleLength >= AnalysisStateView.streamContentThreshold {
-            debugLog("loaderShouldBeCleared -> true via content threshold length \(visibleLength)")
-            return true
-        }
-        if visibleLength >= AnalysisStateView.streamRevealThreshold {
-            debugLog("loaderShouldBeCleared -> true via reveal threshold length \(visibleLength)")
-            return true
+            return visibleLength > 0
         }
         return false
     }
@@ -870,7 +807,7 @@ private struct AnalysisStateView: View {
         }
         if loaderShouldBeCleared(for: text) {
             loaderCleared = true
-            debugLog("loaderCleared set to true (textLength=\(text.count), isStreaming=\(state.isStreaming), metadataTitle=\(state.metadataTitle ?? "nil"))")
+            debugLog("loaderCleared = true (textLength=\(text.count), isStreaming=\(state.isStreaming), title=\(state.metadataTitle ?? "nil"))")
         }
     }
 
@@ -880,8 +817,10 @@ private struct AnalysisStateView: View {
             withAnimation(.easeInOut(duration: 0.25)) {
                 metadataVisible = true
             }
+            debugLog("metadataVisible = true (title=\(state.metadataTitle ?? "nil"), shortLen=\(state.metadataShortDescription?.count ?? 0))")
         } else if !hasMetadata && metadataVisible && state.isStreaming {
             metadataVisible = false
+            debugLog("metadataVisible = false (awaiting metadata)")
         }
     }
 
@@ -933,16 +872,10 @@ private struct AnalysisStateView: View {
     }
 
     private func animationDelay(for count: Int) -> UInt64 {
+        // Legacy per-character delay (kept for reference). Not used by the chunked animator.
         let characters = max(1, count)
-        let baseDelay = min(
-            AnimationConstants.maximumCharacterDelay,
-            max(AnimationConstants.minimumCharacterDelay, 0.3 / Double(characters))
-        )
-        let acceleratedDelay = max(
-            AnimationConstants.minimumAcceleratedDelay,
-            baseDelay * AnimationConstants.speedMultiplier
-        )
-        return UInt64(acceleratedDelay * 1_000_000_000)
+        let baseDelay = min(0.02, max(0.002, 0.3 / Double(characters)))
+        return UInt64(baseDelay * 1_000_000_000)
     }
 
     private func scrollToContent(using proxy: ScrollViewProxy, animated: Bool = true) {
@@ -1036,6 +969,7 @@ private struct AnalysisStateView: View {
                         .lineLimit(2)
                 }
             } else {
+                let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
                 VStack(spacing: BrandSpacing.small) {
                     if let title = state.metadataTitle, !title.isEmpty {
                         Text(title)
@@ -1044,17 +978,23 @@ private struct AnalysisStateView: View {
                             .foregroundStyle(Color.white)
                             .frame(maxWidth: .infinity)
                     }
+                    if let date = capturedAt {
+                        Text(date.formatted(.dateTime.month().day().year()))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                            .frame(maxWidth: .infinity)
+                    }
                     if let short = state.metadataShortDescription, !short.isEmpty {
                         Text(short)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14))
                             .foregroundStyle(Color.white.opacity(0.92))
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, BrandSpacing.large)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .opacity(metadataVisible ? 1 : 0)
-                .animation(.easeInOut(duration: 0.25), value: metadataVisible)
+                .opacity(hasMetadata ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: hasMetadata)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1063,28 +1003,27 @@ private struct AnalysisStateView: View {
     @ViewBuilder
     private var markdownSection: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-            if displayedMarkdown.isEmpty || shouldShowLoader {
+            if shouldShowLoader {
                 if state.isStreaming {
                     Text("We’re composing your story…")
                         .font(.system(size: 15))
                         .foregroundStyle(palette.textSecondary)
                         .italic()
                 } else {
-                    Text("Analysis complete. Opening your discovery…")
+                    Text("Analysis complete.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(palette.textSecondary)
                 }
-            } else {
+            } else if !displayedMarkdown.isEmpty {
                 #if canImport(MarkdownUI)
                 Markdown(displayedMarkdown)
                     .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
-                    .animation(.easeInOut(duration: 0.2), value: displayedMarkdown)
                 #else
                 Text(displayedMarkdown)
                     .font(.system(size: 16))
                     .foregroundStyle(palette.textSecondary)
                 #endif
-            }
+            } // else: show nothing until the first markdown chunk lands
         }
         .padding(.top, BrandSpacing.large)
         .padding(.horizontal, BrandSpacing.large)

@@ -61,12 +61,14 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
+    var onAnalysisBegan: ((DiscoveryCreationFlowType) -> Void)?
 
     private let configuration: Configuration
     private let captureService: DiscoveryCaptureService
     private let selectionService: DiscoverySelectionService
     private let historyRepository: DiscoveryHistoryRepository
     private let creditsRepository: DiscoveryCreditsRepository
+    private let creditBalanceStore: CreditBalanceStore
     private let analysisClient: DiscoveryAnalysisClient
     private let imageEncoder: DiscoveryImageEncodingService
     private let pushService: DiscoveryPushService
@@ -91,6 +93,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         selectionService: DiscoverySelectionService,
         historyRepository: DiscoveryHistoryRepository,
         creditsRepository: DiscoveryCreditsRepository,
+        creditBalanceStore: CreditBalanceStore,
         analysisClient: DiscoveryAnalysisClient,
         imageEncoder: DiscoveryImageEncodingService,
         pushService: DiscoveryPushService,
@@ -101,6 +104,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         self.selectionService = selectionService
         self.historyRepository = historyRepository
         self.creditsRepository = creditsRepository
+        self.creditBalanceStore = creditBalanceStore
         self.analysisClient = analysisClient
         self.imageEncoder = imageEncoder
         self.pushService = pushService
@@ -143,6 +147,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return
         }
 
+        onAnalysisBegan?(configuration.type)
         analysisTask?.cancel()
         analysisTask = Task { [weak self] in
             await self?.performAnalysis(media: media, confirmation: state)
@@ -214,7 +219,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
         await locationService.startTrackingIfNeeded()
 
-        async let creditsTask = creditsRepository.fetchCreditBalance()
+        // Load cached credits immediately and refresh in background.
+        if let cached = await creditBalanceStore.getCached() {
+            creditBalance = cached
+        }
+
         async let locationTask = locationService.currentLocation()
         async let historyTask = historyRepository.fetchRecentDiscoveries(limit: configuration.recentHistoryLimit)
         async let pushTask = pushService.requestPushAuthorizationIfNeeded()
@@ -228,11 +237,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         permissionGranted = locationValue != nil
         locationDescription = DiscoveryCreationFlowViewModel.makeLocationDescription(from: location)
 
+        // Refresh credits if stale; if it fails, keep the cached value.
         do {
-            let balance = try await creditsTask
+            let balance = try await creditBalanceStore.refreshIfStale()
             creditBalance = balance
         } catch {
-            creditBalance = nil
+            // Keep existing cached value
         }
 
         do {
@@ -261,8 +271,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 customContext: current.customContext
             )
         }
-
-        flowState = .confirming(confirmationState!)
+        // Only re-emit confirming if we are still in the confirmation step.
+        // If analysis has already begun, do not bounce the UI back to confirmation.
+        if case .confirming = flowState {
+            flowState = .confirming(confirmationState!)
+        }
     }
 
     private func performAnalysis(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
@@ -302,6 +315,15 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             self.error = .analysisFailed(message)
             self.flowState = .error(message: message)
             locationService.stopTracking()
+            if Self.messageIndicatesInsufficientCredits(message) {
+                Task { [weak self] in
+                    guard let self else { return }
+                    let updated = await self.creditBalanceStore.set(0)
+                    await MainActor.run {
+                        self.creditBalance = updated
+                    }
+                }
+            }
         }
     }
 
@@ -343,13 +365,36 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             locationService.stopTracking()
             onDiscoveryCreated?(discoveryId)
             hydrateDiscoverySummaryIfNeeded(for: discoveryId)
+            // Optimistically decrement credits on success.
+            Task { [weak self] in
+                guard let self else { return }
+                let updated = await self.creditBalanceStore.adjust(by: -1)
+                await MainActor.run {
+                    self.creditBalance = updated
+                }
+            }
         case let .error(message):
             error = .analysisFailed(message)
             flowState = .error(message: message)
             locationService.stopTracking()
+            // If this looks like a credits error, reset local balance to 0
+            if Self.messageIndicatesInsufficientCredits(message) {
+                Task { [weak self] in
+                    guard let self else { return }
+                    let updated = await self.creditBalanceStore.set(0)
+                    await MainActor.run {
+                        self.creditBalance = updated
+                    }
+                }
+            }
         case .end:
             break
         }
+    }
+
+    private static func messageIndicatesInsufficientCredits(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("insufficient") || lower.contains("credit") || lower.contains("no credits")
     }
 
     private func handleAnalysisCancellation() async {
@@ -370,16 +415,37 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         let metadataChanged = existing.metadataTitle != previousTitle || existing.metadataShortDescription != previousShort
 
         if streamChanged || metadataChanged {
-            if let parsed = analysisParser.parse(existing.streamedText) {
-                existing.displayMarkdown = parsed.markdown
-                if let parsedTitle = parsed.metadata?.title, !parsedTitle.isEmpty {
-                    existing.metadataTitle = parsedTitle
+            let parsed = analysisParser.parse(existing.streamedText)
+            if debugLoggingEnabled {
+                if let parsed {
+                    let t = parsed.metadata?.title ?? "nil"
+                    let sLen = parsed.metadata?.shortDescription?.count ?? 0
+                    debugLog("parser: metadata(title: \(t), shortLen: \(sLen))")
+                } else {
+                    let preview = String(existing.streamedText.suffix(140)).replacingOccurrences(of: "\n", with: " ")
+                    debugLog("parser: no metadata yet, streamSuffix=…\(preview)")
                 }
-                if let parsedShort = parsed.metadata?.shortDescription, !parsedShort.isEmpty {
-                    existing.metadataShortDescription = parsedShort
+            }
+
+            // Update metadata as soon as it is fully available in the stream
+            if let parsedTitle = parsed?.metadata?.title, !parsedTitle.isEmpty {
+                existing.metadataTitle = parsedTitle
+            }
+            if let parsedShort = parsed?.metadata?.shortDescription, !parsedShort.isEmpty {
+                existing.metadataShortDescription = parsedShort
+            }
+
+            // Gate narrative rendering until metadata has been parsed, to avoid
+            // rendering raw metadata JSON into the description area during streaming.
+            let hasMetadata = (existing.metadataTitle?.isEmpty == false) || (existing.metadataShortDescription?.isEmpty == false)
+            if hasMetadata {
+                if let parsedMarkdown = parsed?.markdown {
+                    existing.displayMarkdown = parsedMarkdown
+                } else {
+                    existing.displayMarkdown = DiscoveryStreamFormatter.narrative(from: existing.streamedText)
                 }
             } else {
-                existing.displayMarkdown = DiscoveryStreamFormatter.narrative(from: existing.streamedText)
+                // Keep whatever is currently shown (typically empty) until metadata arrives.
             }
         }
         return existing

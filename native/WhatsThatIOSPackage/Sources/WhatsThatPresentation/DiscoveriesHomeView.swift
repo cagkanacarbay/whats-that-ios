@@ -31,6 +31,7 @@ struct DiscoveriesHomeView: View {
     @State private var heroDragShadowOpacity: Double = 0
     @State private var heroDragCornerRadius: CGFloat = 0
     @State private var hiddenDiscovery: HiddenDiscovery?
+    @State private var cardFrames: [Int64: CGRect] = [:]
     @State private var safeAreaBottomInset: CGFloat = 0
 
     private let headerHeight: CGFloat = 110
@@ -41,6 +42,7 @@ struct DiscoveriesHomeView: View {
     private let heroEdgeActivationWidth: CGFloat = 30
     private let heroDismissalThreshold: CGFloat = 150
     private let heroOpenAnimationDuration: TimeInterval = 0.5
+    private let heroCloseAnimationDuration: TimeInterval = 0.65
 
     private var heroDismissalDistance: CGFloat {
 #if canImport(UIKit)
@@ -102,6 +104,7 @@ struct DiscoveriesHomeView: View {
                             viewModel: viewModel,
                             availableWidth: contentWidth,
                             cardSpacing: gridSpacing,
+                            cardFrames: $cardFrames,
                             hiddenDiscovery: hiddenDiscovery,
                             onLoadMore: { discovery in
                                 await viewModel.loadMoreIfNeeded(currentItem: discovery)
@@ -139,6 +142,9 @@ struct DiscoveriesHomeView: View {
                     guard let summary else { return }
                     viewModel.upsert(summary)
                     pendingCreatedSummary = nil
+                }
+                .onChange(of: cardFrames) { _ in
+                    presentPendingDiscoveryIfNeeded()
                 }
 
                 header(opacity: headerOpacity)
@@ -278,12 +284,32 @@ struct DiscoveriesHomeView: View {
             return
         }
 
+        guard let startFrame = resolveStartFrame(for: discovery.id) else {
+            return
+        }
+
         pendingDiscoveryId = nil
         handleDiscoverySelection(
             discovery: discovery,
             imageURL: imageURL(for: discovery),
-            startFrame: .zero
+            startFrame: startFrame
         )
+    }
+
+    private func resolveStartFrame(for discoveryId: Int64) -> CGRect? {
+        if let frame = cardFrames[discoveryId], frame.width > 0, frame.height > 0 {
+            return frame
+        }
+
+        guard let firstId = viewModel.discoveries.first?.id,
+              let frame = cardFrames[firstId],
+              frame.width > 0,
+              frame.height > 0
+        else {
+            return nil
+        }
+
+        return frame
     }
 
     private func resetHeroInteraction(animated: Bool) {
@@ -406,12 +432,12 @@ struct DiscoveriesHomeView: View {
         heroIsSettled = false
         updateHeroPresentationVisibility()
 
-        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.45)) {
+        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: heroCloseAnimationDuration)) {
             heroProgress = 0
         }
 
         let closingSessionId = context.sessionId
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + heroCloseAnimationDuration + 0.1) {
             if heroContext?.sessionId == closingSessionId {
                 heroContext = nil
                 heroIsClosing = false
@@ -831,11 +857,10 @@ private struct DiscoveriesGrid: View {
     @ObservedObject var viewModel: DiscoveryFeedViewModel
     let availableWidth: CGFloat
     let cardSpacing: CGFloat
+    @Binding var cardFrames: [Int64: CGRect]
     let hiddenDiscovery: HiddenDiscovery?
     let onLoadMore: (DiscoverySummary) async -> Void
     let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
-
-    @State private var cardFrames: [Int64: CGRect] = [:]
 
     private var gridColumns: [GridItem] {
         [
@@ -917,7 +942,9 @@ private struct DiscoveriesGrid: View {
         }
         .frame(width: availableWidth, alignment: .leading)
         .onPreferenceChange(DiscoveryCardFramePreferenceKey.self) { value in
-            cardFrames = value
+            DispatchQueue.main.async {
+                cardFrames = value
+            }
         }
     }
 }
@@ -1213,14 +1240,16 @@ private struct DiscoveryHeroOverlay: View {
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
                 let cardHeight = isChromeReady ? geometry.size.height : geometry.imageHeight
+                let effectivePullDown = (isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
                         discoveryId: context.discovery.id,
                         imageURL: context.imageURL,
                         placeholderImage: context.placeholderImage,
+                        preferPlaceholder: (!isChromeReady) || isInteracting,
                         height: geometry.imageHeight,
-                        pullDownOffset: max(scrollOffset, 0)
+                        pullDownOffset: effectivePullDown
                     )
                     .overlay(alignment: .bottom) {
                         DiscoveryCardChrome(discovery: context.discovery)
@@ -1355,6 +1384,7 @@ private struct DiscoveryHeroImageView: View {
     let discoveryId: Int64
     let imageURL: URL?
     let placeholderImage: UIImage?
+    let preferPlaceholder: Bool
     let height: CGFloat
     let pullDownOffset: CGFloat
 
@@ -1366,9 +1396,15 @@ private struct DiscoveryHeroImageView: View {
             Group {
                 switch phase {
                 case .success(let platformImage):
-                    Image(uiImage: platformImage)
-                        .resizable()
-                        .scaledToFill()
+                    if preferPlaceholder, let placeholderImage {
+                        Image(uiImage: placeholderImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(uiImage: platformImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
                 case .failure:
                     placeholderView
                 case .loading, .empty:

@@ -10,6 +10,7 @@ public struct RootContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: AppRootViewModel
     @State private var authError: AuthError?
+    @State private var authStartMode: AuthenticationFlowView.Mode = .signUp
     @State private var isSettingsPresented = false
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let feedUseCase: DiscoveryFeedUseCase
@@ -60,6 +61,7 @@ public struct RootContentView: View {
                 case .authentication:
                     AuthenticationFlowView(
                         isPerformingAction: viewModel.isPerformingAuthAction,
+                        initialMode: authStartMode,
                         onSignIn: { email, password in
                             try await handleAuthOperation {
                                 try await viewModel.signIn(email: email, password: password)
@@ -91,6 +93,7 @@ public struct RootContentView: View {
                             }
                         }
                     )
+                    .id(authStartMode)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 case let .postOnboarding(user):
                     PostOnboardingSummary(
@@ -172,6 +175,17 @@ public struct RootContentView: View {
         }
         .preferredColorScheme(appearance.colorScheme)
         .onAppear(perform: syncBrandTheme)
+        .onChange(of: viewModel.flowState) { previous, current in
+            guard previous != current else { return }
+            if case .authentication = current {
+                switch previous {
+                case .main, .postOnboarding:
+                    authStartMode = .signIn
+                default:
+                    authStartMode = .signUp
+                }
+            }
+        }
         .onChange(of: storedAppearance) { _, _ in
             syncBrandTheme()
         }
@@ -374,8 +388,26 @@ private struct AuthenticationFlowView: View {
     let onGoogle: () async throws -> Void
     let onApple: () async throws -> Void
 
-    @State private var mode: Mode = .signIn
+    @State private var mode: Mode
     @State private var globalError: String?
+
+    init(
+        isPerformingAction: Bool,
+        initialMode: Mode = .signUp,
+        onSignIn: @escaping (String, String) async throws -> Void,
+        onSignUp: @escaping (String, String) async throws -> Void,
+        onForgotPassword: @escaping (String) async -> PasswordResetResult,
+        onGoogle: @escaping () async throws -> Void,
+        onApple: @escaping () async throws -> Void
+    ) {
+        self.isPerformingAction = isPerformingAction
+        self.onSignIn = onSignIn
+        self.onSignUp = onSignUp
+        self.onForgotPassword = onForgotPassword
+        self.onGoogle = onGoogle
+        self.onApple = onApple
+        _mode = State(initialValue: initialMode)
+    }
 
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
@@ -497,6 +529,8 @@ private struct LoginForm: View {
     @State private var password: String = ""
     @State private var errorMessage: String?
     @State private var showingLoading = false
+    @State private var didAttemptSubmit = false
+    @State private var hasEditedPassword = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.large) {
@@ -526,6 +560,10 @@ private struct LoginForm: View {
                     fieldType: .password(showToggle: true),
                     errorText: errorForPassword
                 )
+                .onChange(of: password) { _, _ in
+                    guard !hasEditedPassword else { return }
+                    hasEditedPassword = true
+                }
             }
 
             BrandPrimaryButton(
@@ -585,7 +623,11 @@ private struct LoginForm: View {
     }
 
     private var errorForPassword: String? {
-        password.isEmpty ? "Password is required" : nil
+        shouldShowPasswordError ? "Password is required" : nil
+    }
+
+    private var shouldShowPasswordError: Bool {
+        (hasEditedPassword || didAttemptSubmit) && password.isEmpty
     }
 
     private var titleColor: Color {
@@ -601,6 +643,8 @@ private struct LoginForm: View {
     }
 
     private func submit() {
+        didAttemptSubmit = true
+
         guard errorForEmail == nil, errorForPassword == nil, !email.isEmpty, !password.isEmpty else {
             errorMessage = "Please fill in both fields to continue."
             return
@@ -648,6 +692,7 @@ private struct SignUpForm: View {
     @State private var agreedToTerms: Bool = false
     @State private var errorMessage: String?
     @State private var isLoading: Bool = false
+    @State private var didAttemptSubmit: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.large) {
@@ -683,10 +728,12 @@ private struct SignUpForm: View {
                         Text("I agree to the Terms and Conditions and Privacy Policy")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(bodyColor)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .toggleStyle(SwitchToggleStyle(tint: primaryColor))
-                if termsError != nil {
+                if shouldShowTermsError {
                     Text("You must agree before continuing.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.red.opacity(0.85))
@@ -759,7 +806,7 @@ private struct SignUpForm: View {
 
     private var passwordError: String? {
         guard !password.isEmpty else { return nil }
-        return password.count >= 6 ? nil : "Password must be at least 6 characters"
+        return password.count >= 8 ? nil : "Password must be at least 8 characters"
     }
 
     private var confirmPasswordError: String? {
@@ -767,12 +814,14 @@ private struct SignUpForm: View {
         return confirmPassword == password ? nil : "Passwords do not match"
     }
 
-    private var termsError: String? {
-        agreedToTerms ? nil : "You must agree to continue."
+    private var shouldShowTermsError: Bool {
+        didAttemptSubmit && !agreedToTerms
     }
 
     private func submit() {
-        guard emailError == nil, passwordError == nil, confirmPasswordError == nil, termsError == nil else {
+        didAttemptSubmit = true
+
+        guard emailError == nil, passwordError == nil, confirmPasswordError == nil, agreedToTerms else {
             errorMessage = "Please resolve the highlighted fields."
             return
         }
@@ -814,6 +863,7 @@ private struct ForgotPasswordForm: View {
     @State private var isLoading: Bool = false
     @State private var infoMessage: String?
     @State private var error: String?
+    @State private var didAttemptSubmit = false
 
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
@@ -832,7 +882,7 @@ private struct ForgotPasswordForm: View {
                     title: "Email Address",
                     placeholder: "name@email.com",
                     text: $email,
-                    fieldType: .plain,
+                    fieldType: .email,
                     errorText: emailError
                 )
             }
@@ -842,7 +892,8 @@ private struct ForgotPasswordForm: View {
                     title: isLoading ? "Sending..." : "Send Reset Link",
                     isLoading: isLoading
                 ) {
-                    guard emailError == nil else { return }
+                    didAttemptSubmit = true
+                    guard emailValidationError == nil else { return }
                     isLoading = true
                     onSubmit(email.lowercased()) { result in
                         isLoading = false
@@ -874,11 +925,20 @@ private struct ForgotPasswordForm: View {
     }
 
     private var emailError: String? {
-        guard !email.isEmpty else { return nil }
+        guard shouldShowEmailError else { return nil }
+        return emailValidationError
+    }
+
+    private var emailValidationError: String? {
+        guard !email.isEmpty else { return "Please enter a valid email address" }
         let regex = try? NSRegularExpression(pattern: "[^\\s@]+@[^\\s@]+\\.[^\\s@]+")
         let range = NSRange(location: 0, length: email.utf16.count)
         let isValid = regex?.firstMatch(in: email, options: [], range: range) != nil
         return isValid ? nil : "Please enter a valid email address"
+    }
+
+    private var shouldShowEmailError: Bool {
+        didAttemptSubmit && emailValidationError != nil
     }
 
     private var titleColor: Color {

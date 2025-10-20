@@ -28,6 +28,7 @@ public enum DiscoveryStreamFormatter {
         }
 
         working = removeMetadataSection(from: working)
+        working = removeInlineMetadataJSON(from: working)
         working = working.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let headingRange = working.range(of: #"##\s+"#, options: .regularExpression) {
@@ -89,5 +90,34 @@ public enum DiscoveryStreamFormatter {
         }
 
         return nil
+    }
+
+    // Removes a JSON object that includes metadata keys (title/shortDescription)
+    // even if it isn't preceded by the `metadata_json` heading. This helps with
+    // partial/streamed payloads that surface the JSON early.
+    private static func removeInlineMetadataJSON(from source: String) -> String {
+        let keys = ["\"title\"", "\"shortDescription\"", "\"short_description\""]
+        guard let keyRange = keys
+            .compactMap({ source.range(of: $0) })
+            .sorted(by: { $0.lowerBound < $1.lowerBound })
+            .first
+        else {
+            return source
+        }
+
+        guard let openBrace = source[..<keyRange.lowerBound].lastIndex(of: "{") else {
+            return source
+        }
+        guard let jsonRange = findJsonBounds(in: source, startingAt: openBrace) else {
+            return source
+        }
+
+        var mutable = source
+        var removalEnd = jsonRange.upperBound
+        if removalEnd < mutable.endIndex, mutable[removalEnd] == "," {
+            removalEnd = mutable.index(after: removalEnd)
+        }
+        mutable.removeSubrange(jsonRange.lowerBound..<removalEnd)
+        return mutable
     }
 }

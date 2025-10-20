@@ -105,7 +105,17 @@ public struct CreditsView: View {
                     if let balance = viewModel.balance {
                         Text("\(balance) credits")
                             .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(palette.textPrimary)
+                        .foregroundStyle(palette.textPrimary)
+                        
+                    if viewModel.isRefreshingBalance {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                            Text("Checking…")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                    }
                     } else {
                         HStack(spacing: 6) {
                             ProgressView()

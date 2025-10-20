@@ -22,6 +22,7 @@ public struct AppDependencyContainer: Sendable {
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
     private let creditsRepository: DiscoveryCreditsRepository
     private let creditsStore: any CreditsStore
+    private let creditBalanceStore: CreditBalanceStore
 #endif
 
 #if os(iOS)
@@ -33,7 +34,8 @@ public struct AppDependencyContainer: Sendable {
         discoveryCreationProvider: DiscoveryCreationDependencyProvider,
         voiceoverRepository: any DiscoveryVoiceoverRepository,
         creditsRepository: DiscoveryCreditsRepository,
-        creditsStore: any CreditsStore
+        creditsStore: any CreditsStore,
+        creditBalanceStore: CreditBalanceStore
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
@@ -44,6 +46,7 @@ public struct AppDependencyContainer: Sendable {
         self.voiceoverRepository = voiceoverRepository
         self.creditsRepository = creditsRepository
         self.creditsStore = creditsStore
+        self.creditBalanceStore = creditBalanceStore
     }
 #else
     init(
@@ -134,6 +137,7 @@ public extension AppDependencyContainer {
             client: client,
             urlSession: session
         )
+        let creditBalanceStore = CreditBalanceStore(repository: creditsRepository)
         let analysisClient = SupabaseDiscoveryAnalysisClient(
             client: client,
             configuration: configuration,
@@ -150,6 +154,7 @@ public extension AppDependencyContainer {
             selectionService: selectionService,
             historyRepository: discoveryRepository,
             creditsRepository: creditsRepository,
+            creditBalanceStore: creditBalanceStore,
             analysisClient: analysisClient,
             imageEncoder: imageEncoder,
             pushService: pushService,
@@ -167,7 +172,8 @@ public extension AppDependencyContainer {
             discoveryCreationProvider: discoveryCreationProvider,
             voiceoverRepository: voiceoverRepository,
             creditsRepository: creditsRepository,
-            creditsStore: creditsStore
+            creditsStore: creditsStore,
+            creditBalanceStore: creditBalanceStore
         )
 #else
         return AppDependencyContainer(
@@ -199,13 +205,14 @@ public extension AppDependencyContainer {
     func makeCreditsViewModel() -> CreditsViewModel {
         CreditsViewModel(
             creditsRepository: creditsRepository,
-            store: creditsStore
+            store: creditsStore,
+            balanceStore: creditBalanceStore
         )
     }
 
     func fetchCreditBalance() async -> Result<Int, Error> {
         do {
-            let balance = try await creditsRepository.fetchCreditBalance()
+            let balance = try await creditBalanceStore.refreshIfStale()
             return .success(balance)
         } catch {
             return .failure(error)

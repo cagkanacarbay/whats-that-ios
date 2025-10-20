@@ -10,17 +10,18 @@ struct BrandPrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                if isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
+            Text(title)
+                .fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .overlay(alignment: .trailing) {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .padding(.trailing, 16)
+                    }
                 }
-                Text(title)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-            }
-            .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.white)

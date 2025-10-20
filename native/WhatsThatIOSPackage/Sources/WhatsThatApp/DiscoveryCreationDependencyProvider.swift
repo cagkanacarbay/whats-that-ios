@@ -11,6 +11,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
     private let selectionService: DiscoverySelectionService
     private let historyRepository: DiscoveryHistoryRepository
     private let creditsRepository: DiscoveryCreditsRepository
+    private let creditBalanceStore: CreditBalanceStore
     private let analysisClient: DiscoveryAnalysisClient
     private let imageEncoder: DiscoveryImageEncodingService
     private let pushService: DiscoveryPushService
@@ -23,6 +24,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         selectionService: DiscoverySelectionService,
         historyRepository: DiscoveryHistoryRepository,
         creditsRepository: DiscoveryCreditsRepository,
+        creditBalanceStore: CreditBalanceStore,
         analysisClient: DiscoveryAnalysisClient,
         imageEncoder: DiscoveryImageEncodingService,
         pushService: DiscoveryPushService,
@@ -34,6 +36,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         self.selectionService = selectionService
         self.historyRepository = historyRepository
         self.creditsRepository = creditsRepository
+        self.creditBalanceStore = creditBalanceStore
         self.analysisClient = analysisClient
         self.imageEncoder = imageEncoder
         self.pushService = pushService
@@ -52,6 +55,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
             selectionService: selectionService,
             historyRepository: historyRepository,
             creditsRepository: creditsRepository,
+            creditBalanceStore: creditBalanceStore,
             analysisClient: analysisClient,
             imageEncoder: imageEncoder,
             pushService: pushService,

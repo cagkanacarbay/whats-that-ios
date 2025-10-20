@@ -45,6 +45,7 @@ public final class CreditsViewModel: ObservableObject {
 
     @Published public private(set) var isLoading = false
     @Published public private(set) var isFetchingProducts = false
+    @Published public private(set) var isRefreshingBalance = false
     @Published public private(set) var isPurchasing = false
     @Published public private(set) var balance: Int?
     @Published public private(set) var creditPacks: [CreditPackItem] = []
@@ -54,6 +55,7 @@ public final class CreditsViewModel: ObservableObject {
 
     private let creditsRepository: DiscoveryCreditsRepository
     private let store: CreditsStore
+    private let balanceStore: CreditBalanceStore
     private let packDefinitions: [CreditPackDefinition]
     private var hasLoadedOnce = false
 
@@ -62,10 +64,12 @@ public final class CreditsViewModel: ObservableObject {
     public init(
         creditsRepository: DiscoveryCreditsRepository,
         store: CreditsStore,
+        balanceStore: CreditBalanceStore,
         packDefinitions: [CreditPackDefinition] = CreditPackCatalog.standardPacks
     ) {
         self.creditsRepository = creditsRepository
         self.store = store
+        self.balanceStore = balanceStore
         self.packDefinitions = packDefinitions
     }
 
@@ -81,7 +85,21 @@ public final class CreditsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let balanceTask = fetchBalance()
+            // Pre-populate with cached balance while we refresh.
+            if let cached = await balanceStore.getCached() {
+                updateBalance(cached)
+            }
+
+            isRefreshingBalance = true
+            async let balanceTask: Int = {
+                defer { Task { await MainActor.run { self.isRefreshingBalance = false } } }
+                do {
+                    return try await self.balanceStore.refreshIfStale()
+                } catch {
+                    // If refresh fails, fall back to repository as a one-off.
+                    return try await self.fetchBalance()
+                }
+            }()
             async let productsTask = fetchProducts()
 
             let balanceValue = try await balanceTask
@@ -95,8 +113,12 @@ public final class CreditsViewModel: ObservableObject {
     }
 
     public func refreshBalance() async {
+        if isRefreshingBalance { return }
+        isRefreshingBalance = true
+        defer { isRefreshingBalance = false }
+
         do {
-            let balanceValue = try await fetchBalance()
+            let balanceValue = try await balanceStore.refresh(force: true)
             updateBalance(balanceValue)
         } catch {
             present(error: error)
@@ -128,8 +150,8 @@ public final class CreditsViewModel: ObservableObject {
                     message: result.message ?? "Purchase successful! Check out your new credits.",
                     style: .success
                 )
-                let balanceValue = try await fetchBalance()
-                updateBalance(balanceValue)
+                let newValue = try await balanceStore.refresh(force: true)
+                updateBalance(newValue)
             case .pending:
                 toastMessage = ToastMessage(
                     message: result.message ?? "This purchase is pending. We’ll update your balance as soon as it clears.",

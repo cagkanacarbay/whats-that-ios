@@ -128,11 +128,11 @@ struct MainTabView: View {
                 }
             }
         }
-        .onChange(of: cameraViewModel.flowState) { newState in
-            updateOverlayVisibility(for: .camera, state: newState)
+        .onChange(of: cameraViewModel.flowState.phase) { newPhase in
+            updateOverlayVisibility(for: .camera, phase: newPhase)
         }
-        .onChange(of: uploadViewModel.flowState) { newState in
-            updateOverlayVisibility(for: .upload, state: newState)
+        .onChange(of: uploadViewModel.flowState.phase) { newPhase in
+            updateOverlayVisibility(for: .upload, phase: newPhase)
         }
     }
 
@@ -187,6 +187,15 @@ struct MainTabView: View {
         }
     }
 
+    private func shouldShowOverlay(for phase: DiscoveryCreationPhase) -> Bool {
+        switch phase {
+        case .idle, .cancelled:
+            return false
+        default:
+            return true
+        }
+    }
+
     private func viewModel(for tab: Tab) -> DiscoveryCreationFlowViewModel? {
         switch tab {
         case .camera:
@@ -201,6 +210,13 @@ struct MainTabView: View {
     private func updateOverlayVisibility(for tab: Tab, state: DiscoveryCreationFlowState) {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: state) {
+            activeOverlayTab = nil
+        }
+    }
+
+    private func updateOverlayVisibility(for tab: Tab, phase: DiscoveryCreationPhase) {
+        guard activeOverlayTab == tab else { return }
+        if !shouldShowOverlay(for: phase) {
             activeOverlayTab = nil
         }
     }

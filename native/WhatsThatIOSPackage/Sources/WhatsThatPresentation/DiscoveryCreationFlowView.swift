@@ -100,8 +100,8 @@ struct DiscoveryCreationFlowView: View {
                 onContinue: { viewModel.beginAnalysis() },
                 onCancel: { viewModel.cancelFlow() }
             )
-        case let .analyzing(state):
-            makeAnalysisView(for: state)
+        case .analyzing(_):
+            makeAnalysisView()
         }
     }
 
@@ -109,9 +109,9 @@ struct DiscoveryCreationFlowView: View {
         BrandTheme.palette(for: colorScheme).background
     }
 
-    private func makeAnalysisView(for state: DiscoveryAnalysisState) -> AnalysisStateView {
+    private func makeAnalysisView() -> AnalysisStateView {
         AnalysisStateView(
-            state: state,
+            viewModel: viewModel,
             imageData: viewModel.confirmationState?.displayImageData,
             capturedAt: viewModel.confirmationState?.media.createdAt,
             onCancel: { viewModel.cancelFlow() }
@@ -557,10 +557,22 @@ private struct ConfirmationStateView: View {
 }
 
 private struct AnalysisStateView: View {
-    let state: DiscoveryAnalysisState
+    @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
     let imageData: Data?
     let capturedAt: Date?
     let onCancel: () -> Void
+
+    init(
+        viewModel: DiscoveryCreationFlowViewModel,
+        imageData: Data?,
+        capturedAt: Date?,
+        onCancel: @escaping () -> Void
+    ) {
+        self._viewModel = ObservedObject(initialValue: viewModel)
+        self.imageData = imageData
+        self.capturedAt = capturedAt
+        self.onCancel = onCancel
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var displayedMarkdown: String = ""
@@ -595,6 +607,11 @@ private struct AnalysisStateView: View {
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
+    }
+
+    // Read the current analysis state from the view model to allow streaming updates
+    private var state: DiscoveryAnalysisState {
+        viewModel.analysisState ?? DiscoveryAnalysisState()
     }
 
     private var previewImage: Image? {
@@ -648,7 +665,8 @@ private struct AnalysisStateView: View {
                 .background(palette.background.ignoresSafeArea())
                 .onAppear {
                     resetStateForInitialRender()
-                    startMessageRotationIfNeeded()
+                    // TEMP: Disable loading message animation while investigating update-per-frame warnings.
+                    // startMessageRotationIfNeeded()
                     if loaderCleared {
                         DispatchQueue.main.async {
                             scrollToContent(using: scrollProxy, animated: false)
@@ -657,7 +675,8 @@ private struct AnalysisStateView: View {
                 }
                 .onDisappear {
                     markdownAnimationTask?.cancel()
-                    stopMessageRotation()
+                    // TEMP: Disable loading message animation while investigating update-per-frame warnings.
+                    // stopMessageRotation()
                 }
                 .overlay(alignment: .topLeading) {
                     Button(action: onCancel) {
@@ -711,11 +730,19 @@ private struct AnalysisStateView: View {
                 .onChange(of: loaderCleared) { cleared in
                     debugLog("loaderCleared changed -> \(cleared)")
                     if cleared {
-                        stopMessageRotation()
+                        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
+                        // stopMessageRotation()
                         scrollToContent(using: scrollProxy)
+                        let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
+                        if hasMetadata && !metadataVisible {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                metadataVisible = true
+                            }
+                        }
                     } else {
                         hasScrolledToContent = false
-                        startMessageRotationIfNeeded()
+                        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
+                        // startMessageRotationIfNeeded()
                     }
                 }
             }
@@ -730,9 +757,10 @@ private struct AnalysisStateView: View {
         displayedMarkdown = initialNarrative
         loaderCleared = loaderShouldBeCleared(for: initialNarrative)
         hasScrolledToContent = false
-        if shouldShowLoader {
-            triggerCharacterAnimation()
-        }
+        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
+        // if shouldShowLoader {
+        //     triggerCharacterAnimation()
+        // }
         debugLog("resetState loaderCleared=\(loaderCleared) initialMarkdownLength=\(initialNarrative.count) metadataTitle=\(state.metadataTitle ?? "nil")")
     }
 
@@ -814,10 +842,14 @@ private struct AnalysisStateView: View {
     private func evaluateMetadataVisibility() {
         let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
         if hasMetadata && !metadataVisible {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                metadataVisible = true
+            if loaderCleared {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    metadataVisible = true
+                }
+                debugLog("metadataVisible = true (title=\(state.metadataTitle ?? "nil"), shortLen=\(state.metadataShortDescription?.count ?? 0))")
+            } else {
+                // Wait to animate title/short until the loader clears so it matches the description reveal.
             }
-            debugLog("metadataVisible = true (title=\(state.metadataTitle ?? "nil"), shortLen=\(state.metadataShortDescription?.count ?? 0))")
         } else if !hasMetadata && metadataVisible && state.isStreaming {
             metadataVisible = false
             debugLog("metadataVisible = false (awaiting metadata)")
@@ -950,51 +982,51 @@ private struct AnalysisStateView: View {
         let availableWidth = max(width - (BrandSpacing.large * 2), 0)
         return VStack(spacing: BrandSpacing.medium) {
             if shouldShowLoader {
-                if !currentLoadingMessage.isEmpty {
-                    LoadingMessageView(
-                        message: currentLoadingMessage,
-                        animateCharacters: animateCharacters,
-                        availableWidth: availableWidth,
-                        opacity: messageOpacity
-                    )
-                }
+                // TEMP: Disable animated loading headline while investigating update-per-frame warnings.
+                // if !currentLoadingMessage.isEmpty {
+                //     LoadingMessageView(
+                //         message: currentLoadingMessage,
+                //         animateCharacters: animateCharacters,
+                //         availableWidth: availableWidth,
+                //         opacity: messageOpacity
+                //     )
+                // }
 
                 if let status = state.statusMessage, !status.isEmpty {
                     Text(status)
                         .font(.system(size: 15, weight: .medium))
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(palette.textSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, BrandSpacing.large)
                         .lineLimit(2)
                 }
             } else {
-                let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
                 VStack(spacing: BrandSpacing.small) {
                     if let title = state.metadataTitle, !title.isEmpty {
                         Text(title)
                             .font(.system(size: 26, weight: .bold))
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(palette.textPrimary)
                             .frame(maxWidth: .infinity)
                     }
                     if let date = capturedAt {
                         Text(date.formatted(.dateTime.month().day().year()))
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.92))
+                            .foregroundStyle(palette.textSecondary)
                             .frame(maxWidth: .infinity)
                     }
                     if let short = state.metadataShortDescription, !short.isEmpty {
                         Text(short)
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.white.opacity(0.92))
+                            .foregroundStyle(palette.textSecondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, BrandSpacing.large)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .opacity(hasMetadata ? 1 : 0)
-                .animation(.easeInOut(duration: 0.25), value: hasMetadata)
+                .opacity(metadataVisible ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: metadataVisible)
             }
         }
         .frame(maxWidth: .infinity)

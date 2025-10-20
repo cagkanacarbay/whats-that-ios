@@ -114,6 +114,36 @@ public enum DiscoveryCreationFlowState: Equatable, Sendable {
     case error(message: String)
 }
 
+public enum DiscoveryCreationPhase: Equatable, Sendable {
+    case idle
+    case requestingPermissions
+    case capturingInitial
+    case capturingRetake
+    case selectingInitial
+    case selectingRetake
+    case confirming
+    case analyzing
+    case cancelled
+    case error
+}
+
+public extension DiscoveryCreationFlowState {
+    var phase: DiscoveryCreationPhase {
+        switch self {
+        case .idle: return .idle
+        case .requestingPermissions: return .requestingPermissions
+        case .capturingInitial: return .capturingInitial
+        case .capturingRetake: return .capturingRetake
+        case .selectingInitial: return .selectingInitial
+        case .selectingRetake: return .selectingRetake
+        case .confirming: return .confirming
+        case .analyzing: return .analyzing
+        case .cancelled: return .cancelled
+        case .error: return .error
+        }
+    }
+}
+
 public enum DiscoveryAnalysisEvent: Sendable, Equatable {
     case status(String)
     case metadata(title: String?, shortDescription: String?)

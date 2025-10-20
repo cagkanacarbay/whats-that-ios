@@ -334,7 +334,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             analysisState = analysisStateUpdated { state in
                 state.statusMessage = message
             }
-            syncFlowStateWithAnalysis()
+            // Coarse phase: do not republish flowState during streaming/status updates.
         case let .metadata(title, shortDescription):
             analysisState = analysisStateUpdated { state in
                 let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -346,13 +346,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     state.metadataShortDescription = trimmedShort
                 }
             }
-            syncFlowStateWithAnalysis()
+            // Coarse phase: do not republish flowState during streaming/metadata updates.
         case let .token(token):
             analysisState = analysisStateUpdated { state in
                 state.streamedText.append(token)
                 state.isStreaming = true
             }
-            syncFlowStateWithAnalysis()
+            // Coarse phase: do not republish flowState for each token.
         case let .complete(discoveryId, systemVersion, userVersion):
             analysisState = analysisStateUpdated { state in
                 state.discoveryIdentifier = discoveryId
@@ -361,7 +361,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 state.systemPromptVersion = systemVersion
                 state.userPromptVersion = userVersion
             }
-            syncFlowStateWithAnalysis()
+            // Do not republish flowState here; wait for the final end signal.
             locationService.stopTracking()
             onDiscoveryCreated?(discoveryId)
             hydrateDiscoverySummaryIfNeeded(for: discoveryId)
@@ -388,7 +388,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 }
             }
         case .end:
-            break
+            // Finalize: publish a single flowState update to reflect final analysis state.
+            if let analysisState {
+                flowState = .analyzing(analysisState)
+            }
         }
     }
 
@@ -544,7 +547,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     self.analysisState = self.analysisStateUpdated { state in
                         state.discoverySummary = summary
                     }
-                    self.syncFlowStateWithAnalysis()
                     self.onDiscoverySummaryReady?(summary)
                 }
             } catch {

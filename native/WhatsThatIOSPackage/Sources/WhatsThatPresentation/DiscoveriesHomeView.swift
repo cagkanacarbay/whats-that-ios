@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import OSLog
 import WhatsThatDomain
 import WhatsThatShared
 import UIKit
@@ -942,7 +943,8 @@ private struct DiscoveriesGrid: View {
         }
         .frame(width: availableWidth, alignment: .leading)
         .onPreferenceChange(DiscoveryCardFramePreferenceKey.self) { value in
-            DispatchQueue.main.async {
+            // Guard to avoid redundant state writes that can cause multiple updates per frame warnings
+            if cardFrames != value {
                 cardFrames = value
             }
         }
@@ -1216,7 +1218,8 @@ private struct DiscoveryHeroOverlay: View {
                 containerSize: containerSize,
                 containerOrigin: CGPoint(x: 0, y: containerFrame.origin.y),
                 targetAspectRatio: context.cardAspectRatio,
-                progress: progress
+                progress: progress,
+                enforceAspectForImage: isClosing
             )
             let safeAreaInsets = proxy.safeAreaInsets
 
@@ -1239,16 +1242,37 @@ private struct DiscoveryHeroOverlay: View {
                 let rotationAngle = gestureRotation
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
-                let cardHeight = isChromeReady ? geometry.size.height : geometry.imageHeight
+                // Compute base target sizes for the hero header at the expanded state.
+                let targetHeaderHeight = min(containerSize.height, containerSize.width * context.cardAspectRatio)
+                // During closing we keep the base frame at expanded header size and uniformly
+                // transform the whole card to the start frame to preserve crop.
+                let cardWidth: CGFloat = isClosing ? containerSize.width : geometry.size.width
+                let cardHeight: CGFloat = isClosing ? targetHeaderHeight : (isChromeReady ? geometry.size.height : geometry.imageHeight)
+                let imageHeightForView: CGFloat = isClosing ? targetHeaderHeight : geometry.imageHeight
                 let effectivePullDown = (isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
+                let preferPlaceholder = (!isChromeReady) || isInteracting
+
+                let _ = maybeLogHeroGeometry(
+                    phase: isClosing ? "close" : (isChromeReady ? "settled" : "open"),
+                    progress: progress,
+                    containerSize: containerSize,
+                    startFrame: context.startFrame,
+                    width: cardWidth,
+                    height: cardHeight,
+                    imageHeight: imageHeightForView,
+                    cardAspect: context.cardAspectRatio,
+                    preferPlaceholder: preferPlaceholder,
+                    pullDown: effectivePullDown,
+                    isChromeReady: isChromeReady
+                )
 
                 let heroCard = ZStack(alignment: .top) {
                     DiscoveryHeroImageView(
                         discoveryId: context.discovery.id,
                         imageURL: context.imageURL,
                         placeholderImage: context.placeholderImage,
-                        preferPlaceholder: (!isChromeReady) || isInteracting,
-                        height: geometry.imageHeight,
+                        preferPlaceholder: preferPlaceholder,
+                        height: imageHeightForView,
                         pullDownOffset: effectivePullDown
                     )
                     .overlay(alignment: .bottom) {
@@ -1257,7 +1281,7 @@ private struct DiscoveryHeroOverlay: View {
                             .opacity(cardChromeOpacity(for: progress, isClosing: isClosing))
                             .allowsHitTesting(false)
                     }
-                    .offset(y: scrollOffset > 0 ? scrollOffset : 0)
+                    .offset(y: (isChromeReady && scrollOffset > 0) ? scrollOffset : 0)
 
                     DiscoveryHeroContentView(
                         discovery: context.discovery,
@@ -1274,7 +1298,7 @@ private struct DiscoveryHeroOverlay: View {
                         scrollOffset: $scrollOffset
                     )
                 }
-                .frame(width: geometry.size.width, height: cardHeight)
+                .frame(width: cardWidth, height: cardHeight)
                 .background(backgroundColor)
                 .clipShape(RoundedRectangle(cornerRadius: combinedCornerRadius, style: .continuous))
 
@@ -1297,9 +1321,21 @@ private struct DiscoveryHeroOverlay: View {
                         x: 0,
                         y: combinedShadowYOffset
                     )
-                    .scaleEffect(finalScale, anchor: .center)
-                    .rotation3DEffect(.degrees(rotationAngle), axis: (x: 0, y: 1, z: 0))
-                    .offset(x: finalOffsetX, y: finalOffsetY)
+                    // During closing, uniformly transform the full expanded header to the start frame
+                    // using a single scale + offset derived from progress to preserve constant crop.
+                    .modifier(UniformCloseTransform(
+                        isClosing: isClosing,
+                        progress: progress,
+                        startFrame: context.startFrame,
+                        containerFrame: containerFrame
+                    ))
+                    // Preserve interactive transforms while not closing.
+                    .if(!isClosing) { view in
+                        view
+                            .scaleEffect(finalScale, anchor: .center)
+                            .rotation3DEffect(.degrees(rotationAngle), axis: (x: 0, y: 1, z: 0))
+                            .offset(x: finalOffsetX, y: finalOffsetY)
+                    }
                     .animation(.easeInOut(duration: 0.24), value: isChromeReady)
             }
         }
@@ -1340,7 +1376,7 @@ private struct DiscoveryHeroOverlay: View {
         let shadowRadius: CGFloat
         let shadowYOffset: CGFloat
 
-        init(startFrame: CGRect, containerSize: CGSize, containerOrigin: CGPoint, targetAspectRatio: CGFloat, progress: CGFloat) {
+        init(startFrame: CGRect, containerSize: CGSize, containerOrigin: CGPoint, targetAspectRatio: CGFloat, progress: CGFloat, enforceAspectForImage: Bool = false) {
             let clamped = max(0, min(progress, 1))
             let startX = startFrame.minX - containerOrigin.x
             let startY = startFrame.minY - containerOrigin.y
@@ -1351,9 +1387,21 @@ private struct DiscoveryHeroOverlay: View {
             let aspectRatio = targetAspectRatio.isFinite && targetAspectRatio > 0.1
                 ? targetAspectRatio
                 : startFrame.height / max(startFrame.width, 1)
-            let resolvedTargetHeight = min(containerSize.height, containerSize.width * aspectRatio)
-            let targetImageHeight = max(startFrame.height, resolvedTargetHeight)
-            let imageHeight = HeroGeometry.lerp(startFrame.height, targetImageHeight, clamped)
+            // For closing, compute imageHeight from the current width to
+            // maintain constant cropping relative to the card aspect ratio.
+            // Clamp to container height to avoid overshooting off screen.
+            let imageHeight: CGFloat
+            if enforceAspectForImage {
+                let ratioHeight = width * aspectRatio
+                let clampedHeight = min(containerSize.height, ratioHeight)
+                // Interpolate between the starting card height and the
+                // width-driven target to keep smoothness.
+                imageHeight = HeroGeometry.lerp(startFrame.height, clampedHeight, clamped)
+            } else {
+                let resolvedTargetHeight = min(containerSize.height, containerSize.width * aspectRatio)
+                let targetImageHeight = max(startFrame.height, resolvedTargetHeight)
+                imageHeight = HeroGeometry.lerp(startFrame.height, targetImageHeight, clamped)
+            }
 
             self.size = CGSize(width: width, height: height)
             self.offset = CGPoint(x: x, y: y)
@@ -1376,6 +1424,76 @@ private struct DiscoveryHeroOverlay: View {
                 let local = (progress - 0.7) / 0.3
                 return lerp(6, 0, max(0, min(local, 1)))
             }
+        }
+    }
+}
+
+// MARK: - Logging
+
+private let heroLogger = Logger(subsystem: "WhatsThatIOS", category: "HeroTransition")
+
+private extension DiscoveryHeroOverlay {
+    func maybeLogHeroGeometry(
+        phase: String,
+        progress: CGFloat,
+        containerSize: CGSize,
+        startFrame: CGRect,
+        width: CGFloat,
+        height: CGFloat,
+        imageHeight: CGFloat,
+        cardAspect: CGFloat,
+        preferPlaceholder: Bool,
+        pullDown: CGFloat,
+        isChromeReady: Bool
+    ) {
+        guard isClosing else { return }
+
+        let currentAspect = height / max(width, 1)
+        let widthDrivenHeight = width * cardAspect
+        let heightDelta = imageHeight - widthDrivenHeight
+
+        heroLogger.debug(
+            "[Hero] phase=\(phase, privacy: .public) progress=\(progress, privacy: .public) width=\(width, privacy: .public) height=\(height, privacy: .public) imageHeight=\(imageHeight, privacy: .public) widthDrivenHeight=\(widthDrivenHeight, privacy: .public) heightDelta=\(heightDelta, privacy: .public) currentAspect=\(currentAspect, privacy: .public) cardAspect=\(cardAspect, privacy: .public) container=\(String(describing: containerSize), privacy: .public) start=\(String(describing: startFrame), privacy: .public) placeholder=\(preferPlaceholder, privacy: .public) pullDown=\(pullDown, privacy: .public) chromeReady=\(isChromeReady, privacy: .public)"
+        )
+    }
+}
+
+// MARK: - Uniform close transform
+
+private struct UniformCloseTransform: ViewModifier {
+    let isClosing: Bool
+    let progress: CGFloat // 1 -> 0 on close
+    let startFrame: CGRect
+    let containerFrame: CGRect
+
+    func body(content: Content) -> some View {
+        if isClosing {
+            // Close progress from 0 (no change) to 1 (at start frame)
+            let t = max(0, min(1, 1 - progress))
+            let startX = startFrame.minX - containerFrame.origin.x
+            let startY = startFrame.minY - containerFrame.origin.y
+            let containerWidth = max(containerFrame.width, 1)
+            let startScale = max(startFrame.width, 1) / containerWidth
+            let scale = 1 + (startScale - 1) * t
+            let offsetX = startX * t
+            let offsetY = startY * t
+
+            return content
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(x: offsetX, y: offsetY)
+        } else {
+            return content
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
         }
     }
 }

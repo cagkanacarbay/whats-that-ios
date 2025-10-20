@@ -31,8 +31,12 @@ struct DiscoveriesHomeView: View {
     @State private var heroDragRotation: Double = 0
     @State private var heroDragShadowOpacity: Double = 0
     @State private var heroDragCornerRadius: CGFloat = 0
+    @State private var heroCloseStartTranslation: CGSize = .zero
+    @State private var heroCloseStartScale: CGFloat = 1
+    @State private var heroCloseStartRotation: Double = 0
     @State private var hiddenDiscovery: HiddenDiscovery?
     @State private var cardFrames: [Int64: CGRect] = [:]
+    @State private var isCardFramesReactionScheduled: Bool = false
     @State private var safeAreaBottomInset: CGFloat = 0
 
     private let headerHeight: CGFloat = 110
@@ -145,14 +149,29 @@ struct DiscoveriesHomeView: View {
                     pendingCreatedSummary = nil
                 }
                 .onChange(of: cardFrames) { _ in
-                    presentPendingDiscoveryIfNeeded()
+                    // Defer reacting to card frame changes to the next runloop tick.
+                    // Rationale: updating hero presentation state inside the same frame
+                    // can cause a layout → preference write → layout loop, which triggers
+                    // "Bound preference … tried to update multiple times per frame".
+                    // Coalesce multiple rapid updates and run once off-frame.
+                    guard pendingDiscoveryId != nil else { return }
+                    if !isCardFramesReactionScheduled {
+                        isCardFramesReactionScheduled = true
+                        DispatchQueue.main.async {
+                            // Reset the coalescing flag and perform the action.
+                            isCardFramesReactionScheduled = false
+                            presentPendingDiscoveryIfNeeded()
+                        }
+                    }
                 }
 
                 header(opacity: headerOpacity)
 
                 if let context = heroContext {
+                    let targetCloseFrame = cardFrames[context.discovery.id] ?? context.startFrame
                     DiscoveryHeroOverlay(
                         context: context,
+                        destinationFrame: targetCloseFrame,
                         progress: heroProgress,
                         contentOpacity: heroContentOpacity,
                         isContentReady: heroIsSettled,
@@ -163,10 +182,13 @@ struct DiscoveriesHomeView: View {
                         gestureRotation: heroDragRotation,
                         gestureShadowOpacity: heroDragShadowOpacity,
                         gestureCornerRadius: heroDragCornerRadius,
+                        closeStartTranslation: heroCloseStartTranslation,
+                        closeStartScale: heroCloseStartScale,
+                        closeStartRotation: heroCloseStartRotation,
                         backgroundColor: backgroundColor,
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
-                        onClose: handleDetailDismissal,
+                        onClose: { handleDetailDismissal(fromGesture: false) },
                         onShare: makeShareAction(for: context.discovery),
                         onShowOptions: nil
                     )
@@ -414,8 +436,13 @@ struct DiscoveriesHomeView: View {
         let shouldDismiss = predictedTranslation > heroDismissalThreshold || translation > heroDismissalThreshold
 
         if shouldDismiss {
+            // Capture the current interactive transform as the starting
+            // point for the uniform close animation.
+            heroCloseStartTranslation = heroDragTranslation
+            heroCloseStartScale = heroDragScale
+            heroCloseStartRotation = heroDragRotation
             resetHeroInteraction(animated: true)
-            handleDetailDismissal()
+            handleDetailDismissal(fromGesture: true)
         } else {
             resetHeroInteraction(animated: true)
             if let sessionId = heroContext?.sessionId {
@@ -424,10 +451,16 @@ struct DiscoveriesHomeView: View {
         }
     }
 
-    private func handleDetailDismissal() {
+    private func handleDetailDismissal(fromGesture: Bool = false) {
         guard let context = heroContext else { return }
 
         heroIsInteracting = false
+        if !fromGesture {
+            // Back button dismissal should close from the expanded state.
+            heroCloseStartTranslation = .zero
+            heroCloseStartScale = 1
+            heroCloseStartRotation = 0
+        }
         resetHeroInteraction(animated: true)
         heroIsClosing = true
         heroIsSettled = false
@@ -935,6 +968,7 @@ private struct DiscoveriesGrid: View {
                             value: [discovery.id: proxy.frame(in: .global)]
                         )
                     }
+                    .transaction { tx in tx.animation = nil }
                 )
                 .onAppear {
                     Task { await onLoadMore(discovery) }
@@ -1150,6 +1184,7 @@ private final class DiscoveryHeroImageCache {
 private struct DiscoveryHeroOverlay: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let context: DiscoveryHeroContext
+    let destinationFrame: CGRect
     let progress: CGFloat
     let contentOpacity: Double
     let isContentReady: Bool
@@ -1160,6 +1195,9 @@ private struct DiscoveryHeroOverlay: View {
     let gestureRotation: Double
     let gestureShadowOpacity: Double
     let gestureCornerRadius: CGFloat
+    let closeStartTranslation: CGSize
+    let closeStartScale: CGFloat
+    let closeStartRotation: Double
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let onClose: () -> Void
@@ -1169,6 +1207,7 @@ private struct DiscoveryHeroOverlay: View {
 
     init(
         context: DiscoveryHeroContext,
+        destinationFrame: CGRect,
         progress: CGFloat,
         contentOpacity: Double,
         isContentReady: Bool,
@@ -1179,6 +1218,9 @@ private struct DiscoveryHeroOverlay: View {
         gestureRotation: Double,
         gestureShadowOpacity: Double,
         gestureCornerRadius: CGFloat,
+        closeStartTranslation: CGSize,
+        closeStartScale: CGFloat,
+        closeStartRotation: Double,
         backgroundColor: Color,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
@@ -1187,6 +1229,7 @@ private struct DiscoveryHeroOverlay: View {
         onShowOptions: (() -> Void)?
     ) {
         self.context = context
+        self.destinationFrame = destinationFrame
         self.progress = progress
         self.contentOpacity = contentOpacity
         self.isContentReady = isContentReady
@@ -1197,6 +1240,9 @@ private struct DiscoveryHeroOverlay: View {
         self.gestureRotation = gestureRotation
         self.gestureShadowOpacity = gestureShadowOpacity
         self.gestureCornerRadius = gestureCornerRadius
+        self.closeStartTranslation = closeStartTranslation
+        self.closeStartScale = closeStartScale
+        self.closeStartRotation = closeStartRotation
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.onClose = onClose
@@ -1256,7 +1302,7 @@ private struct DiscoveryHeroOverlay: View {
                     phase: isClosing ? "close" : (isChromeReady ? "settled" : "open"),
                     progress: progress,
                     containerSize: containerSize,
-                    startFrame: context.startFrame,
+                    startFrame: destinationFrame,
                     width: cardWidth,
                     height: cardHeight,
                     imageHeight: imageHeightForView,
@@ -1326,8 +1372,13 @@ private struct DiscoveryHeroOverlay: View {
                     .modifier(UniformCloseTransform(
                         isClosing: isClosing,
                         progress: progress,
-                        startFrame: context.startFrame,
-                        containerFrame: containerFrame
+                        startFrame: destinationFrame,
+                        containerFrame: containerFrame,
+                        initialScale: closeStartScale,
+                        initialOffset: closeStartTranslation,
+                        initialRotation: closeStartRotation,
+                        baseWidth: cardWidth,
+                        baseHeight: cardHeight
                     ))
                     // Preserve interactive transforms while not closing.
                     .if(!isClosing) { view in
@@ -1465,24 +1516,40 @@ private struct UniformCloseTransform: ViewModifier {
     let progress: CGFloat // 1 -> 0 on close
     let startFrame: CGRect
     let containerFrame: CGRect
+    let initialScale: CGFloat
+    let initialOffset: CGSize
+    let initialRotation: Double
+    let baseWidth: CGFloat
+    let baseHeight: CGFloat
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if isClosing {
             // Close progress from 0 (no change) to 1 (at start frame)
             let t = max(0, min(1, 1 - progress))
-            let startX = startFrame.minX - containerFrame.origin.x
-            let startY = startFrame.minY - containerFrame.origin.y
+            // Compute the target center relative to the overlay's top-left origin.
+            let targetCenterX = startFrame.midX - containerFrame.origin.x
+            let targetCenterY = startFrame.midY - containerFrame.origin.y
             let containerWidth = max(containerFrame.width, 1)
             let startScale = max(startFrame.width, 1) / containerWidth
-            let scale = 1 + (startScale - 1) * t
-            let offsetX = startX * t
-            let offsetY = startY * t
+            // Interpolate from the interactive transform to the card frame.
+            let clampedInitialScale = initialScale.isFinite ? max(0.5, min(initialScale, 1.2)) : 1
+            let scale = clampedInitialScale + (startScale - clampedInitialScale) * t
+            // Current center (before offset) is at half of the base size.
+            let currentCenterX = baseWidth / 2
+            let currentCenterY = baseHeight / 2
+            let targetOffsetX = targetCenterX - currentCenterX
+            let targetOffsetY = targetCenterY - currentCenterY
+            let offsetX = initialOffset.width + (targetOffsetX - initialOffset.width) * t
+            let offsetY = initialOffset.height + (targetOffsetY - initialOffset.height) * t
+            let rotation = initialRotation + (0 - initialRotation) * t
 
-            return content
-                .scaleEffect(scale, anchor: .topLeading)
+            content
+                .scaleEffect(scale, anchor: .center)
+                .rotation3DEffect(.degrees(rotation), axis: (x: 0, y: 1, z: 0))
                 .offset(x: offsetX, y: offsetY)
         } else {
-            return content
+            content
         }
     }
 }

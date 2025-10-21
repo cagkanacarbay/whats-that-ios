@@ -188,14 +188,11 @@ private struct ErrorStateView: View {
 
 private struct ConfirmationStateView: View {
     private enum ActiveAlert: Identifiable {
-        case creditInfo(balance: Int)
         case outOfCredits
         case locationPermissions
 
         var id: String {
             switch self {
-            case .creditInfo:
-                return "creditInfo"
             case .outOfCredits:
                 return "outOfCredits"
             case .locationPermissions:
@@ -213,17 +210,42 @@ private struct ConfirmationStateView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var activeAlert: ActiveAlert?
+    @State private var bottomOverlayHeight: CGFloat = 0
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
     }
 
+    #if canImport(UIKit)
+    private var previewUIImage: UIImage? {
+        UIImage(data: state.displayImageData)
+    }
+    #endif
+
     private var previewImage: Image? {
         #if canImport(UIKit)
-        guard let uiImage = UIImage(data: state.displayImageData) else {
+        guard let uiImage = previewUIImage else {
             return nil
         }
         return Image(uiImage: uiImage)
+        #else
+        return nil
+        #endif
+    }
+
+    private enum PreviewOrientation {
+        case portrait
+        case landscape
+    }
+
+    private var previewOrientation: PreviewOrientation? {
+        #if canImport(UIKit)
+        guard let image = previewUIImage else { return nil }
+        if image.size.height >= image.size.width {
+            return .portrait
+        } else {
+            return .landscape
+        }
         #else
         return nil
         #endif
@@ -277,7 +299,7 @@ private struct ConfirmationStateView: View {
     }
 
     private var retakeIconName: String {
-        flowType == .upload ? "arrow.up.tray" : "arrow.counterclockwise"
+        flowType == .upload ? "arrow.triangle.2.circlepath" : "arrow.counterclockwise"
     }
 
     private var hasResolvedLocation: Bool {
@@ -294,17 +316,24 @@ private struct ConfirmationStateView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let topInset = proxy.safeAreaInsets.top
+            let topInset = proxy.safeAreaInsets.top - 10
             // Overlays already respect the safe area; only add minimal extra breathing room.
             let overlayTopPadding = topInset > 0 ? BrandSpacing.small : BrandSpacing.medium
             let overlayControlHeight: CGFloat = 48
-            let previewTopPadding = topInset + overlayTopPadding + overlayControlHeight + BrandSpacing.small
+            let minimumTopPadding = topInset + overlayTopPadding
+            let previewTopSpacing: CGFloat = -20
+            let previewBottomSpacing: CGFloat = BrandSpacing.medium
+            let previewTopPadding = max(
+                topInset + overlayTopPadding + overlayControlHeight + previewTopSpacing,
+                minimumTopPadding
+            )
+            let previewAvailableHeight = max(proxy.size.height - previewTopPadding - bottomOverlayHeight - previewBottomSpacing, 0)
 
             ZStack {
                 palette.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    previewSection(size: proxy.size)
+                    previewSection(size: proxy.size, availableHeight: previewAvailableHeight)
                         .padding(.top, previewTopPadding)
                     Spacer(minLength: 0)
                 }
@@ -336,39 +365,48 @@ private struct ConfirmationStateView: View {
             }
             .overlay(alignment: .bottom) {
                 bottomOverlay
+                    .padding(.top, previewBottomSpacing)
                     .padding(.horizontal, BrandSpacing.large)
-                    .padding(.bottom, BrandSpacing.large * CGFloat(1.1))
+                    .padding(.bottom, BrandSpacing.small)
                     .frame(maxWidth: proxy.size.width)
             }
         }
+        .onPreferenceChange(BottomOverlayHeightPreferenceKey.self) { bottomOverlayHeight = $0 }
         .alert(item: $activeAlert) { alert(for: $0) }
     }
 
     @ViewBuilder
-    private func previewSection(size: CGSize) -> some View {
+    private func previewSection(size: CGSize, availableHeight: CGFloat) -> some View {
         let fallbackHeight = max(size.height * 0.62, 320)
-        if let image = previewImage {
-            image
-                .resizable()
-                .scaledToFit()
-                .frame(width: size.width)
-                .clipped()
-                .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
-        } else {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(palette.border.opacity(0.1))
-                .frame(width: size.width, height: fallbackHeight)
-                .overlay {
-                    VStack(spacing: 10) {
-                        Image(systemName: "photo")
-                            .font(.system(size: 32, weight: .medium))
-                            .foregroundStyle(palette.textSecondary)
-                        Text("Preview unavailable")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(palette.textSecondary)
-                    }
+        let containerHeight = availableHeight > 0 ? availableHeight : fallbackHeight
+        let resolvedHeight = max(containerHeight, 1)
+        return ZStack {
+            Group {
+                if let image = previewImage {
+                    let orientation = previewOrientation
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: orientation == .landscape ? .fit : .fill)
+                        .frame(width: size.width, height: resolvedHeight, alignment: .center)
+                        .clipped()
+                } else {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(palette.border.opacity(0.1))
+                        .overlay {
+                            VStack(spacing: 10) {
+                                Image(systemName: "photo")
+                                    .font(.system(size: 32, weight: .medium))
+                                    .foregroundStyle(palette.textSecondary)
+                                Text("Preview unavailable")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(palette.textSecondary)
+                            }
+                        }
                 }
+            }
         }
+        .frame(width: size.width, height: resolvedHeight, alignment: .center)
+        .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
     }
     @ViewBuilder
     private var topTrailingControl: some View {
@@ -389,20 +427,16 @@ private struct ConfirmationStateView: View {
     }
 
     private var bottomOverlay: some View {
-        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-            Button {
-                guard let balance = creditBalance else { return }
-                if balance == 0 {
-                    activeAlert = .outOfCredits
-                } else {
-                    activeAlert = .creditInfo(balance: balance)
-                }
-            } label: {
+        let chipToActionsSpacing: CGFloat = 4
+        return VStack(alignment: .leading, spacing: chipToActionsSpacing) {
+            Button(action: {}) {
                 Text(creditDisplayText)
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(creditTint)
-                    .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, BrandSpacing.small)
+                    .padding(.top, BrandSpacing.small / 2)
+                    .padding(.bottom, 1)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(creditBalance == nil)
@@ -449,6 +483,12 @@ private struct ConfirmationStateView: View {
                 .disabled(isContinueDisabled)
             }
         }
+        .background(
+            GeometryReader { geometry in
+                Color.clear
+                    .preference(key: BottomOverlayHeightPreferenceKey.self, value: geometry.size.height)
+            }
+        )
     }
 
     private func overlayCircleButton(systemName: String, action: @escaping () -> Void) -> some View {
@@ -518,12 +558,6 @@ private struct ConfirmationStateView: View {
 
     private func alert(for alert: ActiveAlert) -> Alert {
         switch alert {
-        case let .creditInfo(balance):
-            return Alert(
-                title: Text("Credit information"),
-                message: Text("Each discovery costs 1 credit. You have \(balance)."),
-                dismissButton: .default(Text("OK"))
-            )
         case .outOfCredits:
             return Alert(
                 title: Text("Out of credits"),
@@ -558,6 +592,13 @@ private struct ConfirmationStateView: View {
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
         #endif
+    }
+}
+
+private struct BottomOverlayHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

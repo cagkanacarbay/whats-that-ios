@@ -4,6 +4,10 @@
 .LSOverride
 Icon?
 
+# Local cache artifacts
+.cache/
+.module-cache/
+
 # Editors
 *.swp
 *~

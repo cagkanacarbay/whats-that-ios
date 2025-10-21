@@ -40,14 +40,12 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
         configuration.filter = .images
         configuration.preferredAssetRepresentationMode = .current
 
-        if continuation != nil {
-            continuation?.resume(throwing: PhotoLibrarySelectionError.cancelled)
-            continuation = nil
-        }
+        resumeCancellationIfNeeded()
 
         return try await withCheckedThrowingContinuation { continuation in
             let picker = PHPickerViewController(configuration: configuration)
             picker.delegate = self
+            picker.presentationController?.delegate = self
             self.continuation = continuation
 
             guard let presenter = CameraCaptureService.topViewController() else {
@@ -130,14 +128,28 @@ extension PhotoLibrarySelectionService: PHPickerViewControllerDelegate {
         }
 
         guard let result = results.first else {
-            continuation.resume(throwing: PhotoLibrarySelectionError.cancelled)
-            self.continuation = nil
+            resumeCancellationIfNeeded()
             picker.dismiss(animated: true)
             return
         }
 
         self.continuation = nil
         loadAsset(result, in: picker, continuation: continuation)
+    }
+}
+
+extension PhotoLibrarySelectionService: UIAdaptivePresentationControllerDelegate {
+    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard presentationController.presentedViewController is PHPickerViewController else { return }
+        resumeCancellationIfNeeded()
+    }
+}
+
+private extension PhotoLibrarySelectionService {
+    func resumeCancellationIfNeeded() {
+        guard let continuation else { return }
+        continuation.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
+        self.continuation = nil
     }
 }
 #endif

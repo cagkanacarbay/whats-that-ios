@@ -128,6 +128,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         flowState = .cancelled
         error = nil
         locationService.stopTracking()
+        flowState = .idle
     }
 
     func retake() {
@@ -180,6 +181,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 let media = try await captureService.capturePhoto()
                 await prepareConfirmation(with: media)
             } catch {
+                if DiscoveryFlowCancellationError.isCancellation(error) {
+                    self.error = nil
+                    flowState = .cancelled
+                    flowState = .idle
+                    return
+                }
                 self.error = .captureFailed
                 flowState = .error(message: FlowError.captureFailed.errorDescription ?? "Capture failed")
             }
@@ -196,6 +203,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 let media = try await selectionService.selectPhoto()
                 await prepareConfirmation(with: media)
             } catch {
+                if DiscoveryFlowCancellationError.isCancellation(error) {
+                    self.error = nil
+                    flowState = .cancelled
+                    flowState = .idle
+                    return
+                }
                 self.error = .selectionFailed
                 flowState = .error(message: FlowError.selectionFailed.errorDescription ?? "Selection failed")
             }
@@ -413,6 +426,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         analysisState = nil
         flowState = .cancelled
         locationService.stopTracking()
+        flowState = .idle
     }
 
     private func analysisStateUpdated(_ transform: (inout DiscoveryAnalysisState) -> Void) -> DiscoveryAnalysisState {

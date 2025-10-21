@@ -39,7 +39,7 @@ public final class CameraCaptureService: NSObject, DiscoveryCaptureService {
         }
 
         if continuation != nil {
-            continuation?.resume(throwing: CameraCaptureError.cancelled)
+            continuation?.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
             continuation = nil
         }
 
@@ -118,7 +118,7 @@ extension CameraCaptureService: UIImagePickerControllerDelegate, UINavigationCon
     }
 
     public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-        continuation?.resume(throwing: CameraCaptureError.cancelled)
+        continuation?.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
         continuation = nil
         picker.dismiss(animated: true)
     }

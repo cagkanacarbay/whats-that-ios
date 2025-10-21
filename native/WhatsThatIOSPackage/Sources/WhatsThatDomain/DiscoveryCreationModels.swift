@@ -5,6 +5,27 @@ public enum DiscoveryCreationFlowType: String, Equatable, Sendable {
     case upload
 }
 
+public enum DiscoveryFlowCancellationError: Error, Equatable, Sendable {
+    case userCancelled
+
+    public static func isCancellation(_ error: Error) -> Bool {
+        if let cancellation = error as? DiscoveryFlowCancellationError, cancellation == .userCancelled {
+            return true
+        }
+
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+            return true
+        }
+
+        return false
+    }
+}
+
 public struct DiscoveryCapturedMedia: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let data: Data

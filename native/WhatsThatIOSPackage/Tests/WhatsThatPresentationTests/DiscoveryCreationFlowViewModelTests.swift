@@ -27,6 +27,11 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         let selectionService = StubSelectionService(media: capturedMedia)
         let historyRepository = StubHistoryRepository()
         let creditsRepository = StubCreditsRepository(balance: 5)
+        let creditBalanceStore = CreditBalanceStore(
+            repository: creditsRepository,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            ttl: 0
+        )
         let analysisClient = StubAnalysisClient(
             events: [
                 .status("Uploading photo…"),
@@ -48,6 +53,7 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
             selectionService: selectionService,
             historyRepository: historyRepository,
             creditsRepository: creditsRepository,
+            creditBalanceStore: creditBalanceStore,
             analysisClient: analysisClient,
             imageEncoder: imageEncoder,
             pushService: pushService,
@@ -90,6 +96,75 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         XCTAssertFalse(analysisState.displayMarkdown.contains("metadata_json"))
 
         await fulfillment(of: [createdExpectation], timeout: 1.0)
+    }
+
+    func testUploadCancellationReturnsToIdleState() async {
+        let historyRepository = StubHistoryRepository()
+        let creditsRepository = StubCreditsRepository(balance: 5)
+        let creditBalanceStore = CreditBalanceStore(
+            repository: creditsRepository,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            ttl: 0
+        )
+
+        let viewModel = DiscoveryCreationFlowViewModel(
+            configuration: .init(type: .upload, maxImageDimension: 2048, recentHistoryLimit: 3),
+            captureService: StubCaptureService(),
+            selectionService: CancellingSelectionService(),
+            historyRepository: historyRepository,
+            creditsRepository: creditsRepository,
+            creditBalanceStore: creditBalanceStore,
+            analysisClient: StubAnalysisClient(events: []),
+            imageEncoder: StubImageEncoder(),
+            pushService: StubPushService(),
+            locationService: StubLocationService(location: nil)
+        )
+
+        viewModel.startFlow()
+
+        let reset = await waitUntil({ viewModel.flowState == .idle })
+        XCTAssertTrue(reset, "Expected idle state after user cancels selection")
+        XCTAssertEqual(viewModel.flowState, .idle)
+        XCTAssertNil(viewModel.error)
+    }
+
+    func testCameraCancellationReturnsToIdleState() async {
+        let capturedMedia = DiscoveryCapturedMedia(
+            data: Data(repeating: 0xAA, count: 8),
+            contentType: "image/jpeg",
+            originalFilename: "placeholder.jpg",
+            pixelWidth: 800,
+            pixelHeight: 600,
+            createdAt: Date(),
+            location: nil
+        )
+        let historyRepository = StubHistoryRepository()
+        let creditsRepository = StubCreditsRepository(balance: 2)
+        let creditBalanceStore = CreditBalanceStore(
+            repository: creditsRepository,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            ttl: 0
+        )
+
+        let viewModel = DiscoveryCreationFlowViewModel(
+            configuration: .init(type: .camera, maxImageDimension: 2048, recentHistoryLimit: 3),
+            captureService: CancellingCaptureService(),
+            selectionService: StubSelectionService(media: capturedMedia),
+            historyRepository: historyRepository,
+            creditsRepository: creditsRepository,
+            creditBalanceStore: creditBalanceStore,
+            analysisClient: StubAnalysisClient(events: []),
+            imageEncoder: StubImageEncoder(),
+            pushService: StubPushService(),
+            locationService: StubLocationService(location: nil)
+        )
+
+        viewModel.startFlow()
+
+        let reset = await waitUntil({ viewModel.flowState == .idle })
+        XCTAssertTrue(reset, "Expected idle state after user cancels capture")
+        XCTAssertEqual(viewModel.flowState, .idle)
+        XCTAssertNil(viewModel.error)
     }
 
     // MARK: - Helpers
@@ -212,6 +287,26 @@ private struct StubImageEncoder: DiscoveryImageEncodingService {
 private struct StubPushService: DiscoveryPushService {
     func requestPushAuthorizationIfNeeded() async throws -> String? {
         nil
+    }
+}
+
+private final class CancellingSelectionService: DiscoverySelectionService {
+    func requestPermission() async -> Bool {
+        true
+    }
+
+    func selectPhoto() async throws -> DiscoveryCapturedMedia {
+        throw DiscoveryFlowCancellationError.userCancelled
+    }
+}
+
+private final class CancellingCaptureService: DiscoveryCaptureService {
+    func requestPermission(for type: DiscoveryCreationFlowType) async -> Bool {
+        type == .camera
+    }
+
+    func capturePhoto() async throws -> DiscoveryCapturedMedia {
+        throw DiscoveryFlowCancellationError.userCancelled
     }
 }
 

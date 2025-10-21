@@ -92,15 +92,6 @@ struct DiscoveriesHomeView: View {
                     .ignoresSafeArea()
 
                 ScrollView {
-                    GeometryReader { scrollProxy in
-                        Color.clear
-                            .preference(
-                                key: ScrollOffsetPreferenceKey.self,
-                                value: scrollProxy.frame(in: .named("discoveriesScroll")).minY
-                            )
-                    }
-                    .frame(height: 0)
-
                     VStack(spacing: 0) {
                         Color.clear.frame(height: headerHeight)
 
@@ -133,8 +124,10 @@ struct DiscoveriesHomeView: View {
                     await viewModel.loadInitialIfNeeded()
                     presentPendingDiscoveryIfNeeded()
                 }
-                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-                    scrollOffset = value
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
+                    guard let rawValue else { return }
+                    let adjusted = rawValue - headerHeight
+                    scrollOffset = adjusted
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
@@ -265,10 +258,6 @@ struct DiscoveriesHomeView: View {
 
         let sessionId = UUID()
         let cachedImage = DiscoveryHeroImageCache.shared.image(for: discovery.id)
-        let snapshot = cachedImage ?? captureSnapshot(of: resolvedFrame)
-        if cachedImage == nil, let snapshot {
-            DiscoveryHeroImageCache.shared.store(snapshot, for: discovery.id)
-        }
 
         hiddenDiscovery = HiddenDiscovery(id: discovery.id, sessionId: sessionId)
         heroContext = DiscoveryHeroContext(
@@ -276,7 +265,7 @@ struct DiscoveriesHomeView: View {
             discovery: discovery,
             imageURL: resolvedImageURL,
             startFrame: resolvedFrame,
-            placeholderImage: snapshot,
+            placeholderImage: cachedImage,
             cardAspectRatio: resolvedFrame.height / max(resolvedFrame.width, 1)
         )
         heroProgress = 0
@@ -491,26 +480,6 @@ struct DiscoveriesHomeView: View {
             voiceoverController.isDetailOverlayActive = false
         }
     }
-
-    private func keyWindow() -> UIWindow? {
-        UIApplication.shared
-            .connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap { $0.windows }
-            .first(where: { $0.isKeyWindow })
-    }
-
-    private func captureSnapshot(of frame: CGRect) -> UIImage? {
-        guard let window = keyWindow() else { return nil }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = UIScreen.main.scale
-        let renderer = UIGraphicsImageRenderer(bounds: frame, format: format)
-        return renderer.image { context in
-            context.cgContext.translateBy(x: -frame.origin.x, y: -frame.origin.y)
-            window.layer.render(in: context.cgContext)
-    }
-}
 
     private func updateSafeAreaBottomInsetIfNeeded(_ value: CGFloat) {
         if abs(value - safeAreaBottomInset) > 0.5 {
@@ -821,10 +790,13 @@ private struct FeedErrorToast: View {
 }
 
 private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+    static var defaultValue: CGFloat? = nil
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        let newValue = nextValue()
+        if let newValue {
+            value = newValue
+        }
     }
 }
 private struct DiscoveryCardFramePreferenceKey: PreferenceKey {
@@ -911,10 +883,20 @@ private struct DiscoveriesGrid: View {
                 )
                 .background(
                     GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: DiscoveryCardFramePreferenceKey.self,
-                            value: [discovery.id: proxy.frame(in: .global)]
-                        )
+                        let isFirstDiscovery = discovery.id == viewModel.discoveries.first?.id
+                        let globalFrame = proxy.frame(in: .global)
+                        let localFrame = proxy.frame(in: .named("discoveriesScroll"))
+                        Color.clear
+                            .preference(
+                                key: DiscoveryCardFramePreferenceKey.self,
+                                value: [discovery.id: globalFrame]
+                            )
+                            .if(isFirstDiscovery) { view in
+                                view.preference(
+                                    key: ScrollOffsetPreferenceKey.self,
+                                    value: localFrame.minY
+                                )
+                            }
                     }
                     .transaction { tx in tx.animation = nil }
                 )
@@ -1013,33 +995,7 @@ private struct DiscoveryCardImage: View {
     private func cacheIfNeeded(image: DiscoveryPlatformImage) {
         guard !didCacheSnapshot else { return }
         didCacheSnapshot = true
-
-#if canImport(UIKit)
-        let rendererFormat = UIGraphicsImageRendererFormat.default()
-        rendererFormat.scale = UIScreen.main.scale
-        let targetSize = CGSize(width: width, height: height)
-        let renderer = UIGraphicsImageRenderer(size: targetSize, format: rendererFormat)
-        let snapshot = renderer.image { _ in
-            UIColor.clear.setFill()
-            UIBezierPath(rect: CGRect(origin: .zero, size: targetSize)).fill()
-
-            let sourceSize = image.size
-            guard sourceSize.width > 0 && sourceSize.height > 0 else {
-                image.draw(in: CGRect(origin: .zero, size: targetSize))
-                return
-            }
-
-            let scale = max(targetSize.width / sourceSize.width, targetSize.height / sourceSize.height)
-            let scaledSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
-            let origin = CGPoint(
-                x: (targetSize.width - scaledSize.width) / 2,
-                y: (targetSize.height - scaledSize.height) / 2
-            )
-            let drawRect = CGRect(origin: origin, size: scaledSize)
-            image.draw(in: drawRect)
-        }
-        DiscoveryHeroImageCache.shared.store(snapshot, for: discoveryId)
-#endif
+        DiscoveryHeroImageCache.shared.store(image, for: discoveryId)
     }
 
     private var placeholder: some View {
@@ -1129,6 +1085,10 @@ private final class DiscoveryHeroImageCache {
     }
 }
 
+private enum DiscoveryHeroLayout {
+    static let expandedImageHeightFraction: CGFloat = 0.8
+}
+
 private struct DiscoveryHeroOverlay: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let context: DiscoveryHeroContext
@@ -1215,6 +1175,7 @@ private struct DiscoveryHeroOverlay: View {
                 containerOrigin: CGPoint(x: 0, y: containerFrame.origin.y),
                 targetAspectRatio: context.cardAspectRatio,
                 progress: progress,
+                targetExpandedHeightFraction: DiscoveryHeroLayout.expandedImageHeightFraction,
                 enforceAspectForImage: isClosing
             )
             // safeAreaInsets already captured above
@@ -1250,15 +1211,15 @@ private struct DiscoveryHeroOverlay: View {
                 // Single header overlay on image: 0 while closing/dragging, ramps in during open,
                 // and stays fully visible once settled.
                 let headerOverlayOpacity: Double = isChromeReady ? (isClosing || isInteracting ? 0 : 1) : headerOpacityRaw
-                // Compute base target sizes for the hero header at the expanded state.
-                let targetHeaderHeight = min(containerSize.height, containerSize.width * context.cardAspectRatio)
+                // Width-driven height ensures we match the card aspect during close.
+                let widthDrivenCardHeight = min(containerSize.height, containerSize.width * context.cardAspectRatio)
                 // During closing we keep the base frame at expanded header size and uniformly
                 // transform the whole card to the start frame to preserve crop.
                 let cardWidth: CGFloat = isClosing ? containerSize.width : geometry.size.width
                 // Always present the full card height during open so the background
                 // below the image is visible and expands smoothly.
-                let cardHeight: CGFloat = isClosing ? targetHeaderHeight : geometry.size.height
-                let imageHeightForView: CGFloat = isClosing ? targetHeaderHeight : geometry.imageHeight
+                let cardHeight: CGFloat = isClosing ? widthDrivenCardHeight : geometry.size.height
+                let imageHeightForView: CGFloat = isClosing ? widthDrivenCardHeight : geometry.imageHeight
                 let effectivePullDown = (isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
                 let preferPlaceholder = (!isChromeReady) || isInteracting
 
@@ -1395,7 +1356,15 @@ private struct DiscoveryHeroOverlay: View {
         let shadowRadius: CGFloat
         let shadowYOffset: CGFloat
 
-        init(startFrame: CGRect, containerSize: CGSize, containerOrigin: CGPoint, targetAspectRatio: CGFloat, progress: CGFloat, enforceAspectForImage: Bool = false) {
+        init(
+            startFrame: CGRect,
+            containerSize: CGSize,
+            containerOrigin: CGPoint,
+            targetAspectRatio: CGFloat,
+            progress: CGFloat,
+            targetExpandedHeightFraction: CGFloat,
+            enforceAspectForImage: Bool = false
+        ) {
             let clamped = max(0, min(progress, 1))
             let startX = startFrame.minX - containerOrigin.x
             let startY = startFrame.minY - containerOrigin.y
@@ -1412,14 +1381,18 @@ private struct DiscoveryHeroOverlay: View {
             let imageHeight: CGFloat
             if enforceAspectForImage {
                 let ratioHeight = width * aspectRatio
-                let clampedHeight = min(containerSize.height, ratioHeight)
+                let desiredHeight = min(containerSize.height, ratioHeight)
+                let resolvedHeight = max(startFrame.height, desiredHeight)
                 // Interpolate between the starting card height and the
                 // width-driven target to keep smoothness.
-                imageHeight = HeroGeometry.lerp(startFrame.height, clampedHeight, clamped)
+                imageHeight = HeroGeometry.lerp(startFrame.height, resolvedHeight, clamped)
             } else {
-                let resolvedTargetHeight = min(containerSize.height, containerSize.width * aspectRatio)
-                let targetImageHeight = max(startFrame.height, resolvedTargetHeight)
-                imageHeight = HeroGeometry.lerp(startFrame.height, targetImageHeight, clamped)
+                let widthDrivenHeight = min(containerSize.height, containerSize.width * aspectRatio)
+                let clampedFraction = max(0, min(targetExpandedHeightFraction, 1))
+                let fractionHeight = containerSize.height * clampedFraction
+                let desiredHeight = min(containerSize.height, max(widthDrivenHeight, fractionHeight))
+                let resolvedHeight = max(startFrame.height, desiredHeight)
+                imageHeight = HeroGeometry.lerp(startFrame.height, resolvedHeight, clamped)
             }
 
             self.size = CGSize(width: width, height: height)

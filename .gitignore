@@ -7,6 +7,8 @@ Icon?
 # Local cache artifacts
 .cache/
 .module-cache/
+native/.clang-module-cache
+.swift-module-cache
 
 # Editors
 *.swp

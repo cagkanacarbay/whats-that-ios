@@ -37,9 +37,42 @@ struct DiscoveriesHomeView: View {
     @State private var cardFrames: [Int64: CGRect] = [:]
     @State private var isCardFramesReactionScheduled: Bool = false
     @State private var safeAreaBottomInset: CGFloat = 0
+    @State private var headerHeight: CGFloat = 110
+    @State private var safeAreaTopInset: CGFloat = 0
 
-    private let headerHeight: CGFloat = 110
-    private let collapseDistance: CGFloat = 110
+    private var headerContentHeight: CGFloat {
+        max(headerHeight - safeAreaTopInset, 0)
+    }
+
+    private var headerDesiredSpacing: CGFloat {
+        BrandSpacing.small
+    }
+
+    private var headerSpacerHeight: CGFloat {
+        max(headerContentHeight - headerDesiredSpacing, 0)
+    }
+
+    private var headerTopPadding: CGFloat {
+        BrandSpacing.small * 0.5
+    }
+
+    private var headerStackSpacing: CGFloat {
+        BrandSpacing.small * 0.5
+    }
+
+    private var headerDividerBottomPadding: CGFloat {
+        BrandSpacing.small * 0.25
+    }
+
+    private var gridTopPadding: CGFloat {
+        let approximateTitleToNotch = safeAreaTopInset + headerTopPadding
+        let desiredGap = approximateTitleToNotch * 0.35
+        return max(desiredGap, BrandSpacing.small * 0.75)
+    }
+
+    private var collapseDistance: CGFloat {
+        max(headerContentHeight, 1)
+    }
     private let gridSpacing: CGFloat = 1
     private let gridHorizontalPadding: CGFloat = 1
     private let gridBottomPadding: CGFloat = 16
@@ -82,6 +115,7 @@ struct DiscoveriesHomeView: View {
     var body: some View {
         GeometryReader { proxy in
             let safeBottom = proxy.safeAreaInsets.bottom
+            let safeTop = proxy.safeAreaInsets.top
 
             let _ = proxy.size // retain to keep dependency updates
             let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
@@ -93,7 +127,7 @@ struct DiscoveriesHomeView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: headerHeight)
+                        Color.clear.frame(height: headerSpacerHeight)
 
                         DiscoveriesGrid(
                             viewModel: viewModel,
@@ -113,6 +147,7 @@ struct DiscoveriesHomeView: View {
                             }
                         )
                         .padding(.horizontal, gridHorizontalPadding)
+                        .padding(.top, gridTopPadding)
                         .padding(.bottom, gridBottomPadding)
                     }
                 }
@@ -126,7 +161,7 @@ struct DiscoveriesHomeView: View {
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
-                    let adjusted = rawValue - headerHeight
+                    let adjusted = rawValue - headerSpacerHeight
                     scrollOffset = adjusted
                 }
                 .onChange(of: viewModel.discoveries) {
@@ -158,6 +193,12 @@ struct DiscoveriesHomeView: View {
                 }
 
                 header(opacity: headerOpacity)
+                    .onPreferenceChange(HeaderHeightPreferenceKey.self) { value in
+                        guard value > 0 else { return }
+                        if abs(value - headerHeight) > 0.5 {
+                            headerHeight = value
+                        }
+                    }
 
                 if let context = heroContext {
                     let targetCloseFrame = cardFrames[context.discovery.id] ?? context.startFrame
@@ -191,9 +232,13 @@ struct DiscoveriesHomeView: View {
             }
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
+                updateSafeAreaTopInsetIfNeeded(safeTop)
             }
             .onChange(of: safeBottom) { _, newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
+            }
+            .onChange(of: safeTop) { _, newValue in
+                updateSafeAreaTopInsetIfNeeded(newValue)
             }
         }
         .overlay(alignment: .bottom) {
@@ -487,6 +532,12 @@ struct DiscoveriesHomeView: View {
         }
     }
 
+    private func updateSafeAreaTopInsetIfNeeded(_ value: CGFloat) {
+        if abs(value - safeAreaTopInset) > 0.5 {
+            safeAreaTopInset = value
+        }
+    }
+
     private func imageURL(for discovery: DiscoverySummary) -> URL? {
         guard let path = discovery.imagePath else { return nil }
         return URL(string: path)
@@ -534,7 +585,7 @@ struct DiscoveriesHomeView: View {
 
     @ViewBuilder
     private func header(opacity: Double) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: headerStackSpacing) {
             HStack {
                 Text("My Discoveries")
                     .font(.system(size: 34, weight: .bold))
@@ -575,13 +626,13 @@ struct DiscoveriesHomeView: View {
                 }
             }
             .padding(.horizontal, BrandSpacing.large)
-            .padding(.top, BrandSpacing.large)
+            .padding(.top, headerTopPadding)
 
             Divider()
                 .background(dividerColor)
                 .padding(.horizontal, BrandSpacing.large)
+                .padding(.bottom, headerDividerBottomPadding)
         }
-        .frame(height: headerHeight)
         .background(
             LinearGradient(
                 colors: [
@@ -592,6 +643,12 @@ struct DiscoveriesHomeView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+        )
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: HeaderHeightPreferenceKey.self, value: proxy.size.height)
+            }
         )
         .opacity(opacity)
     }
@@ -799,6 +856,15 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
         }
     }
 }
+
+private struct HeaderHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private struct DiscoveryCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: [Int64: CGRect] = [:]
 
@@ -934,14 +1000,15 @@ private struct DiscoveryCard: View {
                     width: width,
                     height: height
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(borderColor, lineWidth: 0.3)
-                }
                 DiscoveryCardChrome(discovery: discovery)
             }
             .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(borderColor, lineWidth: 0.3)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .opacity(isHidden ? 0 : 1)
@@ -988,7 +1055,6 @@ private struct DiscoveryCardImage: View {
             }
         }
         .frame(width: width, height: height)
-        .contentShape(RoundedRectangle(cornerRadius: 12))
         .clipped()
     }
 
@@ -1237,12 +1303,16 @@ private struct DiscoveryHeroOverlay: View {
                     isChromeReady: isChromeReady
                 )
 
+                let headerOffset = (isClosing || isInteracting) ? 0 : min(scrollOffset, 0)
+
+                let heroHeaderHeight = isClosing ? imageHeightForView : imageHeightForView + safeAreaInsets.top
+
                 let heroHeader = DiscoveryHeroHeaderView(
                     discovery: context.discovery,
                     imageURL: context.imageURL,
                     placeholderImage: context.placeholderImage,
                     preferPlaceholderImage: (!isChromeReady) || isInteracting,
-                    height: imageHeightForView,
+                    height: heroHeaderHeight,
                     pullDownOffset: effectivePullDown,
                     cornerRadius: geometry.cornerRadius,
                     width: cardWidth,
@@ -1254,17 +1324,19 @@ private struct DiscoveryHeroOverlay: View {
                     maxDescriptionLines: 3,
                     overlayOpacity: headerOverlayOpacity
                 )
-                .offset(y: (isChromeReady && scrollOffset > 0) ? scrollOffset : 0)
+                .offset(y: headerOffset)
 
                 let heroCard = ZStack(alignment: .top) {
                     heroHeader
 
                     DiscoveryHeroContentView(
                         discovery: context.discovery,
-                        imageHeight: geometry.imageHeight,
+                        imageHeight: imageHeightForView,
+                        pullDownOffset: effectivePullDown,
                         backgroundColor: backgroundColor,
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
+                        safeAreaTopInset: safeAreaInsets.top,
                         containerWidth: containerWidth,
                         contentOpacity: detailOpacity,
                         isChromeReady: isChromeReady,
@@ -1511,8 +1583,10 @@ private extension View {
 private struct DiscoveryHeroContentView: View {
     let discovery: DiscoverySummary
     let imageHeight: CGFloat
+    let pullDownOffset: CGFloat
     let backgroundColor: Color
     let colorScheme: ColorScheme
+    let safeAreaTopInset: CGFloat
     let containerWidth: CGFloat
     let contentOpacity: Double
     let isChromeReady: Bool
@@ -1525,9 +1599,11 @@ private struct DiscoveryHeroContentView: View {
     init(
         discovery: DiscoverySummary,
         imageHeight: CGFloat,
+        pullDownOffset: CGFloat,
         backgroundColor: Color,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
+        safeAreaTopInset: CGFloat,
         containerWidth: CGFloat,
         contentOpacity: Double,
         isChromeReady: Bool,
@@ -1537,8 +1613,10 @@ private struct DiscoveryHeroContentView: View {
     ) {
         self.discovery = discovery
         self.imageHeight = imageHeight
+        self.pullDownOffset = pullDownOffset
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
+        self.safeAreaTopInset = safeAreaTopInset
         self.containerWidth = containerWidth
         self.contentOpacity = contentOpacity
         self.isChromeReady = isChromeReady
@@ -1550,6 +1628,10 @@ private struct DiscoveryHeroContentView: View {
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
+    }
+
+    private var headerLayoutHeight: CGFloat {
+        imageHeight + safeAreaTopInset + pullDownOffset
     }
 
     var body: some View {
@@ -1565,7 +1647,7 @@ private struct DiscoveryHeroContentView: View {
 
             VStack(spacing: 0) {
                 Color.clear
-                    .frame(height: imageHeight)
+                    .frame(height: headerLayoutHeight)
                     .clipped()
 
                 if isChromeReady {
@@ -1599,13 +1681,14 @@ private struct DiscoveryHeroContentView: View {
         .id(discovery.id)
         .coordinateSpace(name: "hero-scroll")
         .frame(width: containerWidth)
+        .contentMargins(.all, 0, for: .scrollContent)
         .conditionalScrollDisabled(isScrollDisabled)
         .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
             if baselineOffset == nil {
                 baselineOffset = value
             }
             let adjusted = value - (baselineOffset ?? 0)
-            scrollOffset = max(adjusted, 0)
+            scrollOffset = adjusted
         }
         .onAppear {
             voiceoverController.ensureMetadata(for: discovery)

@@ -23,8 +23,6 @@ struct DiscoveryHeroHeaderView: View {
     let isGeometrySource: Bool
     let discoveryId: Int64
     let palette: BrandTheme.Palette
-    let onShare: (() -> Void)?
-    let onLocation: (() -> Void)?
     var gradientFalloff: CGFloat = 0.55
     var maxDescriptionLines: Int = 3
     var overlayOpacity: Double = 1
@@ -52,9 +50,6 @@ struct DiscoveryHeroHeaderView: View {
             .frame(height: height)
             .opacity(overlayOpacity)
             .allowsHitTesting(false)
-
-            headerButtons
-                .opacity(overlayOpacity)
         }
         .frame(maxWidth: .infinity)
         .frame(width: width, height: effectiveHeight)
@@ -65,44 +60,6 @@ struct DiscoveryHeroHeaderView: View {
         max(height + pullDownOffset, 0)
     }
 
-    private var headerButtons: some View {
-        HStack {
-            if let onLocation {
-                headerButton(systemName: "mappin.and.ellipse", action: onLocation)
-            }
-
-            Spacer()
-
-            if let onShare {
-                headerButton(systemName: "square.and.arrow.up", action: onShare)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.bottom, 28)
-    }
-
-    private func headerButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(palette.overlayButtonForeground)
-                .padding(16)
-                .background(palette.overlayButtonBackground)
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .strokeBorder(palette.overlayButtonBorder, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .shadow(
-            color: Color.black.opacity(palette.overlayButtonShadowOpacity),
-            radius: 8,
-            x: 0,
-            y: 4
-        )
-    }
 }
 
 private struct DiscoveryHeroHeaderImageView: View {

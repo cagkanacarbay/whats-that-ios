@@ -4,7 +4,6 @@ import WhatsThatShared
 #if canImport(MarkdownUI)
 import MarkdownUI
 #endif
-import MapKit
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -18,7 +17,6 @@ struct DiscoveryDetailView: View {
     let namespace: Namespace.ID
     let isExpanded: Bool
     let onClose: () -> Void
-    let onShare: (() -> Void)?
     let onShowOptions: (() -> Void)?
     let onPlayAudio: (() -> Void)?
 
@@ -120,11 +118,7 @@ struct DiscoveryDetailView: View {
             namespace: namespace,
             isGeometrySource: true,
             discoveryId: discovery.id,
-            palette: palette,
-            onShare: onShare,
-            onLocation: discovery.location.map { location in
-                { openInMaps(location: location) }
-            }
+            palette: palette
         )
     }
 
@@ -243,16 +237,6 @@ struct DiscoveryDetailView: View {
         return baseInset + 12
     }
 
-    private func openInMaps(location: DiscoveryLocation) {
-        let coordinate = CLLocationCoordinate2D(
-            latitude: location.latitude,
-            longitude: location.longitude
-        )
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = discovery.title
-        mapItem.openInMaps()
-    }
 }
 
 private extension String {

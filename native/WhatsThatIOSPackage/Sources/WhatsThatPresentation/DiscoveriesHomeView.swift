@@ -4,7 +4,6 @@ import OSLog
 import WhatsThatDomain
 import WhatsThatShared
 import UIKit
-import MapKit
 #if canImport(MarkdownUI)
 import MarkdownUI
 #endif
@@ -189,7 +188,6 @@ struct DiscoveriesHomeView: View {
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
                         onClose: { handleDetailDismissal(fromGesture: false) },
-                        onShare: makeShareAction(for: context.discovery),
                         onShowOptions: nil
                     )
                     .ignoresSafeArea(edges: .top)
@@ -494,53 +492,6 @@ struct DiscoveriesHomeView: View {
         }
     }
 
-    private func makeShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
-        guard discovery.shareToken != nil || discovery.imagePath != nil else {
-            return nil
-        }
-
-        return {
-            Task {
-                guard let shareURL = await resolveShareURL(for: discovery) else { return }
-                await MainActor.run {
-                    presentShareSheet(for: discovery, url: shareURL)
-                }
-            }
-        }
-    }
-
-    private func resolveShareURL(for discovery: DiscoverySummary) async -> URL? {
-        if let token = discovery.shareToken {
-            return URL(string: "https://whats-that.app/\(token.uuidString)")
-        }
-
-        if let cached = await DiscoveryAssetCache.shared.cachedImageURL(for: discovery.id) {
-            return cached
-        }
-
-        if let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: path) {
-            return url
-        }
-
-        return nil
-    }
-
-    private func presentShareSheet(for discovery: DiscoverySummary, url: URL) {
-        let message = [
-            discovery.title,
-            discovery.shortDescription ?? discovery.highlight
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n\n")
-
-        let items: [Any] = message.isEmpty ? [url] : [message, url]
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-
-        guard let root = keyWindowRootViewController() else { return }
-        root.present(controller, animated: true)
-    }
-
     private func keyWindow() -> UIWindow? {
         UIApplication.shared
             .connectedScenes
@@ -548,10 +499,6 @@ struct DiscoveriesHomeView: View {
             .filter { $0.activationState == .foregroundActive }
             .flatMap { $0.windows }
             .first(where: { $0.isKeyWindow })
-    }
-
-    private func keyWindowRootViewController() -> UIViewController? {
-        keyWindow()?.rootViewController
     }
 
     private func captureSnapshot(of frame: CGRect) -> UIImage? {
@@ -1202,7 +1149,6 @@ private struct DiscoveryHeroOverlay: View {
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let onClose: () -> Void
-    let onShare: (() -> Void)?
     let onShowOptions: (() -> Void)?
     @State private var scrollOffset: CGFloat = 0
 
@@ -1226,7 +1172,6 @@ private struct DiscoveryHeroOverlay: View {
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
         onClose: @escaping () -> Void,
-        onShare: (() -> Void)?,
         onShowOptions: (() -> Void)?
     ) {
         self.context = context
@@ -1247,7 +1192,6 @@ private struct DiscoveryHeroOverlay: View {
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.onClose = onClose
-        self.onShare = onShare
         self.onShowOptions = onShowOptions
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
     }
@@ -1345,10 +1289,6 @@ private struct DiscoveryHeroOverlay: View {
                     isGeometrySource: false,
                     discoveryId: context.discovery.id,
                     palette: BrandTheme.palette(for: colorScheme),
-                    onShare: onShare,
-                    onLocation: context.discovery.location.map { location in
-                        { openInMaps(location: location) }
-                    },
                     gradientFalloff: 0.55,
                     maxDescriptionLines: 3,
                     overlayOpacity: headerOverlayOpacity
@@ -1365,7 +1305,6 @@ private struct DiscoveryHeroOverlay: View {
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
                         containerWidth: containerWidth,
-                        onShare: onShare,
                         contentOpacity: detailOpacity,
                         isChromeReady: isChromeReady,
                         isMarkdownReady: isChromeReady,
@@ -1537,16 +1476,7 @@ private extension DiscoveryHeroOverlay {
         )
     }
 
-    func openInMaps(location: DiscoveryLocation) {
-        let coordinate = CLLocationCoordinate2D(
-            latitude: location.latitude,
-            longitude: location.longitude
-        )
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = context.discovery.title
-        mapItem.openInMaps()
-    }
+    // Map integration removed; hero header no longer surfaces a location button.
 }
 
 // MARK: - Uniform close transform
@@ -1616,7 +1546,6 @@ private struct DiscoveryHeroContentView: View {
     let isMarkdownReady: Bool
     let isScrollDisabled: Bool
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
-    let onShare: (() -> Void)?
     @Binding var scrollOffset: CGFloat
     @State private var baselineOffset: CGFloat?
 
@@ -1627,7 +1556,6 @@ private struct DiscoveryHeroContentView: View {
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
         containerWidth: CGFloat,
-        onShare: (() -> Void)?,
         contentOpacity: Double,
         isChromeReady: Bool,
         isMarkdownReady: Bool,
@@ -1643,7 +1571,6 @@ private struct DiscoveryHeroContentView: View {
         self.isChromeReady = isChromeReady
         self.isMarkdownReady = isMarkdownReady
         self.isScrollDisabled = isScrollDisabled
-        self.onShare = onShare
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
     }

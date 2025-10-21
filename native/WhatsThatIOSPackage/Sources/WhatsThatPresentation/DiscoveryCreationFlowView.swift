@@ -294,25 +294,31 @@ private struct ConfirmationStateView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let topInset = proxy.safeAreaInsets.top
+            // Overlays already respect the safe area; only add minimal extra breathing room.
+            let overlayTopPadding = topInset > 0 ? BrandSpacing.small : BrandSpacing.medium
+            let overlayControlHeight: CGFloat = 48
+            let previewTopPadding = topInset + overlayTopPadding + overlayControlHeight + BrandSpacing.small
+
             ZStack {
                 palette.background.ignoresSafeArea()
 
-                VStack {
-                    Spacer(minLength: 0)
+                VStack(spacing: 0) {
                     previewSection(size: proxy.size)
+                        .padding(.top, previewTopPadding)
                     Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .overlay(alignment: .topLeading) {
                 overlayCircleButton(systemName: "xmark", action: onCancel)
                     .padding(.leading, BrandSpacing.large)
-                    .padding(.top, BrandSpacing.xLarge)
+                    .padding(.top, overlayTopPadding)
             }
             .overlay(alignment: .topTrailing) {
                 topTrailingControl
                     .padding(.trailing, BrandSpacing.large)
-                    .padding(.top, BrandSpacing.xLarge)
+                    .padding(.top, overlayTopPadding)
             }
             .overlay(alignment: .bottom) {
                 LinearGradient(
@@ -340,18 +346,18 @@ private struct ConfirmationStateView: View {
 
     @ViewBuilder
     private func previewSection(size: CGSize) -> some View {
-        let targetHeight = max(size.height * 0.62, 320)
+        let fallbackHeight = max(size.height * 0.62, 320)
         if let image = previewImage {
             image
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: size.width) // full width, no side squeeze
-                .frame(height: targetHeight)
+                .frame(width: size.width)
+                .clipped()
                 .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
         } else {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(palette.border.opacity(0.1))
-                .frame(width: size.width * 0.9, height: targetHeight)
+                .frame(width: size.width, height: fallbackHeight)
                 .overlay {
                     VStack(spacing: 10) {
                         Image(systemName: "photo")
@@ -364,7 +370,6 @@ private struct ConfirmationStateView: View {
                 }
         }
     }
-
     @ViewBuilder
     private var topTrailingControl: some View {
         if shouldShowLocationPermissions {

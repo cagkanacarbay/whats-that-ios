@@ -312,10 +312,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             await handleAnalysisCancellation()
         } catch {
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
-            self.error = .analysisFailed(message)
-            self.flowState = .error(message: message)
             locationService.stopTracking()
             if Self.messageIndicatesInsufficientCredits(message) {
+                // Normalize to friendly no-credits error and sync local cache.
+                self.error = .noCredits
+                self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
                 Task { [weak self] in
                     guard let self else { return }
                     let updated = await self.creditBalanceStore.set(0)
@@ -323,6 +324,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                         self.creditBalance = updated
                     }
                 }
+            } else {
+                self.error = .analysisFailed(message)
+                self.flowState = .error(message: message)
             }
         }
     }
@@ -373,12 +377,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     self.creditBalance = updated
                 }
             }
-        case let .error(message):
-            error = .analysisFailed(message)
-            flowState = .error(message: message)
+        case let .error(message, status):
             locationService.stopTracking()
-            // If this looks like a credits error, reset local balance to 0
-            if Self.messageIndicatesInsufficientCredits(message) {
+            if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
+                // Normalize to a friendly no-credits error and sync local cache.
+                error = .noCredits
+                flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
                 Task { [weak self] in
                     guard let self else { return }
                     let updated = await self.creditBalanceStore.set(0)
@@ -386,6 +390,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                         self.creditBalance = updated
                     }
                 }
+            } else {
+                error = .analysisFailed(message)
+                flowState = .error(message: message)
             }
         case .end:
             // Finalize: publish a single flowState update to reflect final analysis state.
@@ -467,8 +474,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return "token(len: \(token.count), preview: \(preview))"
         case let .complete(id, system, user):
             return "complete(id: \(id), system: \(system ?? "nil"), user: \(user ?? "nil"))"
-        case let .error(message):
-            return "error(message: \(message))"
+        case let .error(message, status):
+            if let status {
+                return "error(message: \(message), status: \(status))"
+            } else {
+                return "error(message: \(message))"
+            }
         case .end:
             return "end"
         }

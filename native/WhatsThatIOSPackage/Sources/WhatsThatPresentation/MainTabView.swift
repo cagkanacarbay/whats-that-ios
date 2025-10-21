@@ -105,7 +105,7 @@ struct MainTabView: View {
         .onDisappear {
             summaryFallbackTask?.cancel()
         }
-        .onChange(of: selectedTab) { newValue in
+        .onChange(of: selectedTab) { _, newValue in
             switch newValue {
             case .camera:
                 uploadViewModel.cancelFlow()
@@ -128,10 +128,10 @@ struct MainTabView: View {
                 }
             }
         }
-        .onChange(of: cameraViewModel.flowState.phase) { newPhase in
+        .onChange(of: cameraViewModel.flowState.phase) { _, newPhase in
             updateOverlayVisibility(for: .camera, phase: newPhase)
         }
-        .onChange(of: uploadViewModel.flowState.phase) { newPhase in
+        .onChange(of: uploadViewModel.flowState.phase) { _, newPhase in
             updateOverlayVisibility(for: .upload, phase: newPhase)
         }
     }

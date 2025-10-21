@@ -579,10 +579,11 @@ private struct AnalysisStateView: View {
     @State private var loaderCleared: Bool = false
     @State private var shuffledMessages: [String] = AnalysisStateView.loadingMessages.shuffled()
     @State private var currentMessageIndex: Int = 0
-    @State private var messageOpacity: Double = 1
-    @State private var animateCharacters: Bool = false
     @State private var markdownAnimationTask: Task<Void, Never>?
-    @State private var messageTimer: Timer?
+    // For smooth crossfade between loader messages
+    @State private var previousMessage: String? = nil
+    @State private var previousMessageOpacity: Double = 0
+    @State private var currentMessageOpacity: Double = 1
     @State private var metadataVisible: Bool = false
     @State private var hasScrolledToContent = false
 
@@ -635,11 +636,8 @@ private struct AnalysisStateView: View {
     }
 
     private var currentMarkdown: String {
-        // Mirror RN gating: do not reveal any narrative until metadata is parsed
-        // to avoid showing the metadata JSON in the description area.
-        let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
-        guard hasMetadata else { return "" }
-
+        // Prefer already-formatted markdown if present, otherwise derive
+        // narrative from streamed text while stripping metadata JSON.
         let trimmed = state.displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             return trimmed
@@ -656,17 +654,41 @@ private struct AnalysisStateView: View {
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        imageSection(size: proxy.size)
+                        // Match DiscoveryHero overlay behavior: place a placeholder
+                        // header inside the scroll content and overlay the image onto it
+                        // so the entire page (including the image) scrolls together.
+                        // Reserve only the visible header height. The image is drawn
+                        // in a top overlay and already extends into the safe area.
+                        let reservedHeight = max(proxy.size.height * Layout.headerHeightFactor, Layout.minimumHeaderHeight)
+                        let safeTop = proxy.safeAreaInsets.top
+                        let headerWidth = max(proxy.size.width, Layout.minimumHeaderWidth)
+                        Color.clear
+                            .frame(height: reservedHeight)
+                            // Layer image first so it remains stable
+                            .overlay(
+                                headerImageSection(size: proxy.size, safeTop: safeTop)
+                                    .ignoresSafeArea(edges: .top)
+                                    .compositingGroup(),
+                                alignment: .bottom
+                            )
+                            // Then overlay the text/loader in its own compositing group
+                            .overlay(
+                                headerOverlayContent(width: headerWidth)
+                                    .padding(.horizontal, BrandSpacing.large)
+                                    .padding(.bottom, BrandSpacing.large * CGFloat(1.2))
+                                    .compositingGroup(),
+                                alignment: .bottom
+                            )
+
                         markdownSection
                             .id(ScrollTarget.markdown)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                // Image/header drawn inside content overlay, so the whole page scrolls.
                 .background(palette.background.ignoresSafeArea())
                 .onAppear {
                     resetStateForInitialRender()
-                    // TEMP: Disable loading message animation while investigating update-per-frame warnings.
-                    // startMessageRotationIfNeeded()
                     if loaderCleared {
                         DispatchQueue.main.async {
                             scrollToContent(using: scrollProxy, animated: false)
@@ -675,8 +697,6 @@ private struct AnalysisStateView: View {
                 }
                 .onDisappear {
                     markdownAnimationTask?.cancel()
-                    // TEMP: Disable loading message animation while investigating update-per-frame warnings.
-                    // stopMessageRotation()
                 }
                 .overlay(alignment: .topLeading) {
                     Button(action: onCancel) {
@@ -698,10 +718,25 @@ private struct AnalysisStateView: View {
                     .padding(.leading, BrandSpacing.large)
                     .padding(.top, BrandSpacing.xLarge)
                 }
-                .onChange(of: state.displayMarkdown) { _ in
+                .onChange(of: state.displayMarkdown) {
                     updateDisplayedMarkdown()
                 }
-                .onChange(of: state.streamedText) { _ in
+                .onChange(of: currentMessageIndex) { newIndex in
+                    let currentOpacityFormatted = String(format: "%.2f", currentMessageOpacity)
+                    let previousOpacityFormatted = String(format: "%.2f", previousMessageOpacity)
+                    debugLog(
+                        "loaderMessageIndex -> \(newIndex) message=\"\(currentLoadingMessage)\" prev=\"\(previousMessage ?? "nil")\" currentOpacity=\(currentOpacityFormatted) previousOpacity=\(previousOpacityFormatted)"
+                    )
+                }
+                .onChange(of: currentMessageOpacity) { newValue in
+                    let formatted = String(format: "%.2f", newValue)
+                    debugLog("currentMessageOpacity changed -> \(formatted) message=\"\(currentLoadingMessage)\"")
+                }
+                .onChange(of: previousMessageOpacity) { newValue in
+                    let formatted = String(format: "%.2f", newValue)
+                    debugLog("previousMessageOpacity changed -> \(formatted) previous=\"\(previousMessage ?? "nil")\"")
+                }
+                .onChange(of: state.streamedText) {
                     // Throttle noisy updates: only consider stream text for clearing
                     // the loader if we still have no metadata and the loader is visible.
                     guard !loaderCleared,
@@ -709,16 +744,16 @@ private struct AnalysisStateView: View {
                     else { return }
                     evaluateLoaderCleared(with: currentMarkdown)
                 }
-                .onChange(of: state.metadataTitle) { _ in
+                .onChange(of: state.metadataTitle) {
                     evaluateMetadataVisibility()
                     evaluateLoaderCleared(with: displayedMarkdown)
                 }
-                .onChange(of: state.metadataShortDescription) { _ in
+                .onChange(of: state.metadataShortDescription) {
                     evaluateMetadataVisibility()
                     evaluateLoaderCleared(with: displayedMarkdown)
                 }
-                .onChange(of: state.isStreaming) { isStreaming in
-                    if !isStreaming {
+                .onChange(of: state.isStreaming) {
+                    if !state.isStreaming {
                         // Streaming ended: snap to final text (no animation) to avoid cut-offs
                         markdownAnimationTask?.cancel()
                         let final = currentMarkdown
@@ -727,11 +762,9 @@ private struct AnalysisStateView: View {
                         loaderCleared = true
                     }
                 }
-                .onChange(of: loaderCleared) { cleared in
-                    debugLog("loaderCleared changed -> \(cleared)")
-                    if cleared {
-                        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
-                        // stopMessageRotation()
+                .onChange(of: loaderCleared) {
+                    debugLog("loaderCleared changed -> \(loaderCleared)")
+                    if loaderCleared {
                         scrollToContent(using: scrollProxy)
                         let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
                         if hasMetadata && !metadataVisible {
@@ -741,8 +774,6 @@ private struct AnalysisStateView: View {
                         }
                     } else {
                         hasScrolledToContent = false
-                        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
-                        // startMessageRotationIfNeeded()
                     }
                 }
             }
@@ -752,15 +783,14 @@ private struct AnalysisStateView: View {
     private func resetStateForInitialRender() {
         shuffledMessages = AnalysisStateView.loadingMessages.shuffled()
         currentMessageIndex = 0
+        previousMessage = nil
+        previousMessageOpacity = 0
+        currentMessageOpacity = 1
         metadataVisible = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
         let initialNarrative = currentMarkdown
         displayedMarkdown = initialNarrative
         loaderCleared = loaderShouldBeCleared(for: initialNarrative)
         hasScrolledToContent = false
-        // TEMP: Disable loading message animation while investigating update-per-frame warnings.
-        // if shouldShowLoader {
-        //     triggerCharacterAnimation()
-        // }
         debugLog("resetState loaderCleared=\(loaderCleared) initialMarkdownLength=\(initialNarrative.count) metadataTitle=\(state.metadataTitle ?? "nil")")
     }
 
@@ -817,15 +847,22 @@ private struct AnalysisStateView: View {
     }
 
     private func loaderShouldBeCleared(for text: String) -> Bool {
-        // Follow RN behavior: keep loader and overlay messages until metadata
-        // is parsed, then clear. If the stream ends without metadata, clear if
-        // there is any visible content.
-        if let title = state.metadataTitle, !title.isEmpty { return true }
-        if let short = state.metadataShortDescription, !short.isEmpty { return true }
-        if !state.isStreaming {
-            let visibleLength = DiscoveryStreamFormatter.visibleLength(for: text)
-            return visibleLength > 0
+        // End loading as soon as actual streamed narrative content is visible,
+        // or metadata is present. Do not wait for the stream to finish.
+        if let title = state.metadataTitle, !title.isEmpty {
+            debugLog("loaderShouldBeCleared -> true (metadataTitle=\"\(title)\")")
+            return true
         }
+        if let short = state.metadataShortDescription, !short.isEmpty {
+            debugLog("loaderShouldBeCleared -> true (metadataShortDescription length=\(short.count))")
+            return true
+        }
+        let visibleLength = DiscoveryStreamFormatter.visibleLength(for: state.streamedText)
+        if visibleLength > 0 {
+            debugLog("loaderShouldBeCleared -> true (visibleStreamLength=\(visibleLength))")
+            return true
+        }
+        debugLog("loaderShouldBeCleared -> false (textLength=\(text.count))")
         return false
     }
 
@@ -856,52 +893,7 @@ private struct AnalysisStateView: View {
         }
     }
 
-    private func startMessageRotationIfNeeded() {
-        guard shouldShowLoader else { return }
-        guard messageTimer == nil else { return }
-
-        triggerCharacterAnimation()
-
-        let timer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { _ in
-            rotateMessage()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        messageTimer = timer
-    }
-
-    private func stopMessageRotation() {
-        messageTimer?.invalidate()
-        messageTimer = nil
-        withAnimation(.easeInOut(duration: 0.3)) {
-            messageOpacity = 1
-        }
-    }
-
-    private func rotateMessage() {
-        guard shouldShowLoader else { return }
-        guard !shuffledMessages.isEmpty else { return }
-
-        withAnimation(.easeInOut(duration: 0.35)) {
-            messageOpacity = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            currentMessageIndex = (currentMessageIndex + 1) % shuffledMessages.count
-            triggerCharacterAnimation()
-            withAnimation(.easeInOut(duration: 0.35)) {
-                messageOpacity = 1
-            }
-        }
-    }
-
-    private func triggerCharacterAnimation() {
-        animateCharacters = false
-        DispatchQueue.main.async {
-            withAnimation(.spring(response: 0.65, dampingFraction: 0.78)) {
-                animateCharacters = true
-            }
-        }
-    }
+    // Rotation handled by ShimmerTextView's onFinished callback.
 
     private func animationDelay(for count: Int) -> UInt64 {
         // Legacy per-character delay (kept for reference). Not used by the chunked animator.
@@ -926,7 +918,8 @@ private struct AnalysisStateView: View {
     }
 
     @ViewBuilder
-    private func imageSection(size: CGSize) -> some View {
+    private func headerImageSection(size: CGSize, safeTop: CGFloat) -> some View {
+        // Full-bleed image header with gradient/title overlay.
         let height = max(size.height * Layout.headerHeightFactor, Layout.minimumHeaderHeight)
         let width = max(size.width, Layout.minimumHeaderWidth)
         ZStack(alignment: .bottom) {
@@ -934,7 +927,7 @@ private struct AnalysisStateView: View {
                 image
                     .resizable()
                     .scaledToFill()
-                    .frame(width: width, height: height)
+                    .frame(width: width, height: height + safeTop)
                     .clipped()
             } else {
                 LinearGradient(
@@ -945,7 +938,7 @@ private struct AnalysisStateView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .frame(width: width, height: height)
+                .frame(width: width, height: height + safeTop)
                     .overlay {
                         VStack(spacing: 10) {
                             Image(systemName: "photo")
@@ -967,40 +960,41 @@ private struct AnalysisStateView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(width: width, height: height)
+            .frame(width: width, height: height + safeTop)
             .allowsHitTesting(false)
-
-            overlayContent(width: width)
-                .padding(.horizontal, BrandSpacing.large)
-                .padding(.bottom, BrandSpacing.large * CGFloat(1.2))
         }
-        .frame(width: width, height: height)
+        .frame(width: width, height: height + safeTop)
         .clipped()
     }
 
-    private func overlayContent(width: CGFloat) -> some View {
+    private func headerOverlayContent(width: CGFloat) -> some View {
         let availableWidth = max(width - (BrandSpacing.large * 2), 0)
         return VStack(spacing: BrandSpacing.medium) {
             if shouldShowLoader {
-                // TEMP: Disable animated loading headline while investigating update-per-frame warnings.
-                // if !currentLoadingMessage.isEmpty {
-                //     LoadingMessageView(
-                //         message: currentLoadingMessage,
-                //         animateCharacters: animateCharacters,
-                //         availableWidth: availableWidth,
-                //         opacity: messageOpacity
-                //     )
-                // }
+                if !currentLoadingMessage.isEmpty {
+                    ZStack {
+                        if let prev = previousMessage, previousMessageOpacity > 0 {
+                            ShimmerTextView(
+                                text: prev,
+                                availableWidth: availableWidth,
+                                color: palette.textPrimary,
+                                isActive: false,
+                                logger: { debugLog($0) }
+                            )
+                            .opacity(previousMessageOpacity)
+                        }
 
-                if let status = state.statusMessage, !status.isEmpty {
-                    Text(status)
-                        .font(.system(size: 15, weight: .medium))
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(palette.textSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, BrandSpacing.large)
-                        .lineLimit(2)
+                        ShimmerTextView(
+                            text: currentLoadingMessage,
+                            availableWidth: availableWidth,
+                            color: palette.textPrimary,
+                            logger: { debugLog($0) },
+                            onFinished: { advanceMessage() }
+                        )
+                        .opacity(currentMessageOpacity)
+                    }
                 }
+
             } else {
                 VStack(spacing: BrandSpacing.small) {
                     if let title = state.metadataTitle, !title.isEmpty {
@@ -1032,16 +1026,46 @@ private struct AnalysisStateView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func advanceMessage() {
+        guard shouldShowLoader else {
+            debugLog("advanceMessage skipped (loader already cleared)")
+            return
+        }
+        guard !shuffledMessages.isEmpty else {
+            debugLog("advanceMessage skipped (no shuffled messages)")
+            return
+        }
+
+        // Prepare crossfade: show previous message beneath and fade it out while the new fades in
+        let old = currentLoadingMessage
+        previousMessage = old
+        previousMessageOpacity = 1
+        currentMessageOpacity = 0
+        debugLog("advanceMessage preparing crossfade from \"\(old)\" (index=\(currentMessageIndex))")
+
+        // Compute next index and add a brief dwell before crossfading
+        let nextIndex = (currentMessageIndex + 1) % shuffledMessages.count
+        let upcomingMessage = shuffledMessages[nextIndex]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            debugLog("advanceMessage switching to index \(nextIndex) message=\"\(upcomingMessage)\"")
+            currentMessageIndex = nextIndex
+            withAnimation(.easeInOut(duration: 0.28)) {
+                previousMessageOpacity = 0
+                currentMessageOpacity = 1
+            }
+            let currentOpacityFormatted = String(format: "%.2f", currentMessageOpacity)
+            let previousOpacityFormatted = String(format: "%.2f", previousMessageOpacity)
+            debugLog(
+                "advanceMessage crossfade applied currentOpacity=\(currentOpacityFormatted) previousOpacity=\(previousOpacityFormatted) loaderCleared=\(loaderCleared)"
+            )
+        }
+    }
+
     @ViewBuilder
     private var markdownSection: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
             if shouldShowLoader {
-                if state.isStreaming {
-                    Text("We’re composing your story…")
-                        .font(.system(size: 15))
-                        .foregroundStyle(palette.textSecondary)
-                        .italic()
-                } else {
+                if !state.isStreaming {
                     Text("Analysis complete.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(palette.textSecondary)
@@ -1141,48 +1165,213 @@ private struct AnalysisStateView: View {
     #endif
 }
 
-private struct LoadingMessageView: View {
-    let message: String
-    let animateCharacters: Bool
+private struct ShimmerTextView: View {
+    let text: String
     let availableWidth: CGFloat
-    let opacity: Double
+    let color: Color
+    let isActive: Bool
+    var logger: ((String) -> Void)? = nil
+    var onFinished: (() -> Void)? = nil
+    
+    init(
+        text: String,
+        availableWidth: CGFloat,
+        color: Color,
+        isActive: Bool = true,
+        logger: ((String) -> Void)? = nil,
+        onFinished: (() -> Void)? = nil
+    ) {
+        self.text = text
+        self.availableWidth = availableWidth
+        self.color = color
+        self.isActive = isActive
+        self.logger = logger
+        self.onFinished = onFinished
+    }
+
+    // Tunables
     private let fontSize: CGFloat = 30
+    private let passDuration: Double = 2.0  // seconds for one shimmer pass (slower)
+    private let highlightWidthRatio: CGFloat = 0.22 // fraction of availableWidth
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var notified = false
+
+    @State private var progress: CGFloat = 0
+    @State private var lastAnimatedText: String = ""
 
     var body: some View {
-        let scale = scaleFactor(for: availableWidth)
-        return HStack(spacing: 0) {
-            ForEach(Array(message.enumerated()), id: \.offset) { index, character in
-                Text(character == " " ? "\u{00A0}" : String(character))
-                    .font(.system(size: fontSize, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .opacity(animateCharacters ? 1 : 0.25)
-                    .animation(
-                        .interpolatingSpring(stiffness: 160, damping: 16)
-                            .delay(Double(index) * 0.05),
-                        value: animateCharacters
-                    )
+        Group {
+            if isActive {
+                shimmeringBody
+            } else {
+                staticBody
             }
         }
-        .scaleEffect(scale, anchor: .center)
-        .frame(maxWidth: .infinity)
-        .multilineTextAlignment(.center)
-        .opacity(opacity)
-        .animation(.easeInOut(duration: 0.35), value: opacity)
+    }
+
+    private var shimmeringBody: some View {
+        let scale = scaleFactor(for: availableWidth)
+        let width = max(availableWidth, 1)
+        let stripeWidth = max(60, min(width * highlightWidthRatio, 160))
+        let travel = width + stripeWidth
+        let xOffset = -stripeWidth/2 + Double(progress) * travel - (travel - width)/2
+
+        let highlight = (colorScheme == .dark) ? Color.white.opacity(0.9) : Color.white
+        return ShimmerFrameView(
+            text: text,
+            color: color,
+            highlightColor: highlight,
+            fontSize: fontSize,
+            scale: scale,
+            stripeWidth: stripeWidth,
+            xOffset: xOffset
+        )
+        .compositingGroup()
+        .onAppear {
+            triggerShimmerIfNeeded(for: text)
+        }
+        .onChange(of: text) { newValue in
+            triggerShimmerIfNeeded(for: newValue)
+        }
+    }
+
+    private var staticBody: some View {
+        let scale = scaleFactor(for: availableWidth)
+        return Text(text)
+            .font(.system(size: fontSize, weight: .bold))
+            .foregroundStyle(color)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .scaleEffect(scale, anchor: .center)
+            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+    }
+
+    private func triggerShimmerIfNeeded(for newText: String) {
+        guard isActive else { return }
+        guard lastAnimatedText != newText else {
+            log("startShimmer skipped text=\"\(newText)\" (unchanged)")
+            return
+        }
+        lastAnimatedText = newText
+        log("startShimmer text=\"\(newText)\" availableWidth=\(availableWidth)")
+        startShimmerAnimation()
+    }
+
+    private func startShimmerAnimation() {
+        notified = false
+        progress = 0
+        withAnimation(.linear(duration: passDuration)) {
+            progress = 1
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + passDuration) {
+            if !notified {
+                notified = true
+                log("shimmerCompleted text=\"\(text)\" notifying=true")
+                onFinished?()
+            } else {
+                log("shimmerCompleted text=\"\(text)\" notifying=false (already notified)")
+            }
+        }
+    }
+
+    private func log(_ message: String) {
+        guard let logger else { return }
+        logger("[ShimmerTextView] \(message)")
+    }
+
+    private func baseText() -> some View {
+        Text(text)
+            .font(.system(size: fontSize, weight: .bold))
+            .foregroundStyle(color.opacity(0.65))
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+    }
+
+    private func shimmerOverlay(stripeWidth: CGFloat, xOffset: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: fontSize, weight: .bold))
+            .foregroundStyle(color)
+            .mask(ShimmerStripe(width: stripeWidth, height: fontSize * 1.6, xOffset: xOffset))
+            .blendMode(.screen)
+    }
+
+    private struct ShimmerStripe: View {
+        let width: CGFloat
+        let height: CGFloat
+        let xOffset: CGFloat
+
+        var body: some View {
+            LinearGradient(
+                gradient: Gradient(stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .white.opacity(0.1), location: 0.3),
+                    .init(color: .white, location: 0.5),
+                    .init(color: .white.opacity(0.1), location: 0.7),
+                    .init(color: .clear, location: 1.0)
+                ]),
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: width, height: height)
+            .offset(x: xOffset)
+        }
+    }
+
+    private struct ShimmerFrameView: View {
+        let text: String
+        let color: Color
+        let highlightColor: Color
+        let fontSize: CGFloat
+        let scale: CGFloat
+        let stripeWidth: CGFloat
+        let xOffset: CGFloat
+
+        var body: some View {
+            ZStack {
+                Text(text)
+                    .font(.system(size: fontSize, weight: .bold))
+                    .foregroundStyle(color)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .allowsHitTesting(false)
+
+                Text(text)
+                    .font(.system(size: fontSize, weight: .bold))
+                    .foregroundStyle(highlightColor)
+                    .mask(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .white.opacity(0.12), location: 0.32),
+                                .init(color: .white, location: 0.5),
+                                .init(color: .white.opacity(0.12), location: 0.68),
+                                .init(color: .clear, location: 1.0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: stripeWidth, height: fontSize * 1.6)
+                        .offset(x: xOffset)
+                    )
+                    .allowsHitTesting(false)
+            }
+            .scaleEffect(scale, anchor: .center)
+            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+        }
     }
 
     private func scaleFactor(for width: CGFloat) -> CGFloat {
         guard width > 0 else { return 1 }
         #if canImport(UIKit)
         let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
-        let textWidth = (message as NSString).size(withAttributes: [.font: font]).width
+        let textWidth = (text as NSString).size(withAttributes: [.font: font]).width
         guard textWidth > 0 else { return 1 }
-        if textWidth <= width {
-            return 1
-        }
+        if textWidth <= width { return 1 }
         let adjusted = max(width - 12, 0)
-        if adjusted <= 0 {
-            return 0.65
-        }
+        if adjusted <= 0 { return 0.65 }
         let scaled = adjusted / textWidth
         return max(0.65, scaled)
         #else

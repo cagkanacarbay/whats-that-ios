@@ -32,22 +32,6 @@ struct DiscoveryDetailView: View {
         BrandTheme.palette(for: systemColorScheme)
     }
 
-    private var overlayGradientStops: [Gradient.Stop] {
-        [
-            .init(color: Color.clear, location: 0.0),
-            .init(color: palette.overlayMidtone, location: 0.7),
-            .init(color: palette.background, location: 1.0)
-        ]
-    }
-
-    private var overlayTitleColor: Color {
-        palette.textPrimary
-    }
-
-    private var overlaySupportingColor: Color {
-        palette.textSecondary
-    }
-
     private var overlayButtonBackground: Color {
         palette.overlayButtonBackground
     }
@@ -75,13 +59,27 @@ struct DiscoveryDetailView: View {
                         let proposedHeight = proxy.size.height * headerHeightFactor
                         let ratioHeight = proxy.size.width * imageAspectRatio
                         let headerHeight = min(proposedHeight, ratioHeight)
-                        headerView(height: headerHeight)
+
+                        // Reserve space for a full-bleed header that renders in an overlay
+                        // ignoring the top safe area so the status bar sits on top of it.
+                        Color.clear
+                            .frame(height: headerHeight)
+
                         bodyContent
                             .padding(.top, BrandSpacing.large)
                             .padding(.horizontal, BrandSpacing.large)
                             .padding(.bottom, BrandSpacing.xLarge * 2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                }
+                // Render the image header outside the scrollable content so it can
+                // extend behind the status bar reliably.
+                .overlay(alignment: .top) {
+                    let proposedHeight = proxy.size.height * headerHeightFactor
+                    let ratioHeight = proxy.size.width * imageAspectRatio
+                    let headerHeight = min(proposedHeight, ratioHeight)
+                    headerView(width: proxy.size.width, height: headerHeight)
+                        .ignoresSafeArea(edges: .top)
                 }
                 .id(discovery.id)
                 .opacity(isContentVisible ? 1 : 0)
@@ -109,102 +107,25 @@ struct DiscoveryDetailView: View {
     }
 
     @ViewBuilder
-    private func headerView(height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            DiscoveryImagePlaceholderView(
-                imageURL: imageURL,
-                height: height,
-                cornerRadius: isExpanded ? 0 : BrandCornerRadius.large,
-                namespace: namespace,
-                discoveryId: discovery.id
-            )
-
-            headerOverlay(height: height)
-                .frame(height: height)
-                .allowsHitTesting(false)
-
-            if let shareAction = onShare {
-                bottomTrailingButton(systemName: "square.and.arrow.up", action: shareAction)
+    private func headerView(width: CGFloat, height: CGFloat) -> some View {
+        DiscoveryHeroHeaderView(
+            discovery: discovery,
+            imageURL: imageURL,
+            placeholderImage: nil,
+            preferPlaceholderImage: false,
+            height: height,
+            pullDownOffset: 0,
+            cornerRadius: isExpanded ? 0 : BrandCornerRadius.large,
+            width: width,
+            namespace: namespace,
+            isGeometrySource: true,
+            discoveryId: discovery.id,
+            palette: palette,
+            onShare: onShare,
+            onLocation: discovery.location.map { location in
+                { openInMaps(location: location) }
             }
-
-            if let location = discovery.location {
-                bottomLeadingButton(systemName: "mappin.and.ellipse") {
-                    openInMaps(location: location)
-                }
-            }
-        }
-        .frame(height: height)
-        .clipped()
-    }
-
-    private func bottomLeadingButton(systemName: String, action: @escaping () -> Void) -> some View {
-        buttonCircle(systemName: systemName, alignment: .leading, action: action)
-    }
-
-    private func bottomTrailingButton(systemName: String, action: @escaping () -> Void) -> some View {
-        buttonCircle(systemName: systemName, alignment: .trailing, action: action)
-    }
-
-    private func buttonCircle(systemName: String, alignment: HorizontalAlignment, action: @escaping () -> Void) -> some View {
-        HStack {
-            if alignment == .leading {
-                button(systemName: systemName, action: action)
-                Spacer()
-            } else {
-                Spacer()
-                button(systemName: systemName, action: action)
-            }
-        }
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.bottom, 28)
-    }
-
-    private func button(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(overlayButtonForeground)
-                .padding(16)
-                .background(overlayButtonBackground)
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .strokeBorder(overlayButtonBorder, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .shadow(color: Color.black.opacity(overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
-    }
-
-    private func headerOverlay(height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
-                gradient: Gradient(stops: overlayGradientStops),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            VStack(spacing: BrandSpacing.small) {
-                Text(discovery.title)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(overlayTitleColor)
-                    .multilineTextAlignment(.center)
-
-                Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(overlaySupportingColor)
-
-                if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
-                    Text(shortDescription)
-                        .font(.system(size: 14))
-                        .foregroundStyle(overlaySupportingColor)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, BrandSpacing.large)
-                }
-            }
-            .padding(.bottom, BrandSpacing.xLarge)
-            .padding(.horizontal, BrandSpacing.large)
-        }
+        )
     }
 
     @ViewBuilder
@@ -332,74 +253,6 @@ struct DiscoveryDetailView: View {
         mapItem.name = discovery.title
         mapItem.openInMaps()
     }
-}
-
-private struct DiscoveryImagePlaceholderView: View {
-    let imageURL: URL?
-    let height: CGFloat
-    let cornerRadius: CGFloat
-    let namespace: Namespace.ID
-    let discoveryId: Int64
-
-    var body: some View {
-        DiscoveryCachedImage(
-            discoveryId: discoveryId,
-            remoteURL: imageURL
-        ) { phase in
-            ZStack {
-                placeholder
-
-                switch phase {
-                case .success(let platformImage):
-                    Image(platformImage: platformImage)
-                        .resizable()
-                        .scaledToFill()
-                case .loading, .empty:
-                    EmptyView()
-                case .failure:
-                    EmptyView()
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: height)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .contentShape(Rectangle())
-        .matchedGeometryEffect(id: geometryId, in: namespace, properties: .frame, anchor: .center, isSource: true)
-    }
-
-    private var geometryId: String {
-        "discovery-image-\(discoveryId)"
-    }
-
-    private var placeholder: some View {
-        LinearGradient(
-            gradient: Gradient(colors: [
-                Color(hex: "#20293A"),
-                Color(hex: "#141927")
-            ]),
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-}
-
-#if canImport(UIKit)
-private typealias PlatformImage = UIImage
-#elseif canImport(AppKit)
-private typealias PlatformImage = NSImage
-#endif
-
-private extension Image {
-#if canImport(UIKit)
-    init(platformImage: PlatformImage) {
-        self = Image(uiImage: platformImage)
-    }
-#elseif canImport(AppKit)
-    init(platformImage: PlatformImage) {
-        self = Image(nsImage: platformImage)
-    }
-#endif
 }
 
 private extension String {

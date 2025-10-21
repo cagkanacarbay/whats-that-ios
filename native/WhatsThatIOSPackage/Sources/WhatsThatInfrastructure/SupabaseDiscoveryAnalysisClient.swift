@@ -248,8 +248,12 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
                 return .complete(discoveryId: identifier, systemPromptVersion: systemVersion, userPromptVersion: userVersion)
             }
         case "error":
-            if let message = parseMessage(from: dataString) {
-                return .error(message: message)
+            if let dict = parseDictionary(from: dataString) {
+                let message = (dict["message"] as? String) ?? dataString
+                let status = (dict["status"] as? Int) ?? (dict["status"] as? Double).map { Int($0) }
+                return .error(message: message, status: status)
+            } else if let message = parseMessage(from: dataString) {
+                return .error(message: message, status: nil)
             }
         case "end":
             return .end

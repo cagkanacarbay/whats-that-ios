@@ -137,18 +137,18 @@ struct DiscoveriesHomeView: View {
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     scrollOffset = value
                 }
-                .onChange(of: viewModel.discoveries) { _ in
+                .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
                 }
-                .onChange(of: pendingDiscoveryId) { _ in
+                .onChange(of: pendingDiscoveryId) {
                     presentPendingDiscoveryIfNeeded()
                 }
-                .onChange(of: pendingCreatedSummary) { summary in
-                    guard let summary else { return }
+                .onChange(of: pendingCreatedSummary) { oldValue, newValue in
+                    guard let summary = newValue else { return }
                     viewModel.upsert(summary)
                     pendingCreatedSummary = nil
                 }
-                .onChange(of: cardFrames) { _ in
+                .onChange(of: cardFrames) {
                     // Defer reacting to card frame changes to the next runloop tick.
                     // Rationale: updating hero presentation state inside the same frame
                     // can cause a layout → preference write → layout loop, which triggers
@@ -192,6 +192,7 @@ struct DiscoveriesHomeView: View {
                         onShare: makeShareAction(for: context.discovery),
                         onShowOptions: nil
                     )
+                    .ignoresSafeArea(edges: .top)
                     .transition(.identity)
                     .simultaneousGesture(heroEdgeDragGesture, including: .gesture)
                     .zIndex(5)
@@ -200,7 +201,7 @@ struct DiscoveriesHomeView: View {
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
             }
-            .onChange(of: safeBottom) { newValue in
+            .onChange(of: safeBottom) { _, newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
             }
         }
@@ -1253,12 +1254,17 @@ private struct DiscoveryHeroOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let containerFrame = proxy.frame(in: .global)
+            let safeAreaInsets = proxy.safeAreaInsets
+            let containerFrameRaw = proxy.frame(in: .global)
+            // Treat the visual container as if it starts at the very top of the screen
+            // so the hero image can extend behind the status bar. Adjust both the
+            // geometry container frame and height by the top safe-area inset.
+            let containerFrame = containerFrameRaw.offsetBy(dx: 0, dy: -safeAreaInsets.top)
             let screenBounds = UIScreen.main.bounds
             let rawWidth = proxy.size.width == 0 ? screenBounds.width : proxy.size.width
             let containerWidth = min(rawWidth, screenBounds.width)
             let rawHeight = proxy.size.height == 0 ? screenBounds.height : proxy.size.height
-            let containerSize = CGSize(width: containerWidth, height: rawHeight)
+            let containerSize = CGSize(width: containerWidth, height: rawHeight + safeAreaInsets.top)
             let geometry = HeroGeometry(
                 startFrame: context.startFrame,
                 containerSize: containerSize,
@@ -1267,7 +1273,7 @@ private struct DiscoveryHeroOverlay: View {
                 progress: progress,
                 enforceAspectForImage: isClosing
             )
-            let safeAreaInsets = proxy.safeAreaInsets
+            // safeAreaInsets already captured above
 
             ZStack(alignment: .topLeading) {
                 Color.black
@@ -1288,12 +1294,26 @@ private struct DiscoveryHeroOverlay: View {
                 let rotationAngle = gestureRotation
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
+                // Header (title/date/short description) should fade in as soon as
+                // the image reaches its full size, slightly before settle.
+                let headerOpacityRaw: Double = {
+                    guard !isClosing && !isInteracting else { return 0 }
+                    // Smooth fade near end of open; tuned to avoid jumps.
+                    let start: CGFloat = 0.88
+                    let t = max(0, min((progress - start) / (1 - start), 1))
+                    return Double(t)
+                }()
+                // Single header overlay on image: 0 while closing/dragging, ramps in during open,
+                // and stays fully visible once settled.
+                let headerOverlayOpacity: Double = isChromeReady ? (isClosing || isInteracting ? 0 : 1) : headerOpacityRaw
                 // Compute base target sizes for the hero header at the expanded state.
                 let targetHeaderHeight = min(containerSize.height, containerSize.width * context.cardAspectRatio)
                 // During closing we keep the base frame at expanded header size and uniformly
                 // transform the whole card to the start frame to preserve crop.
                 let cardWidth: CGFloat = isClosing ? containerSize.width : geometry.size.width
-                let cardHeight: CGFloat = isClosing ? targetHeaderHeight : (isChromeReady ? geometry.size.height : geometry.imageHeight)
+                // Always present the full card height during open so the background
+                // below the image is visible and expands smoothly.
+                let cardHeight: CGFloat = isClosing ? targetHeaderHeight : geometry.size.height
                 let imageHeightForView: CGFloat = isClosing ? targetHeaderHeight : geometry.imageHeight
                 let effectivePullDown = (isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
                 let preferPlaceholder = (!isChromeReady) || isInteracting
@@ -1312,22 +1332,31 @@ private struct DiscoveryHeroOverlay: View {
                     isChromeReady: isChromeReady
                 )
 
+                let heroHeader = DiscoveryHeroHeaderView(
+                    discovery: context.discovery,
+                    imageURL: context.imageURL,
+                    placeholderImage: context.placeholderImage,
+                    preferPlaceholderImage: (!isChromeReady) || isInteracting,
+                    height: imageHeightForView,
+                    pullDownOffset: effectivePullDown,
+                    cornerRadius: geometry.cornerRadius,
+                    width: cardWidth,
+                    namespace: nil,
+                    isGeometrySource: false,
+                    discoveryId: context.discovery.id,
+                    palette: BrandTheme.palette(for: colorScheme),
+                    onShare: onShare,
+                    onLocation: context.discovery.location.map { location in
+                        { openInMaps(location: location) }
+                    },
+                    gradientFalloff: 0.55,
+                    maxDescriptionLines: 3,
+                    overlayOpacity: headerOverlayOpacity
+                )
+                .offset(y: (isChromeReady && scrollOffset > 0) ? scrollOffset : 0)
+
                 let heroCard = ZStack(alignment: .top) {
-                    DiscoveryHeroImageView(
-                        discoveryId: context.discovery.id,
-                        imageURL: context.imageURL,
-                        placeholderImage: context.placeholderImage,
-                        preferPlaceholder: preferPlaceholder,
-                        height: imageHeightForView,
-                        pullDownOffset: effectivePullDown
-                    )
-                    .overlay(alignment: .bottom) {
-                        DiscoveryCardChrome(discovery: context.discovery)
-                            .frame(width: geometry.size.width)
-                            .opacity(cardChromeOpacity(for: progress, isClosing: isClosing))
-                            .allowsHitTesting(false)
-                    }
-                    .offset(y: (isChromeReady && scrollOffset > 0) ? scrollOffset : 0)
+                    heroHeader
 
                     DiscoveryHeroContentView(
                         discovery: context.discovery,
@@ -1390,7 +1419,7 @@ private struct DiscoveryHeroOverlay: View {
                     .animation(.easeInOut(duration: 0.24), value: isChromeReady)
             }
         }
-        .onChange(of: isClosing) { closing in
+        .onChange(of: isClosing) { _, closing in
             guard closing, scrollOffset != 0 else { return }
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.2)) {
                 scrollOffset = 0
@@ -1507,6 +1536,17 @@ private extension DiscoveryHeroOverlay {
             "[Hero] phase=\(phase, privacy: .public) progress=\(progress, privacy: .public) width=\(width, privacy: .public) height=\(height, privacy: .public) imageHeight=\(imageHeight, privacy: .public) widthDrivenHeight=\(widthDrivenHeight, privacy: .public) heightDelta=\(heightDelta, privacy: .public) currentAspect=\(currentAspect, privacy: .public) cardAspect=\(cardAspect, privacy: .public) container=\(String(describing: containerSize), privacy: .public) start=\(String(describing: startFrame), privacy: .public) placeholder=\(preferPlaceholder, privacy: .public) pullDown=\(pullDown, privacy: .public) chromeReady=\(isChromeReady, privacy: .public)"
         )
     }
+
+    func openInMaps(location: DiscoveryLocation) {
+        let coordinate = CLLocationCoordinate2D(
+            latitude: location.latitude,
+            longitude: location.longitude
+        )
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = context.discovery.title
+        mapItem.openInMaps()
+    }
 }
 
 // MARK: - Uniform close transform
@@ -1565,69 +1605,6 @@ private extension View {
     }
 }
 
-private struct DiscoveryHeroImageView: View {
-    let discoveryId: Int64
-    let imageURL: URL?
-    let placeholderImage: UIImage?
-    let preferPlaceholder: Bool
-    let height: CGFloat
-    let pullDownOffset: CGFloat
-
-    var body: some View {
-        DiscoveryCachedImage(
-            discoveryId: discoveryId,
-            remoteURL: imageURL
-        ) { phase in
-            Group {
-                switch phase {
-                case .success(let platformImage):
-                    if preferPlaceholder, let placeholderImage {
-                        Image(uiImage: placeholderImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Image(uiImage: platformImage)
-                            .resizable()
-                            .scaledToFill()
-                    }
-                case .failure:
-                    placeholderView
-                case .loading, .empty:
-                    if let placeholderImage {
-                        Image(uiImage: placeholderImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        placeholderView
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: height + pullDownOffset)
-        .clipped()
-    }
-
-    private var placeholderView: some View {
-        Group {
-            if let placeholderImage {
-                Image(uiImage: placeholderImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#20293A"),
-                        Color(hex: "#141927")
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        }
-    }
-}
-
 private struct DiscoveryHeroContentView: View {
     let discovery: DiscoverySummary
     let imageHeight: CGFloat
@@ -1641,6 +1618,7 @@ private struct DiscoveryHeroContentView: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     let onShare: (() -> Void)?
     @Binding var scrollOffset: CGFloat
+    @State private var baselineOffset: CGFloat?
 
     init(
         discovery: DiscoverySummary,
@@ -1688,8 +1666,7 @@ private struct DiscoveryHeroContentView: View {
             VStack(spacing: 0) {
                 Color.clear
                     .frame(height: imageHeight)
-                    .overlay(headerOverlay(opacity: contentOpacity), alignment: .bottom)
-                    .overlay(headerButtons(opacity: contentOpacity), alignment: .bottom)
+                    .clipped()
 
                 if isChromeReady {
                     VStack(alignment: .leading, spacing: BrandSpacing.large) {
@@ -1724,95 +1701,19 @@ private struct DiscoveryHeroContentView: View {
         .frame(width: containerWidth)
         .conditionalScrollDisabled(isScrollDisabled)
         .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
-            scrollOffset = max(value, 0)
+            if baselineOffset == nil {
+                baselineOffset = value
+            }
+            let adjusted = value - (baselineOffset ?? 0)
+            scrollOffset = max(adjusted, 0)
         }
         .onAppear {
             voiceoverController.ensureMetadata(for: discovery)
         }
-        .onChange(of: discovery.id) { _ in
+        .onChange(of: discovery.id) { _, _ in
             scrollOffset = 0
+            baselineOffset = nil
         }
-    }
-
-    private func headerOverlay(opacity: Double) -> some View {
-        Group {
-            if isChromeReady {
-                ZStack(alignment: .bottom) {
-                    LinearGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: Color.clear, location: 0.0),
-                            .init(color: palette.overlayMidtone, location: 0.7),
-                            .init(color: palette.background, location: 1.0)
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-
-                    VStack(spacing: BrandSpacing.small) {
-                        Text(discovery.title)
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(palette.textPrimary)
-                            .multilineTextAlignment(.center)
-
-                        Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(palette.textSecondary)
-
-                        if let shortDescription = discovery.shortDescription ?? discovery.highlight.nonEmptyOrNil {
-                            Text(shortDescription)
-                                .font(.system(size: 14))
-                                .foregroundStyle(palette.textSecondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, BrandSpacing.large)
-                        }
-                    }
-                    .padding(.bottom, BrandSpacing.xLarge)
-                    .padding(.horizontal, BrandSpacing.large)
-                    .opacity(opacity)
-                }
-            } else {
-                Color.clear
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func headerButtons(opacity: Double) -> some View {
-        if isChromeReady {
-            HStack {
-                if let location = discovery.location {
-                    buttonCircle(systemName: "mappin.and.ellipse") {
-                        openInMaps(location: location)
-                    }
-                }
-
-                Spacer()
-
-                if let onShare {
-                    buttonCircle(systemName: "square.and.arrow.up", action: onShare)
-                }
-            }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.bottom, 28)
-            .opacity(opacity)
-        }
-    }
-
-    private func buttonCircle(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(palette.overlayButtonForeground)
-                .padding(16)
-                .background(palette.overlayButtonBackground)
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .strokeBorder(palette.overlayButtonBorder, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .shadow(color: Color.black.opacity(palette.overlayButtonShadowOpacity), radius: 8, x: 0, y: 4)
     }
 
     private var textColor: Color {
@@ -1849,16 +1750,6 @@ private struct DiscoveryHeroContentView: View {
         }
     }
 
-    private func openInMaps(location: DiscoveryLocation) {
-        let coordinate = CLLocationCoordinate2D(
-            latitude: location.latitude,
-            longitude: location.longitude
-        )
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = discovery.title
-        mapItem.openInMaps()
-    }
 }
 
 private struct HeroScrollOffsetPreferenceKey: PreferenceKey {
@@ -2171,6 +2062,7 @@ struct DiscoveriesHomeView: View {
         feedUseCase: DiscoveryFeedUseCase,
         voiceoverController _: VoiceoverPlaybackController,
         pendingDiscoveryId _: Binding<Int64?>,
+        pendingCreatedSummary _: Binding<DiscoverySummary?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil
     ) {

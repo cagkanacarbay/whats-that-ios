@@ -149,6 +149,6 @@ public enum DiscoveryAnalysisEvent: Sendable, Equatable {
     case metadata(title: String?, shortDescription: String?)
     case token(String)
     case complete(discoveryId: Int64, systemPromptVersion: String?, userPromptVersion: String?)
-    case error(message: String)
+    case error(message: String, status: Int? = nil)
     case end
 }

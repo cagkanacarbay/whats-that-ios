@@ -1,5 +1,4 @@
 import SwiftUI
-import OSLog
 import WhatsThatDomain
 import WhatsThatShared
 import UIKit
@@ -39,6 +38,7 @@ struct DiscoveriesHomeView: View {
     @State private var safeAreaBottomInset: CGFloat = 0
     @State private var headerHeight: CGFloat = 110
     @State private var safeAreaTopInset: CGFloat = 0
+    @State private var refreshErrorMessage: String?
 
     private var headerMetrics: DiscoveriesHeaderMetrics {
         DiscoveriesHeaderMetrics(
@@ -108,6 +108,17 @@ struct DiscoveriesHomeView: View {
                     VStack(spacing: 0) {
                         Color.clear.frame(height: metrics.headerSpacerHeight)
 
+                        if viewModel.isRefreshing {
+                            HStack(spacing: BrandSpacing.small) {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                Text("Checking for new discoveries...")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, BrandSpacing.medium)
+                        }
+
                         DiscoveriesGridView(
                             viewModel: viewModel,
                             availableWidth: contentWidth,
@@ -168,6 +179,13 @@ struct DiscoveriesHomeView: View {
                             isCardFramesReactionScheduled = false
                             presentPendingDiscoveryIfNeeded()
                         }
+                    }
+                }
+                .onChange(of: viewModel.errorMessage) { _, newValue in
+                    if let message = newValue?.nonEmptyOrNil, !viewModel.discoveries.isEmpty {
+                        refreshErrorMessage = message
+                    } else if newValue == nil {
+                        refreshErrorMessage = nil
                     }
                 }
 
@@ -231,18 +249,6 @@ struct DiscoveriesHomeView: View {
             VStack(spacing: BrandSpacing.medium) {
                 voiceoverPlayerOverlay
 
-                if let errorMessage = viewModel.errorMessage,
-                   !errorMessage.isEmpty,
-                   !viewModel.discoveries.isEmpty
-                {
-                    DiscoveriesErrorToastView(
-                        message: errorMessage,
-                        retryAction: {
-                            Task { await viewModel.refresh() }
-                        }
-                    )
-                }
-
                 if viewModel.isPaginating {
                     HStack(spacing: BrandSpacing.small) {
                         ProgressView()
@@ -263,6 +269,27 @@ struct DiscoveriesHomeView: View {
             .padding(.bottom, BrandSpacing.medium + max(safeAreaBottomInset - 8, 0))
         }
         .animation(.easeInOut, value: viewModel.loadState)
+        .alert(
+            "An error occurred",
+            isPresented: Binding(
+                get: { refreshErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        refreshErrorMessage = nil
+                        viewModel.clearError()
+                    }
+                }
+            ),
+            actions: {
+                Button("OK", role: .cancel) {
+                    refreshErrorMessage = nil
+                    viewModel.clearError()
+                }
+            },
+            message: {
+                Text("Please try again later.")
+            }
+        )
     }
 
     private func handleDiscoverySelection(discovery: DiscoverySummary, imageURL: URL?, startFrame: CGRect) {

@@ -42,6 +42,10 @@ public final class DiscoveryFeedViewModel: ObservableObject {
         await fetchPage(mode: .refresh)
     }
 
+    public func clearError() {
+        errorMessage = nil
+    }
+
     public func loadMoreIfNeeded(currentItem item: DiscoverySummary?) async {
         guard let item else { return }
         guard hasMore else { return }

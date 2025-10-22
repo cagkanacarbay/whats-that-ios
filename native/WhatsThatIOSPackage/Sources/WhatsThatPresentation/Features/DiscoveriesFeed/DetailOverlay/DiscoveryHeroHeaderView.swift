@@ -1,12 +1,10 @@
 import SwiftUI
-import WhatsThatDomain
 import WhatsThatShared
 import UIKit
 
 typealias DiscoveryHeaderPlatformImage = UIImage
 
 struct DiscoveryHeroHeaderView: View {
-    let discovery: DiscoverySummary
     let imageURL: URL?
     let placeholderImage: DiscoveryHeaderPlatformImage?
     let preferPlaceholderImage: Bool
@@ -17,35 +15,18 @@ struct DiscoveryHeroHeaderView: View {
     let namespace: Namespace.ID?
     let isGeometrySource: Bool
     let discoveryId: Int64
-    let palette: BrandTheme.Palette
-    var gradientFalloff: CGFloat = 0.55
-    var maxDescriptionLines: Int = 3
-    var overlayOpacity: Double = 1
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            DiscoveryHeroHeaderImageView(
-                discoveryId: discoveryId,
-                imageURL: imageURL,
-                placeholderImage: placeholderImage,
-                preferPlaceholder: preferPlaceholderImage,
-                height: effectiveHeight,
-                cornerRadius: cornerRadius,
-                namespace: namespace,
-                isGeometrySource: isGeometrySource
-            )
-
-            DiscoveryHeaderOverlayView(
-                discovery: discovery,
-                palette: palette,
-                maxDescriptionLines: maxDescriptionLines,
-                gradientFalloff: gradientFalloff,
-                contentWidth: width
-            )
-            .frame(height: height)
-            .opacity(overlayOpacity)
-            .allowsHitTesting(false)
-        }
+        DiscoveryHeroHeaderImageView(
+            discoveryId: discoveryId,
+            imageURL: imageURL,
+            placeholderImage: placeholderImage,
+            preferPlaceholder: preferPlaceholderImage,
+            height: effectiveHeight,
+            cornerRadius: cornerRadius,
+            namespace: namespace,
+            isGeometrySource: isGeometrySource
+        )
         .frame(maxWidth: .infinity)
         .frame(width: width, height: effectiveHeight)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

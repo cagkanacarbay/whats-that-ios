@@ -16,7 +16,8 @@ struct DiscoveryDetailView: View {
         let safeAreaTopInset: CGFloat
         let contentOpacity: Double
         let backgroundOpacity: Double
-        let headerOverlayOpacity: Double
+        let heroOverlayOpacity: Double
+        let scrollOverlayOpacity: Double
         let preferPlaceholderImage: Bool
         let isChromeReady: Bool
         let isMarkdownReady: Bool
@@ -30,6 +31,7 @@ struct DiscoveryDetailView: View {
     let colorScheme: ColorScheme
     let layout: LayoutConfiguration
     let safeAreaInsets: EdgeInsets
+    let overlayNamespace: Namespace.ID
     let onClose: () -> Void
     let onShowOptions: (() -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
@@ -44,6 +46,7 @@ struct DiscoveryDetailView: View {
         layout: LayoutConfiguration,
         safeAreaInsets: EdgeInsets,
         voiceoverController: VoiceoverPlaybackController,
+        overlayNamespace: Namespace.ID,
         scrollOffset: Binding<CGFloat>,
         onClose: @escaping () -> Void,
         onShowOptions: (() -> Void)?
@@ -55,6 +58,7 @@ struct DiscoveryDetailView: View {
         self.colorScheme = colorScheme
         self.layout = layout
         self.safeAreaInsets = safeAreaInsets
+        self.overlayNamespace = overlayNamespace
         self.onClose = onClose
         self.onShowOptions = onShowOptions
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
@@ -68,7 +72,6 @@ struct DiscoveryDetailView: View {
     var body: some View {
         ZStack(alignment: .top) {
             DiscoveryHeroHeaderView(
-                discovery: discovery,
                 imageURL: imageURL,
                 placeholderImage: placeholderImage,
                 preferPlaceholderImage: layout.preferPlaceholderImage,
@@ -78,12 +81,26 @@ struct DiscoveryDetailView: View {
                 width: layout.cardSize.width,
                 namespace: nil,
                 isGeometrySource: false,
-                discoveryId: discovery.id,
-                palette: palette,
-                gradientFalloff: 0.55,
-                maxDescriptionLines: 3,
-                overlayOpacity: layout.headerOverlayOpacity
+                discoveryId: discovery.id
             )
+            .overlay(alignment: .bottom) {
+                DiscoveryHeaderOverlayView(
+                    discovery: discovery,
+                    palette: palette,
+                    maxDescriptionLines: 3,
+                    gradientFalloff: 0.55,
+                    contentWidth: layout.cardSize.width
+                )
+                .frame(height: layout.heroHeight)
+                .opacity(layout.heroOverlayOpacity)
+                .matchedGeometryEffect(
+                    id: overlayGeometryId,
+                    in: overlayNamespace,
+                    properties: .frame,
+                    anchor: .bottom,
+                    isSource: !layout.isChromeReady
+                )
+            }
             .offset(y: layout.headerOffset)
 
             DiscoveryDetailContentView(
@@ -100,6 +117,8 @@ struct DiscoveryDetailView: View {
                 isChromeReady: layout.isChromeReady,
                 isMarkdownReady: layout.isMarkdownReady,
                 isScrollDisabled: layout.isScrollDisabled,
+                scrollOverlayOpacity: layout.scrollOverlayOpacity,
+                overlayNamespace: overlayNamespace,
                 scrollOffset: $scrollOffset
             )
         }
@@ -121,6 +140,12 @@ struct DiscoveryDetailView: View {
     }
 }
 
+private extension DiscoveryDetailView {
+    var overlayGeometryId: String {
+        "discovery-detail-overlay-\(discovery.id)"
+    }
+}
+
 private struct DiscoveryDetailContentView: View {
     let discovery: DiscoverySummary
     let imageHeight: CGFloat
@@ -134,6 +159,8 @@ private struct DiscoveryDetailContentView: View {
     let isChromeReady: Bool
     let isMarkdownReady: Bool
     let isScrollDisabled: Bool
+    let scrollOverlayOpacity: Double
+    let overlayNamespace: Namespace.ID
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding var scrollOffset: CGFloat
     @State private var baselineOffset: CGFloat?
@@ -152,6 +179,8 @@ private struct DiscoveryDetailContentView: View {
         isChromeReady: Bool,
         isMarkdownReady: Bool,
         isScrollDisabled: Bool,
+        scrollOverlayOpacity: Double,
+        overlayNamespace: Namespace.ID,
         scrollOffset: Binding<CGFloat>
     ) {
         self.discovery = discovery
@@ -166,6 +195,8 @@ private struct DiscoveryDetailContentView: View {
         self.isChromeReady = isChromeReady
         self.isMarkdownReady = isMarkdownReady
         self.isScrollDisabled = isScrollDisabled
+        self.scrollOverlayOpacity = scrollOverlayOpacity
+        self.overlayNamespace = overlayNamespace
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
     }
@@ -176,6 +207,10 @@ private struct DiscoveryDetailContentView: View {
 
     private var headerLayoutHeight: CGFloat {
         imageHeight + safeAreaTopInset + pullDownOffset
+    }
+
+    private var headerOverlayHeight: CGFloat {
+        imageHeight + safeAreaTopInset
     }
 
     var body: some View {
@@ -190,9 +225,29 @@ private struct DiscoveryDetailContentView: View {
             .frame(height: 0)
 
             VStack(spacing: 0) {
-                Color.clear
-                    .frame(height: headerLayoutHeight)
-                    .clipped()
+                ZStack(alignment: .bottom) {
+                    Color.clear
+                        .frame(height: headerLayoutHeight)
+                        .clipped()
+
+                    DiscoveryHeaderOverlayView(
+                        discovery: discovery,
+                        palette: palette,
+                        maxDescriptionLines: 3,
+                        gradientFalloff: 0.55,
+                        contentWidth: containerWidth
+                    )
+                    .frame(height: headerOverlayHeight)
+                    .opacity(scrollOverlayOpacity)
+                    .matchedGeometryEffect(
+                        id: overlayGeometryId,
+                        in: overlayNamespace,
+                        properties: .frame,
+                        anchor: .bottom,
+                        isSource: isChromeReady
+                    )
+                    .allowsHitTesting(false)
+                }
 
                 if isChromeReady {
                     VStack(alignment: .leading, spacing: BrandSpacing.large) {
@@ -330,5 +385,11 @@ private struct DiscoveryDetailTopControls: View {
             return globalInset + 12
         }
         return baseInset + 12
+    }
+}
+
+private extension DiscoveryDetailContentView {
+    var overlayGeometryId: String {
+        "discovery-detail-overlay-\(discovery.id)"
     }
 }

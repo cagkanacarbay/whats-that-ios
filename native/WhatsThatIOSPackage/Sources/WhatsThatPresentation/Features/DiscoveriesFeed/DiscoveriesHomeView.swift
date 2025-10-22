@@ -20,6 +20,7 @@ struct DiscoveriesHomeView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var detailContext: DiscoveryDetailContext?
     @State private var detailProgress: CGFloat = 0
+    @State private var detailDismissProgress: CGFloat = 0
     @State private var detailContentOpacity: Double = 0
     @State private var detailIsSettled = false
     @State private var detailIsClosing = false
@@ -190,6 +191,7 @@ struct DiscoveriesHomeView: View {
                         context: context,
                         destinationFrame: targetCloseFrame,
                         progress: detailProgress,
+                        dismissProgress: detailDismissProgress,
                         contentOpacity: detailContentOpacity,
                         isContentReady: detailIsSettled,
                         isClosing: detailIsClosing,
@@ -352,13 +354,16 @@ struct DiscoveriesHomeView: View {
         return frame
     }
 
-    private func resetDetailInteraction(animated: Bool) {
+    private func resetDetailInteraction(animated: Bool, resetDismissProgress: Bool = true) {
         let animations = {
             detailDragTranslation = .zero
             detailDragScale = 1
             detailDragRotation = 0
             detailDragShadowOpacity = 0
             detailDragCornerRadius = 0
+            if resetDismissProgress {
+                detailDismissProgress = 0
+            }
         }
 
         if animated {
@@ -418,6 +423,11 @@ struct DiscoveriesHomeView: View {
         detailDragRotation = metrics.rotation
         detailDragCornerRadius = metrics.cornerRadius
         detailDragShadowOpacity = metrics.shadowOpacity
+        let dismissalProgress = min(
+            max(metrics.translation.width / max(detailDismissalDistance, 1), 0),
+            1
+        )
+        detailDismissProgress = dismissalProgress
     }
 
     private func handleDetailDragEnded(_ value: DragGesture.Value) {
@@ -433,7 +443,8 @@ struct DiscoveriesHomeView: View {
             detailCloseStartTranslation = detailDragTranslation
             detailCloseStartScale = detailDragScale
             detailCloseStartRotation = detailDragRotation
-            resetDetailInteraction(animated: true)
+            detailDismissProgress = 1
+            resetDetailInteraction(animated: true, resetDismissProgress: false)
             handleDetailDismissal(fromGesture: true)
         } else {
             resetDetailInteraction(animated: true)
@@ -453,7 +464,8 @@ struct DiscoveriesHomeView: View {
             detailCloseStartScale = 1
             detailCloseStartRotation = 0
         }
-        resetDetailInteraction(animated: true)
+        detailDismissProgress = 1
+        resetDetailInteraction(animated: true, resetDismissProgress: false)
         detailIsClosing = true
         detailIsSettled = false
         updateDetailPresentationVisibility()
@@ -481,6 +493,7 @@ struct DiscoveriesHomeView: View {
             if hiddenDiscovery?.sessionId == closingSessionId {
                 hiddenDiscovery = nil
             }
+            detailDismissProgress = 0
             voiceoverController.isDetailOverlayActive = false
         }
     }

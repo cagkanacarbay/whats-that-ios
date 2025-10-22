@@ -10,6 +10,7 @@ struct DiscoveryDetailOverlayView: View {
     let context: DiscoveryDetailContext
     let destinationFrame: CGRect
     let progress: CGFloat
+    let dismissProgress: CGFloat
     let contentOpacity: Double
     let isContentReady: Bool
     let isClosing: Bool
@@ -32,6 +33,7 @@ struct DiscoveryDetailOverlayView: View {
         context: DiscoveryDetailContext,
         destinationFrame: CGRect,
         progress: CGFloat,
+        dismissProgress: CGFloat,
         contentOpacity: Double,
         isContentReady: Bool,
         isClosing: Bool,
@@ -53,6 +55,7 @@ struct DiscoveryDetailOverlayView: View {
         self.context = context
         self.destinationFrame = destinationFrame
         self.progress = progress
+        self.dismissProgress = dismissProgress
         self.contentOpacity = contentOpacity
         self.isContentReady = isContentReady
         self.isClosing = isClosing
@@ -128,6 +131,11 @@ struct DiscoveryDetailOverlayView: View {
                 )
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
+                let normalizedDismiss = max(0, min(dismissProgress, 1))
+                let collapseThreshold: CGFloat = 0.005
+                let shouldCollapse = isClosing || normalizedDismiss > collapseThreshold
+                let collapseProgress: CGFloat = shouldCollapse ? 1 : 0
+                let cardBackgroundOpacity = Double(max(0, min(1 - collapseProgress, 1)))
                 let headerOpacityRaw: Double = {
                     guard !isClosing && !isInteracting else { return 0 }
                     let start: CGFloat = 0.88
@@ -137,8 +145,12 @@ struct DiscoveryDetailOverlayView: View {
                 let headerOverlayOpacity: Double = isChromeReady ? (isClosing || isInteracting ? 0 : 1) : headerOpacityRaw
                 let widthDrivenCardHeight = min(containerSize.height, containerSize.width * context.cardAspectRatio)
                 let cardWidth: CGFloat = isClosing ? containerSize.width : geometry.size.width
-                let cardHeight: CGFloat = isClosing ? widthDrivenCardHeight : geometry.size.height
                 let imageHeightForView: CGFloat = isClosing ? widthDrivenCardHeight : geometry.imageHeight
+                let expandedCardHeight = geometry.size.height
+                let collapsedCardHeight = imageHeightForView
+                let interactiveCardHeight = collapsedCardHeight
+                    + (expandedCardHeight - collapsedCardHeight) * (1 - collapseProgress)
+                let cardHeight: CGFloat = isClosing ? widthDrivenCardHeight : interactiveCardHeight
                 let effectivePullDown = (isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
                 let preferPlaceholder = (!isChromeReady) || isInteracting
 
@@ -157,64 +169,44 @@ struct DiscoveryDetailOverlayView: View {
                     isClosing: isClosing
                 )
 
-                let headerOffset = (isClosing || isInteracting) ? 0 : min(scrollOffset, 0)
-                let heroHeaderHeight = isClosing ? imageHeightForView : imageHeightForView + safeAreaInsets.top
+                let headerOffset = (isClosing || isInteracting || shouldCollapse) ? 0 : min(scrollOffset, 0)
+                let heroTopInset = isClosing ? 0 : safeAreaInsets.top * (1 - collapseProgress)
+                let heroHeaderHeight = imageHeightForView + heroTopInset
 
-                let heroHeader = DiscoveryHeroHeaderView(
+                let detailLayout = DiscoveryDetailView.LayoutConfiguration(
+                    cardSize: CGSize(width: cardWidth, height: cardHeight),
+                    heroHeight: heroHeaderHeight,
+                    heroImageHeight: imageHeightForView,
+                    headerOffset: headerOffset,
+                    pullDownOffset: effectivePullDown,
+                    cornerRadius: maskCornerRadius,
+                    containerWidth: containerWidth,
+                    safeAreaTopInset: heroTopInset,
+                    contentOpacity: detailOpacity,
+                    backgroundOpacity: cardBackgroundOpacity,
+                    headerOverlayOpacity: headerOverlayOpacity,
+                    preferPlaceholderImage: preferPlaceholder,
+                    isChromeReady: isChromeReady,
+                    isMarkdownReady: isChromeReady,
+                    isScrollDisabled: !isChromeReady || isInteracting || isClosing
+                )
+
+                let heroCard = DiscoveryDetailView(
                     discovery: context.discovery,
                     imageURL: context.imageURL,
                     placeholderImage: context.placeholderImage,
-                    preferPlaceholderImage: (!isChromeReady) || isInteracting,
-                    height: heroHeaderHeight,
-                    pullDownOffset: effectivePullDown,
-                    cornerRadius: maskCornerRadius,
-                    width: cardWidth,
-                    namespace: nil,
-                    isGeometrySource: false,
-                    discoveryId: context.discovery.id,
-                    palette: BrandTheme.palette(for: colorScheme),
-                    gradientFalloff: 0.55,
-                    maxDescriptionLines: 3,
-                    overlayOpacity: headerOverlayOpacity
+                    backgroundColor: backgroundColor,
+                    colorScheme: colorScheme,
+                    layout: detailLayout,
+                    safeAreaInsets: safeAreaInsets,
+                    voiceoverController: voiceoverController,
+                    scrollOffset: $scrollOffset,
+                    onClose: onClose,
+                    onShowOptions: onShowOptions
                 )
-                .offset(y: headerOffset)
-
-                let heroCard = ZStack(alignment: .top) {
-                    heroHeader
-
-                    DiscoveryDetailContentView(
-                        discovery: context.discovery,
-                        imageHeight: imageHeightForView,
-                        pullDownOffset: effectivePullDown,
-                        backgroundColor: backgroundColor,
-                        colorScheme: colorScheme,
-                        voiceoverController: voiceoverController,
-                        safeAreaTopInset: safeAreaInsets.top,
-                        containerWidth: containerWidth,
-                        contentOpacity: detailOpacity,
-                        isChromeReady: isChromeReady,
-                        isMarkdownReady: isChromeReady,
-                        isScrollDisabled: !isChromeReady || isInteracting || isClosing,
-                        scrollOffset: $scrollOffset
-                    )
-                }
-                .frame(width: cardWidth, height: cardHeight)
-                .background(isClosing ? Color.clear : backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: maskCornerRadius, style: .continuous))
+                .animation(.easeOut(duration: 0.12), value: shouldCollapse)
 
                 heroCard
-                    .overlay(alignment: .topLeading) {
-                        if isChromeReady {
-                            DiscoveryDetailTopControls(
-                                safeAreaInsets: safeAreaInsets,
-                                onClose: onClose,
-                                onShowOptions: onShowOptions
-                            )
-                            .opacity(detailOpacity)
-                            .animation(.easeInOut(duration: 0.12), value: detailOpacity)
-                            .ignoresSafeArea()
-                        }
-                    }
                     .shadow(
                         color: Color.black.opacity(combinedShadowOpacity),
                         radius: combinedShadowRadius,
@@ -268,20 +260,15 @@ struct DiscoveryDetailOverlayView: View {
             return 0.7 + local * (0.9 - 0.7)
         }
     }
-
-    private func cardChromeOpacity(for progress: CGFloat, isClosing: Bool) -> Double {
-        if isClosing { return 0 }
-
-        let clamped = max(0, min(progress, 1))
-        return clamped < 0.001 ? 1 : 0
-    }
 }
+#endif
 
 private struct DiscoveryDetailContentView: View {
     let discovery: DiscoverySummary
     let imageHeight: CGFloat
     let pullDownOffset: CGFloat
     let backgroundColor: Color
+    let backgroundOpacity: Double
     let colorScheme: ColorScheme
     let safeAreaTopInset: CGFloat
     let containerWidth: CGFloat
@@ -298,6 +285,7 @@ private struct DiscoveryDetailContentView: View {
         imageHeight: CGFloat,
         pullDownOffset: CGFloat,
         backgroundColor: Color,
+        backgroundOpacity: Double,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
         safeAreaTopInset: CGFloat,
@@ -312,6 +300,7 @@ private struct DiscoveryDetailContentView: View {
         self.imageHeight = imageHeight
         self.pullDownOffset = pullDownOffset
         self.backgroundColor = backgroundColor
+        self.backgroundOpacity = backgroundOpacity
         self.colorScheme = colorScheme
         self.safeAreaTopInset = safeAreaTopInset
         self.containerWidth = containerWidth
@@ -370,7 +359,7 @@ private struct DiscoveryDetailContentView: View {
                         BrandSpacing.xLarge * 2 + additionalBottomPadding
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(backgroundColor)
+                    .background(backgroundColor.opacity(backgroundOpacity))
                     .opacity(contentOpacity)
                 }
             }

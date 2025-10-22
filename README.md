@@ -15,11 +15,22 @@ All planning documents now live under `docs/port/`:
 - `dependency-audit.md` – compatibility matrix for Swift packages/services we will adopt.
 - `theme-system.md` – overview of the user-selectable light/dark appearance and integration guidelines.
 
+Development workflow guides live under `docs/development/`:
+- `building-ios.md` – Xcode build/test commands and rationale for skipping `swift build`.
+
 ## Presentation Module Layout
 - `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/App` – root shell views and the `AppRootViewModel`.
 - `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Features` – feature-specific SwiftUI flows (Discovery Creation/Feed, Settings, Credits, Onboarding).
 - `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Shared` – reusable brand components and controllers.
 - `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Support` – shared exports or glue code for the presentation package.
+
+## Core Package Layout
+The remaining packages now follow the refactor captured in `docs/architecture/module-refactor-plan.md` and summarised in `docs/architecture/file-structure.md`:
+- `WhatsThatApp` – split between `AppEntry/` for SwiftUI entry points and `DependencyInjection/` for container wiring.
+- `WhatsThatDomain` – feature folders (`Auth`, `Credits`, `Discovery`, `Onboarding`, `AppFlow`) with a README that reiterates UI-free boundaries.
+- `WhatsThatData` – repository implementations grouped per feature with placeholder `DTOs/` and `Mappers/` directories.
+- `WhatsThatInfrastructure` – services categorised by capability plus a `Networking/` hub for Supabase clients.
+- `WhatsThatShared` – shared utilities sorted into `Branding`, `Configuration`, `Appearance`, `Caching`, and `Formatting`, supported by quick doc notes.
 
 ## Build Commands
 - `swift package resolve --package-path native/WhatsThatIOSPackage` – refresh Swift Package dependencies.

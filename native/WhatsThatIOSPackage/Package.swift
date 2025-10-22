@@ -106,6 +106,9 @@ var package = Package(
             name: "WhatsThatShared",
             dependencies: sharedDependencies,
             path: "Sources/WhatsThatShared",
+            exclude: [
+                "README.md"
+            ],
             swiftSettings: targetSwiftSettings
         ),
         .target(
@@ -114,6 +117,9 @@ var package = Package(
                 "WhatsThatShared"
             ],
             path: "Sources/WhatsThatDomain",
+            exclude: [
+                "README.md"
+            ],
             swiftSettings: targetSwiftSettings
         ),
         .target(
@@ -126,6 +132,10 @@ var package = Package(
             name: "WhatsThatData",
             dependencies: dataDependencies,
             path: "Sources/WhatsThatData",
+            exclude: [
+                "DTOs/README.md",
+                "Mappers/README.md"
+            ],
             swiftSettings: targetSwiftSettings
         ),
         .target(

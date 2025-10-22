@@ -13,18 +13,18 @@ WhatsThatIOS/
 ├── WhatsThatIOS.xcworkspace/              # Open this file in Xcode
 ├── WhatsThatIOS.xcodeproj/                # App shell project
 ├── WhatsThatIOS/                          # App target (minimal)
-│   ├── Assets.xcassets/                # App-level assets (icons, colors)
+│   ├── Assets.xcassets/                   # App-level assets (icons, colors)
 │   ├── WhatsThatIOSApp.swift              # App entry point
 │   └── WhatsThatIOS.xctestplan            # Test configuration
 ├── WhatsThatIOSPackage/                   # 🚀 Primary development area
 │   ├── Package.swift                      # Package configuration + dependency toggles
 │   ├── Sources/
-│   │   ├── WhatsThatApp/                  # Composition root & dependency container
-│   │   ├── WhatsThatPresentation/         # SwiftUI views + view models
-│   │   ├── WhatsThatDomain/               # Use cases, domain models, repository contracts
-│   │   ├── WhatsThatData/                 # Repository implementations
-│   │   ├── WhatsThatInfrastructure/       # Networking, persistence, external services
-│   │   └── WhatsThatShared/               # Cross-cutting configuration/utilities
+│   │   ├── WhatsThatApp/                  # App entry + dependency injection
+│   │   ├── WhatsThatPresentation/         # SwiftUI features (Views, ViewModels, Coordinators, Shared)
+│   │   ├── WhatsThatDomain/               # Pure domain models, use cases, contracts
+│   │   ├── WhatsThatData/                 # Repository implementations grouped by resource
+│   │   ├── WhatsThatInfrastructure/       # Platform services, networking, encoding
+│   │   └── WhatsThatShared/               # Branding, configuration, formatting, caching
 │   └── Tests/                             # XCTest targets mirrored per module
 └── WhatsThatIOSUITests/                   # UI automation tests
 ```
@@ -59,21 +59,17 @@ public struct NewView: View {
 ```
 
 ### Adding Dependencies
-Edit `WhatsThatIOSPackage/Package.swift` to manage third-party dependencies. By default, the project ships with **stubbed dependencies disabled** to support offline development.
+Edit `WhatsThatIOSPackage/Package.swift` to manage third-party dependencies. Resolve them with the Xcode workspace build (no `swift build`, which targets macOS and fails on our deps):
 
-- Set `USE_REMOTE_DEPS=1` when invoking `swift build` / `xcodebuild` to resolve Supabase Swift, Google Sign-In, Nuke, MarkdownUI, and Apple collections packages (transitive requirements like AppAuth, swift-crypto, and swift-http-types will be fetched automatically).
-- Keep the dependency mapping in sync with `docs/port/dependency-audit.md`.
-- In sandboxed environments (CI, restricted shells), also set `SWIFT_MODULECACHE_PATH` and `CLANG_MODULE_CACHE_PATH` to a writable directory such as `.build/modulecache` before running package commands.
-
-Example (simplified):
-```swift
-var infrastructureDependencies: [Target.Dependency] = ["WhatsThatShared"]
-if useRemoteDependencies {
-    infrastructureDependencies += [
-        .product(name: "Supabase", package: "supabase-swift")
-    ]
-}
+```bash
+USE_REMOTE_DEPS=1 xcodebuild \
+  -workspace native/WhatsThatIOS.xcworkspace \
+  -scheme WhatsThatIOS \
+  -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
+
+- Keep the dependency mapping in sync with `docs/port/dependency-audit.md`.
+- In sandboxed environments (CI, restricted shells), set `SWIFT_MODULECACHE_PATH` and `CLANG_MODULE_CACHE_PATH` to a writable directory such as `.build/modulecache` before invoking `xcodebuild`.
 
 ### Runtime Configuration
 - `AppConfiguration` values are read from the app bundle via `AppConfiguration.fromBundle()`, which maps the xcconfig keys (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`) into Info.plist entries.
@@ -81,7 +77,7 @@ if useRemoteDependencies {
 - The app now fails fast when configuration is missing; make sure Supabase and Google keys are present for development builds.
 - Inject secrets through `.xcconfig` files or launch arguments; avoid hard-coding credentials in source.
 - Populate the placeholders `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`, and `GOOGLE_REVERSED_CLIENT_ID` in `Config/Shared.xcconfig` (and override in Debug/Release files as needed); missing values will cause the app to terminate during startup.
-- Remember to build with `USE_REMOTE_DEPS=1` (e.g., by adding it to your Xcode scheme’s environment) whenever you want the Supabase/GoogleSignIn packages compiled into the binary.
+- Remember to build with `USE_REMOTE_DEPS=1` (e.g., scheme environment variable or command line) whenever you need Supabase/Google Sign-In packages compiled into the binary.
 
 ### Test Structure
 - **Unit Tests**: Module-specific folders under `WhatsThatIOSPackage/Tests/` (XCTest today)
@@ -105,17 +101,7 @@ App capabilities are managed through a **declarative entitlements file**:
 
 ### Asset Management
 - **App-Level Assets**: `WhatsThatIOS/Assets.xcassets/` (app icon, accent color)
-- **Feature Assets**: Add `Resources/` folder to SPM package if needed
-
-### SPM Package Resources
-To include assets in a module (e.g., presentation layer):
-```swift
-.target(
-    name: "WhatsThatPresentation",
-    dependencies: [],
-    resources: [.process("Resources")]
-)
-```
+- **Feature Assets**: Add `Resources/` folder to SPM targets as needed and declare them in `Package.swift`.
 
 ### Generated with XcodeBuildMCP
 This project was scaffolded using [XcodeBuildMCP](https://github.com/cameroncooke/XcodeBuildMCP), which provides tools for AI-assisted iOS development workflows.

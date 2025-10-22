@@ -186,7 +186,7 @@ _If you reorganize anything under `native/WhatsThatIOSPackage/Sources`, edit thi
 2. Create the folder structure first, following `<Module>/<Category>/<Feature>/...` conventions.
 3. Update this document’s tree immediately and bump **Version** / **Last Modified**.
 4. Implement code, add tests in the matching `Tests/` target if applicable.
-5. Run `swift build`, then notify reviewers for visual checks.
+5. Re-run the Xcode build command (`USE_REMOTE_DEPS=1 xcodebuild …`) to confirm the workspace compiles, then notify reviewers for visual checks.
 6. Reference this document in PR descriptions to highlight structural updates.
 
 ## Maintaining Structure Consistency

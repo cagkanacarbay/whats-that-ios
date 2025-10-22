@@ -25,7 +25,7 @@ Development workflow guides live under `docs/development/`:
 - `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Support` – shared exports or glue code for the presentation package.
 
 ## Core Package Layout
-The remaining packages now follow the refactor captured in `docs/architecture/module-refactor-plan.md` and summarised in `docs/architecture/file-structure.md`:
+The remaining packages now follow the structure summarised in `docs/architecture/file-structure.md`:
 - `WhatsThatApp` – split between `AppEntry/` for SwiftUI entry points and `DependencyInjection/` for container wiring.
 - `WhatsThatDomain` – feature folders (`Auth`, `Credits`, `Discovery`, `Onboarding`, `AppFlow`) with a README that reiterates UI-free boundaries.
 - `WhatsThatData` – repository implementations grouped per feature with placeholder `DTOs/` and `Mappers/` directories.

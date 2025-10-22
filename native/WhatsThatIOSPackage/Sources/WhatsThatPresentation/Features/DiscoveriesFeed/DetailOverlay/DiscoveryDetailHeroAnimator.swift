@@ -1,10 +1,11 @@
-#if canImport(UIKit)
 import OSLog
 import SwiftUI
 import UIKit
+import WhatsThatShared
 
 enum DiscoveryDetailLayout {
     static let expandedImageHeightFraction: CGFloat = 0.8
+    static let cardCornerRadius: CGFloat = BrandCornerRadius.large
 }
 
 struct DiscoveryDetailHeroAnimator {
@@ -77,14 +78,8 @@ struct DiscoveryDetailHeroGeometry {
         from + (to - from) * fraction
     }
 
-    private static func cornerRadius(for progress: CGFloat) -> CGFloat {
-        if progress <= 0.7 {
-            let local = progress / 0.7
-            return lerp(12, 6, local)
-        } else {
-            let local = (progress - 0.7) / 0.3
-            return lerp(6, 0, max(0, min(local, 1)))
-        }
+    private static func cornerRadius(for _: CGFloat) -> CGFloat {
+        DiscoveryDetailLayout.cardCornerRadius
     }
 }
 
@@ -153,4 +148,3 @@ struct DiscoveryDetailUniformCloseTransform: ViewModifier {
         }
     }
 }
-#endif

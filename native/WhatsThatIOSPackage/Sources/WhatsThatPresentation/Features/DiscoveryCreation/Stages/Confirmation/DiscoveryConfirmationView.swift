@@ -5,9 +5,7 @@ import WhatsThatShared
 #if canImport(MapKit)
 import MapKit
 #endif
-#if canImport(UIKit)
 import UIKit
-#endif
 
 struct DiscoveryConfirmationView: View {
     private enum ActiveAlert: Identifiable {
@@ -39,21 +37,15 @@ struct DiscoveryConfirmationView: View {
         DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
-    #if canImport(UIKit)
     private var previewUIImage: UIImage? {
         UIImage(data: state.displayImageData)
     }
-    #endif
 
     private var previewImage: Image? {
-        #if canImport(UIKit)
         guard let uiImage = previewUIImage else {
             return nil
         }
         return Image(uiImage: uiImage)
-        #else
-        return nil
-        #endif
     }
 
     private enum PreviewOrientation {
@@ -62,12 +54,8 @@ struct DiscoveryConfirmationView: View {
     }
 
     private var previewOrientation: PreviewOrientation? {
-        #if canImport(UIKit)
         guard let image = previewUIImage else { return nil }
         return image.size.height >= image.size.width ? .portrait : .landscape
-        #else
-        return nil
-        #endif
     }
 
     private var creditDisplayText: String {
@@ -273,10 +261,8 @@ struct DiscoveryConfirmationView: View {
     }
 
     private func openSettings() {
-        #if canImport(UIKit)
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
-        #endif
     }
 
     private func openCurrentLocation() {

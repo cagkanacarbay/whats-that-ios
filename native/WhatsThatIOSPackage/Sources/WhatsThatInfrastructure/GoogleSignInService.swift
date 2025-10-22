@@ -1,6 +1,5 @@
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn)
 @preconcurrency import GoogleSignIn
-#if canImport(UIKit)
 import UIKit
 
 public struct GoogleSignInAccount: Sendable {
@@ -110,5 +109,4 @@ public final class GoogleSignInService: @unchecked Sendable, GoogleSignInServici
         )
     }
 }
-#endif
 #endif

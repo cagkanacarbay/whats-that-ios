@@ -1,11 +1,7 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 struct VoiceoverPlayerBar: View {
     @ObservedObject private var controller: VoiceoverPlaybackController
@@ -148,11 +144,7 @@ struct VoiceoverPlayerBar: View {
     }
 
     private func platformImageView(for image: DiscoveryPlatformImage) -> Image {
-#if canImport(UIKit)
-        return Image(uiImage: image)
-#elseif canImport(AppKit)
-        return Image(nsImage: image)
-#endif
+        Image(uiImage: image)
     }
 
     private func handleSliderEditingChanged(_ isEditing: Bool) {

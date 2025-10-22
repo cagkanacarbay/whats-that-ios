@@ -1,10 +1,8 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
-#if os(iOS)
 import CoreLocation
 import UIKit
-#endif
 
 public struct RootContentView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -309,9 +307,7 @@ private struct PreOnboardingCarousel: View {
                     .tag(offset)
                 }
             }
-#if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .never))
-#endif
             .frame(height: 420)
 
             PageIndicators(count: slides.count, currentIndex: index)
@@ -984,9 +980,7 @@ private struct PostOnboardingSummary: View {
     let onContinue: () -> Void
     let onSignOut: () -> Void
     @Environment(\.colorScheme) private var colorScheme
-#if os(iOS)
     @StateObject private var permissionsCoordinator = OnboardingPermissionsCoordinator()
-#endif
 
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
@@ -1009,9 +1003,7 @@ private struct PostOnboardingSummary: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-#if os(iOS)
             OnboardingPermissionsSection(permissions: permissionsCoordinator)
-#endif
 
             BrandPrimaryButton(title: "Start Exploring", action: onContinue)
 
@@ -1036,7 +1028,6 @@ private struct PostOnboardingSummary: View {
     }
 }
 
-#if os(iOS)
 private struct OnboardingPermissionsSection: View {
     @ObservedObject var permissions: OnboardingPermissionsCoordinator
     @Environment(\.colorScheme) private var colorScheme
@@ -1195,4 +1186,3 @@ private struct OnboardingPermissionsSection: View {
         }
     }
 }
-#endif

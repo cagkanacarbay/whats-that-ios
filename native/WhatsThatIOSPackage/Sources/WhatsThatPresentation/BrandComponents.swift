@@ -211,14 +211,9 @@ struct BrandFloatingField: View {
                 if isSecure {
                     SecureField(placeholder, text: $text)
                 } else {
-#if os(iOS)
                     TextField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
-#else
-                    TextField(placeholder, text: $text)
-                        .autocorrectionDisabled(true)
-#endif
                 }
 
                 if showToggle {
@@ -233,15 +228,10 @@ struct BrandFloatingField: View {
                 }
             }
         case .email:
-#if os(iOS)
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .keyboardType(.emailAddress)
-#else
-            TextField(placeholder, text: $text)
-                .autocorrectionDisabled(true)
-#endif
         case .plain:
             TextField(placeholder, text: $text)
         }

@@ -1,11 +1,9 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 import WhatsThatDomain
 import WhatsThatShared
 #if canImport(MarkdownUI)
 import MarkdownUI
-#endif
 
 struct DiscoveryDetailOverlayView: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
@@ -100,7 +98,11 @@ struct DiscoveryDetailOverlayView: View {
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                let combinedCornerRadius = max(0, geometry.cornerRadius + gestureCornerRadius)
+                let baseCornerRadius = geometry.cornerRadius
+                let combinedCornerRadius = min(
+                    DiscoveryDetailLayout.cardCornerRadius,
+                    max(baseCornerRadius, gestureCornerRadius)
+                )
                 let combinedShadowOpacity = min(1, geometry.shadowOpacity + gestureShadowOpacity)
                 let gestureShadowRadius: CGFloat = gestureShadowOpacity > 0 ? 20 : 0
                 let combinedShadowRadius = max(geometry.shadowRadius, gestureShadowRadius)

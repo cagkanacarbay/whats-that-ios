@@ -128,7 +128,7 @@ Additional utilities inside `AnalysisStateView` (loader messages array, markdown
    - Provide stage-specific dependencies (e.g., `DiscoveryStreamingStageView(viewModel: viewModel)`).
    - Keep alert handling via `IdentifiedError`.
 4. **Validation**
-   - Build after each extraction to ensure no missing imports (`swift build` or Xcode incremental build).
+   - Build after each extraction with Xcode (`Cmd+B`) or `xcodebuild` to ensure no missing imports.
    - Confirm share sheet functionality from simulator once wiring completes.
 
 ### Open Questions
@@ -210,7 +210,7 @@ Additional utilities inside `AnalysisStateView` (loader messages array, markdown
 
 ## Implementation Phases (Detailed)
 
-_Stage gate for every step_: run `swift build` via MCP before proceeding (must finish cleanly). After each successful build, notify the user so they can perform a visual check in the app.
+_Stage gate for every step_: trigger an iOS build via `xcodebuild` (or Xcode) before proceeding. After each successful build, notify the user so they can perform a visual check in the app.
 
 1. **Scaffold & Common Extraction**
    - Create directory tree.

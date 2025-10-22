@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 
 struct DiscoveryDetailDismissMetrics {
@@ -57,4 +56,3 @@ struct DiscoveryDetailDismissInteractor {
         return predicted > dismissalThreshold || horizontalTranslation > dismissalThreshold
     }
 }
-#endif

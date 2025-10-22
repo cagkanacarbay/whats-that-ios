@@ -1,4 +1,5 @@
 import SwiftUI
+import WhatsThatShared
 
 struct DiscoveryCardSkeletonView: View {
     let width: CGFloat
@@ -6,12 +7,14 @@ struct DiscoveryCardSkeletonView: View {
     @State private var animate = false
 
     var body: some View {
+        let cornerRadius = BrandCornerRadius.large
+
         ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color.gray.opacity(0.2))
                 .frame(width: width, height: height)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [

@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import OSLog
 import WhatsThatDomain
@@ -54,7 +53,6 @@ struct DiscoveriesHomeView: View {
     private let heroAnimator = DiscoveryDetailHeroAnimator()
 
     private var detailDismissalDistance: CGFloat {
-#if canImport(UIKit)
         if let window = UIApplication.shared
             .connectedScenes
             .compactMap({ $0 as? UIWindowScene })
@@ -63,7 +61,6 @@ struct DiscoveriesHomeView: View {
         {
             return max(window.bounds.width, 1)
         }
-        #endif
         return max(UIScreen.main.bounds.width, 1)
     }
 
@@ -561,38 +558,3 @@ private extension String {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
-
-#else
-import SwiftUI
-import WhatsThatDomain
-
-struct DiscoveriesHomeView: View {
-    private let feedUseCase: DiscoveryFeedUseCase
-    private let onSignOut: () -> Void
-    private let onSettings: (() -> Void)?
-
-    init(
-        feedUseCase: DiscoveryFeedUseCase,
-        voiceoverController _: VoiceoverPlaybackController,
-        pendingDiscoveryId _: Binding<Int64?>,
-        pendingCreatedSummary _: Binding<DiscoverySummary?>,
-        onSignOut: @escaping () -> Void,
-        onSettings: (() -> Void)? = nil
-    ) {
-        self.feedUseCase = feedUseCase
-        self.onSignOut = onSignOut
-        self.onSettings = onSettings
-    }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Discoveries are available on iOS only.")
-                .font(.headline)
-            Button("Sign out", action: onSignOut)
-                .buttonStyle(.borderedProminent)
-        }
-        .padding()
-    }
-}
-
-#endif

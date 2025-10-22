@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 struct ShimmerTextView: View {
     let text: String
@@ -142,15 +140,11 @@ struct ShimmerTextView: View {
         let beamFeather: Color
         let beamCore: Color
 
-        static func palette(for textColor: Color, fallbackScheme: ColorScheme) -> ShimmerHighlightPalette {
-#if canImport(UIKit)
+        static func palette(for textColor: Color, fallbackScheme _: ColorScheme) -> ShimmerHighlightPalette {
             if let brightness = perceivedBrightness(for: textColor), brightness > 0.75 {
                 return .silvery
             }
             return .whiteHot
-#else
-            return fallbackScheme == .dark ? .silvery : .whiteHot
-#endif
         }
 
         // Keep the shimmer white-hot against darker text so it pops instantly.
@@ -169,7 +163,6 @@ struct ShimmerTextView: View {
             beamCore: Color(red: 0.95, green: 0.98, blue: 1.0)
         )
 
-#if canImport(UIKit)
         private static func perceivedBrightness(for color: Color) -> CGFloat? {
             let uiColor = UIColor(color)
 
@@ -188,7 +181,6 @@ struct ShimmerTextView: View {
 
             return nil
         }
-#endif
     }
 
     private struct ShimmerStripe: View {
@@ -259,7 +251,6 @@ struct ShimmerTextView: View {
 
     private func scaleFactor(for width: CGFloat) -> CGFloat {
         guard width > 0 else { return 1 }
-        #if canImport(UIKit)
         let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
         let textWidth = (text as NSString).size(withAttributes: [.font: font]).width
         guard textWidth > 0 else { return 1 }
@@ -268,8 +259,5 @@ struct ShimmerTextView: View {
         if adjusted <= 0 { return 0.65 }
         let scaled = adjusted / textWidth
         return max(0.65, scaled)
-        #else
-        return 1
-        #endif
     }
 }

@@ -1,14 +1,9 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
-
-#if canImport(UIKit)
 import UIKit
+
 typealias DiscoveryHeaderPlatformImage = UIImage
-#elseif canImport(AppKit)
-import AppKit
-typealias DiscoveryHeaderPlatformImage = NSImage
-#endif
 
 struct DiscoveryHeroHeaderView: View {
     let discovery: DiscoverySummary
@@ -167,16 +162,8 @@ private extension View {
     }
 }
 
-#if canImport(UIKit)
 private extension Image {
     init(platformImage: UIImage) {
         self = Image(uiImage: platformImage)
     }
 }
-#elseif canImport(AppKit)
-private extension Image {
-    init(platformImage: NSImage) {
-        self = Image(nsImage: platformImage)
-    }
-}
-#endif

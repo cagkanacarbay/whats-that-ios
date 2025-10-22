@@ -1,4 +1,3 @@
-#if os(iOS)
 import CoreLocation
 import Foundation
 import UserNotifications
@@ -68,4 +67,3 @@ final class OnboardingPermissionsCoordinator: NSObject, ObservableObject, CLLoca
         }
     }
 }
-#endif

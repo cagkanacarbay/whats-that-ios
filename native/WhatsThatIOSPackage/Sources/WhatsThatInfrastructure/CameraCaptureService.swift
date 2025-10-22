@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -123,4 +122,3 @@ extension CameraCaptureService: UIImagePickerControllerDelegate, UINavigationCon
         picker.dismiss(animated: true)
     }
 }
-#endif

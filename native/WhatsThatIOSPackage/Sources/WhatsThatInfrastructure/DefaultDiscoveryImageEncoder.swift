@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import UIKit
 import WhatsThatDomain
 
@@ -47,4 +46,3 @@ public final class DefaultDiscoveryImageEncoder: DiscoveryImageEncodingService {
         }
     }
 }
-#endif

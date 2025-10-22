@@ -1,14 +1,9 @@
 import Foundation
 import SwiftUI
 import WhatsThatShared
-
-#if canImport(UIKit)
 import UIKit
+
 public typealias DiscoveryPlatformImage = UIImage
-#elseif canImport(AppKit)
-import AppKit
-public typealias DiscoveryPlatformImage = NSImage
-#endif
 
 @MainActor
 public final class DiscoveryImageLoader: ObservableObject {

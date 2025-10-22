@@ -1,4 +1,3 @@
-#if os(iOS)
 import AVFoundation
 import Foundation
 import SwiftUI
@@ -349,55 +348,6 @@ private extension CMTime {
     }
 }
 
-#else
-import Foundation
-import SwiftUI
-import WhatsThatDomain
-
-@MainActor
-public final class VoiceoverPlaybackController: ObservableObject {
-    public enum PlaybackState: Equatable {
-        case idle
-        case loading(discoveryId: Int64)
-        case playing(discoveryId: Int64)
-        case paused(discoveryId: Int64)
-        case unavailable(discoveryId: Int64)
-        case failed(discoveryId: Int64, message: String?)
-    }
-
-    @Published public private(set) var playbackState: PlaybackState = .idle
-    @Published public private(set) var currentDiscovery: DiscoverySummary?
-    @Published public private(set) var position: TimeInterval = 0
-    @Published public private(set) var duration: TimeInterval?
-    @Published public private(set) var errorMessage: String?
-    @Published public private(set) var assetStates: [Int64: DiscoveryVoiceoverAsset] = [:]
-    @Published public var isDetailOverlayActive: Bool = false
-
-    public init(repository _: any DiscoveryVoiceoverRepository = StubRepository()) {}
-
-    public func ensureMetadata(for discovery: DiscoverySummary, force _: Bool = false) {
-        assetStates[discovery.id] = DiscoveryVoiceoverAsset(
-            discoveryId: discovery.id,
-            status: .missing,
-            audioURL: nil,
-            modelIdentifier: nil,
-            fetchedAt: Date()
-        )
-    }
-
-    public func togglePlayback(for _: DiscoverySummary) {}
-    public func play(discovery: DiscoverySummary, forceRefresh _: Bool) {
-        currentDiscovery = discovery
-        playbackState = .unavailable(discoveryId: discovery.id)
-    }
-
-    public func pause() {}
-    public func resume() {}
-    public func stop() {
-        currentDiscovery = nil
-        playbackState = .idle
-    }
-
     public func seek(to _: TimeInterval) {}
     public func isLoading(discoveryId _: Int64) -> Bool { false }
     public func isActive(discoveryId _: Int64) -> Bool { false }
@@ -418,6 +368,4 @@ public final class VoiceoverPlaybackController: ObservableObject {
             )
         }
     }
-}
 
-#endif

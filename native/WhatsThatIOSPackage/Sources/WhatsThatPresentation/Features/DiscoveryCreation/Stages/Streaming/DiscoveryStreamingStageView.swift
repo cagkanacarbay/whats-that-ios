@@ -5,9 +5,7 @@ import WhatsThatShared
 #if canImport(MarkdownUI)
 import MarkdownUI
 #endif
-#if canImport(UIKit)
 import UIKit
-#endif
 struct DiscoveryStreamingStageView: View {
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
     let imageData: Data?
@@ -68,7 +66,6 @@ struct DiscoveryStreamingStageView: View {
     }
 
     private var previewImage: Image? {
-        #if canImport(UIKit)
         guard
             let data = imageData,
             let uiImage = UIImage(data: data)
@@ -76,9 +73,6 @@ struct DiscoveryStreamingStageView: View {
             return nil
         }
         return Image(uiImage: uiImage)
-        #else
-        return nil
-        #endif
     }
 
     private var currentLoadingMessage: String {

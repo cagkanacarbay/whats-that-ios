@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import SwiftUI
 import UIKit
@@ -14,4 +13,3 @@ struct DiscoveryDetailContext: Identifiable {
 
     var id: UUID { sessionId }
 }
-#endif

@@ -88,8 +88,7 @@ var package = Package(
     name: "WhatsThatKit",
     defaultLocalization: "en",
     platforms: [
-        .iOS(.v17),
-        .macOS(.v14)
+        .iOS(.v17)
     ],
     products: [
         .library(name: "WhatsThatApp", targets: ["WhatsThatApp"]),

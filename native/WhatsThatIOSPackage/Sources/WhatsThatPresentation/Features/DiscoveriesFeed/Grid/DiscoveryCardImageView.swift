@@ -1,10 +1,6 @@
 import SwiftUI
 import WhatsThatShared
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 struct DiscoveryCardImageView: View {
     let discoveryId: Int64
@@ -66,10 +62,6 @@ struct DiscoveryCardImageView: View {
     }
 
     private func platformImageView(for image: DiscoveryPlatformImage) -> Image {
-#if canImport(UIKit)
-        return Image(uiImage: image)
-#elseif canImport(AppKit)
-        return Image(nsImage: image)
-#endif
+        Image(uiImage: image)
     }
 }

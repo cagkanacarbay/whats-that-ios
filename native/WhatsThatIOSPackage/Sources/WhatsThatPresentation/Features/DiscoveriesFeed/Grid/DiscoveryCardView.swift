@@ -10,6 +10,8 @@ struct DiscoveryCardView: View {
     let onSelect: (DiscoverySummary, URL?) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
+    private let cardCornerRadius: CGFloat = BrandCornerRadius.large
+
     var body: some View {
         Button {
             onSelect(discovery, imageURL)
@@ -24,12 +26,12 @@ struct DiscoveryCardView: View {
                 DiscoveryCardChrome(discovery: discovery)
             }
             .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                     .strokeBorder(borderColor, lineWidth: 0.3)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .opacity(isHidden ? 0 : 1)

@@ -107,10 +107,10 @@ public final class DiscoveryImageLoader: ObservableObject {
         }
 
         do {
-            return try await Task.detached(priority: .utility) {
-                let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
-                return DiscoveryPlatformImage(data: data)
+            let data = try await Task.detached(priority: .utility) {
+                try Data(contentsOf: fileURL, options: [.mappedIfSafe])
             }.value
+            return DiscoveryPlatformImage(data: data)
         } catch {
             return nil
         }

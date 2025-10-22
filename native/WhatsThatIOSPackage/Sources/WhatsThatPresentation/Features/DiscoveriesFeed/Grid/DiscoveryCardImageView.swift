@@ -1,5 +1,10 @@
 import SwiftUI
 import WhatsThatShared
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct DiscoveryCardImageView: View {
     let discoveryId: Int64
@@ -18,7 +23,7 @@ struct DiscoveryCardImageView: View {
 
                 switch phase {
                 case .success(let platformImage):
-                    Image(uiImage: platformImage)
+                    platformImageView(for: platformImage)
                         .resizable()
                         .scaledToFill()
                         .onAppear {
@@ -38,7 +43,7 @@ struct DiscoveryCardImageView: View {
     private func cacheIfNeeded(image: DiscoveryPlatformImage) {
         guard !didCacheSnapshot else { return }
         didCacheSnapshot = true
-        DiscoveryHeroImageCache.shared.store(image, for: discoveryId)
+        DiscoveryDetailImageCache.shared.store(image, for: discoveryId)
     }
 
     private var placeholder: some View {
@@ -58,5 +63,13 @@ struct DiscoveryCardImageView: View {
                 .frame(width: 44, height: 44)
                 .opacity(0.25)
         }
+    }
+
+    private func platformImageView(for image: DiscoveryPlatformImage) -> Image {
+#if canImport(UIKit)
+        return Image(uiImage: image)
+#elseif canImport(AppKit)
+        return Image(nsImage: image)
+#endif
     }
 }

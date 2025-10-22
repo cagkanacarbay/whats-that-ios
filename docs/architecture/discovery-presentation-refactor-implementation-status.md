@@ -14,9 +14,11 @@ This log tracks the progress of the Discovery presentation refactor so we can co
 - Extracted streaming subviews into `DiscoveryStreamingLoaderView` and `DiscoveryStreamingMarkdownView` for clearer responsibilities.
 - Introduced `DiscoveriesHeaderView` with a dedicated `DiscoveriesHeaderMetrics` helper to manage spacing and opacity.
 - Split the feed grid into reusable `DiscoveriesGridView`, `DiscoveryCardView`, and supporting image/skeleton components, moving `HiddenDiscovery` into the Grid module.
+- Moved the discovery detail overlay stack (context, image cache, geometry helpers, animator, and dismiss interactor) into `Features/DiscoveriesFeed/DetailOverlay/` and rewired `DiscoveriesHomeView` to consume the extracted view.
+- Relocated the persistent voiceover player into `Features/DiscoveriesFeed/Voiceover/`, introducing `VoiceoverPlaybackBindings` for slider state management.
+- Extracted feed toast, empty, and error surfaces into `Features/DiscoveriesFeed/Errors/` so grid and shell reuse a shared implementation.
 
 ## 🚧 Still To Do
 - Revisit share presenter/completion-stage UX once product defines post-analysis actions; current flow remains in the streaming view after completion.
-- Continue the Discoveries Feed extraction: detail overlay animator/interactor, voiceover bar, errors/empty states, and remaining supporting helpers.
 - Introduce completion-stage tests/previews once the structure stabilises; add TODO placeholders where appropriate.
 - Address remaining macOS build blockers (Credits toolbar API availability, voiceover playback state accessor) so `swift build` succeeds end-to-end once the refactor settles.

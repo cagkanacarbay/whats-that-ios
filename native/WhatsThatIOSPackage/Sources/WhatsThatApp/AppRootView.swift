@@ -35,9 +35,15 @@ public struct AppRootView: View {
         let creditsFactory: (() -> CreditsViewModel)? = {
             container.makeCreditsViewModel()
         }
+        let balanceFetcher: () async -> Result<Int, Error> = {
+            await container.fetchCreditBalance()
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
+        let balanceFetcher: () async -> Result<Int, Error> = {
+            .failure(AuthError.unknown)
+        }
         #endif
 
         return RootContentView(
@@ -48,9 +54,7 @@ public struct AppRootView: View {
             makeCreationViewModel: makeViewModel,
             makeVoiceoverController: voiceoverFactory,
             makeCreditsViewModel: creditsFactory,
-            fetchCreditBalance: {
-                await container.fetchCreditBalance()
-            }
+            fetchCreditBalance: balanceFetcher
         )
     }
 }

@@ -34,6 +34,7 @@ public struct CreditsView: View {
             }
         }
         .navigationTitle("Credits")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -41,6 +42,7 @@ public struct CreditsView: View {
                     .font(.system(size: 16, weight: .semibold))
             }
         }
+        #endif
         .task {
             await viewModel.loadIfNeeded()
         }

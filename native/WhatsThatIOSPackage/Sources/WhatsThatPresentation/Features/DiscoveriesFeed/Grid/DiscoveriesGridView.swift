@@ -86,7 +86,7 @@ struct DiscoveriesGridView: View {
                                 key: DiscoveryCardFramePreferenceKey.self,
                                 value: [discovery.id: globalFrame]
                             )
-                            .if(isFirstDiscovery) { view in
+                            .applyingIf(isFirstDiscovery) { view in
                                 view.preference(
                                     key: ScrollOffsetPreferenceKey.self,
                                     value: localFrame.minY
@@ -106,65 +106,5 @@ struct DiscoveriesGridView: View {
                 cardFrames = value
             }
         }
-    }
-}
-
-private struct DiscoveriesErrorView: View {
-    let message: String
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: BrandSpacing.medium) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 42))
-                .foregroundStyle(Color.orange)
-
-            Text("We couldn’t refresh your discoveries.")
-                .font(.system(size: 18, weight: .semibold))
-                .multilineTextAlignment(.center)
-
-            Text(message)
-                .font(.system(size: 15))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-
-            BrandPrimaryButton(title: "Try again", action: action)
-                .frame(maxWidth: 240)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(BrandSpacing.large)
-    }
-}
-
-private struct EmptyDiscoveriesView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: BrandSpacing.medium) {
-            Image("BrandLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 140, height: 140)
-
-            Text("Start making discoveries")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(titleColor)
-
-            Text("Snap a photo or upload from your library to unlock stories about the world around you.")
-                .font(.system(size: 16, weight: .medium))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(bodyColor)
-                .frame(maxWidth: 280)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(.horizontal, BrandSpacing.large)
-    }
-
-    private var titleColor: Color {
-        colorScheme == .dark ? Color.white : BrandColors.Light.accentText
-    }
-
-    private var bodyColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.7) : BrandColors.Light.bodyText
     }
 }

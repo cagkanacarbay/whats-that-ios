@@ -1133,13 +1133,22 @@ private struct OnboardingPermissionsSection: View {
         switch permissions.notificationStatus {
         case .authorized, .provisional:
             return nil
+        case .denied:
+            return "Open Settings"
         default:
             return "Enable Notifications"
         }
     }
 
     private func notificationAction() -> (() -> Void)? {
-        notificationActionTitle == nil ? nil : { permissions.requestNotificationPermission() }
+        switch permissions.notificationStatus {
+        case .authorized, .provisional:
+            return nil
+        case .denied:
+            return { openAppSettings() }
+        default:
+            return { permissions.requestNotificationPermission() }
+        }
     }
 
     private func openAppSettings() {

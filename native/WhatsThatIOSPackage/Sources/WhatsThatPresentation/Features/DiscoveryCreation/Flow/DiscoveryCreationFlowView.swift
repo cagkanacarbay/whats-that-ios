@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WhatsThatDomain
 import WhatsThatShared
 
@@ -36,11 +37,7 @@ struct DiscoveryCreationFlowView: View {
                     set: { _ in viewModel.clearError() }
                 )
             ) { identifiedError in
-                Alert(
-                    title: Text("Oops"),
-                    message: Text(identifiedError.error.localizedDescription),
-                    dismissButton: .default(Text("OK"))
-                )
+                alert(for: identifiedError.error)
             }
     }
 
@@ -98,5 +95,28 @@ struct DiscoveryCreationFlowView: View {
             capturedAt: viewModel.confirmationState?.media.createdAt,
             onCancel: { viewModel.cancelFlow() }
         )
+    }
+
+    private func alert(for error: DiscoveryCreationFlowViewModel.FlowError) -> Alert {
+        switch error {
+        case .permissionDenied:
+            return Alert(
+                title: Text("Permission Needed"),
+                message: Text(error.localizedDescription),
+                primaryButton: .default(Text("Open Settings"), action: openAppSettings),
+                secondaryButton: .cancel(Text("Not Now"))
+            )
+        default:
+            return Alert(
+                title: Text("Oops"),
+                message: Text(error.localizedDescription),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }

@@ -8,6 +8,7 @@ import MapKit
 #if canImport(UIKit)
 import UIKit
 #endif
+
 struct DiscoveryConfirmationView: View {
     private enum ActiveAlert: Identifiable {
         case outOfCredits
@@ -34,8 +35,8 @@ struct DiscoveryConfirmationView: View {
     @State private var activeAlert: ActiveAlert?
     @State private var bottomOverlayHeight: CGFloat = 0
 
-    private var palette: BrandTheme.Palette {
-        BrandTheme.palette(for: colorScheme)
+    private var palette: DiscoveryCreationPalette {
+        DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
     #if canImport(UIKit)
@@ -63,11 +64,7 @@ struct DiscoveryConfirmationView: View {
     private var previewOrientation: PreviewOrientation? {
         #if canImport(UIKit)
         guard let image = previewUIImage else { return nil }
-        if image.size.height >= image.size.width {
-            return .portrait
-        } else {
-            return .landscape
-        }
+        return image.size.height >= image.size.width ? .portrait : .landscape
         #else
         return nil
         #endif
@@ -76,19 +73,6 @@ struct DiscoveryConfirmationView: View {
     private var creditDisplayText: String {
         let balanceText = creditBalance.map { String($0) } ?? "…"
         return "Credits: \(balanceText)"
-    }
-
-    private var creditTint: Color {
-        guard let balance = creditBalance else {
-            return palette.overlayButtonForeground.opacity(0.75)
-        }
-        if balance == 0 {
-            return Color(hex: "#E5484D")
-        }
-        if balance <= 10 {
-            return Color(hex: "#F5A524")
-        }
-        return palette.overlayButtonForeground
     }
 
     private var continueTitle: String {
@@ -136,10 +120,22 @@ struct DiscoveryConfirmationView: View {
         flowType == .upload && state.location == nil
     }
 
+    private var locationBadgeContent: DiscoveryConfirmationLocationBadge.Content? {
+        if shouldShowLocationPermissions {
+            return .permissions { activeAlert = .locationPermissions }
+        }
+        if hasResolvedLocation {
+            return .resolved { openCurrentLocation() }
+        }
+        if shouldShowMissingLocation {
+            return .missing
+        }
+        return nil
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let topInset = proxy.safeAreaInsets.top - 10
-            // Overlays already respect the safe area; only add minimal extra breathing room.
             let overlayTopPadding = topInset > 0 ? BrandSpacing.small : BrandSpacing.medium
             let overlayControlHeight: CGFloat = 48
             let minimumTopPadding = topInset + overlayTopPadding
@@ -149,7 +145,10 @@ struct DiscoveryConfirmationView: View {
                 topInset + overlayTopPadding + overlayControlHeight + previewTopSpacing,
                 minimumTopPadding
             )
-            let previewAvailableHeight = max(proxy.size.height - previewTopPadding - bottomOverlayHeight - previewBottomSpacing, 0)
+            let previewAvailableHeight = max(
+                proxy.size.height - previewTopPadding - bottomOverlayHeight - previewBottomSpacing,
+                0
+            )
 
             ZStack {
                 palette.background.ignoresSafeArea()
@@ -162,14 +161,25 @@ struct DiscoveryConfirmationView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .overlay(alignment: .topLeading) {
-                overlayCircleButton(systemName: "xmark", action: onCancel)
-                    .padding(.leading, BrandSpacing.large)
-                    .padding(.top, overlayTopPadding)
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                .buttonStyle(
+                    DiscoveryCreationOverlayButtonStyle(
+                        palette: palette,
+                        shape: .circle()
+                    )
+                )
+                .padding(.leading, BrandSpacing.large)
+                .padding(.top, overlayTopPadding)
             }
             .overlay(alignment: .topTrailing) {
-                topTrailingControl
-                    .padding(.trailing, BrandSpacing.large)
-                    .padding(.top, overlayTopPadding)
+                if let badgeContent = locationBadgeContent {
+                    DiscoveryConfirmationLocationBadge(content: badgeContent, palette: palette)
+                        .padding(.trailing, BrandSpacing.large)
+                        .padding(.top, overlayTopPadding)
+                }
             }
             .overlay(alignment: .bottom) {
                 LinearGradient(
@@ -186,11 +196,24 @@ struct DiscoveryConfirmationView: View {
                 .allowsHitTesting(false)
             }
             .overlay(alignment: .bottom) {
-                bottomOverlay
-                    .padding(.top, previewBottomSpacing)
-                    .padding(.horizontal, BrandSpacing.large)
-                    .padding(.bottom, BrandSpacing.small)
-                    .frame(maxWidth: proxy.size.width)
+                DiscoveryConfirmationActionsView(
+                    creditDisplayText: creditDisplayText,
+                    creditBalance: creditBalance,
+                    retakeTitle: retakeTitle,
+                    retakeIconName: retakeIconName,
+                    continueTitle: continueTitle,
+                    continueIconName: continueIconName,
+                    continueBackground: continueBackground,
+                    isContinueDisabled: isContinueDisabled,
+                    palette: palette,
+                    onRetake: onRetake,
+                    onContinue: onContinue,
+                    onOutOfCredits: { activeAlert = .outOfCredits }
+                )
+                .padding(.top, previewBottomSpacing)
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.bottom, BrandSpacing.small)
+                .frame(maxWidth: proxy.size.width)
             }
         }
         .onPreferenceChange(BottomOverlayHeightPreferenceKey.self) { bottomOverlayHeight = $0 }
@@ -202,7 +225,7 @@ struct DiscoveryConfirmationView: View {
         let fallbackHeight = max(size.height * 0.62, 320)
         let containerHeight = availableHeight > 0 ? availableHeight : fallbackHeight
         let resolvedHeight = max(containerHeight, 1)
-        return ZStack {
+        ZStack {
             Group {
                 if let image = previewImage {
                     let orientation = previewOrientation
@@ -229,153 +252,6 @@ struct DiscoveryConfirmationView: View {
         }
         .frame(width: size.width, height: resolvedHeight, alignment: .center)
         .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
-    }
-    @ViewBuilder
-    private var topTrailingControl: some View {
-        if shouldShowLocationPermissions {
-            overlayCapsuleButton(
-                title: "No Location Permissions",
-                systemName: "location.slash"
-            ) {
-                activeAlert = .locationPermissions
-            }
-        } else if hasResolvedLocation {
-            overlayCircleButton(systemName: "mappin.and.ellipse") {
-                openCurrentLocation()
-            }
-        } else if shouldShowMissingLocation {
-            overlayCapsuleBadge(title: "No location", systemName: "mappin")
-        }
-    }
-
-    private var bottomOverlay: some View {
-        let chipToActionsSpacing: CGFloat = 4
-        return VStack(alignment: .leading, spacing: chipToActionsSpacing) {
-            Button(action: {}) {
-                Text(creditDisplayText)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(creditTint)
-                    .padding(.horizontal, BrandSpacing.small)
-                    .padding(.top, BrandSpacing.small / 2)
-                    .padding(.bottom, 1)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(creditBalance == nil)
-
-            HStack(spacing: BrandSpacing.small) {
-                Button(action: onRetake) {
-                    Label(retakeTitle, systemImage: retakeIconName)
-                        .labelStyle(.titleAndIcon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: DiscoveryCreationFlowView.LayoutConstants.controlHeight)
-                        .foregroundStyle(palette.overlayButtonForeground)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(palette.secondaryAction)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(palette.overlayButtonBorder, lineWidth: 1)
-                }
-
-                Button {
-                    if let balance = creditBalance, balance == 0 {
-                        activeAlert = .outOfCredits
-                        return
-                    }
-                    onContinue()
-                } label: {
-                    Label(continueTitle, systemImage: continueIconName)
-                        .labelStyle(.titleAndIcon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: DiscoveryCreationFlowView.LayoutConstants.controlHeight)
-                        .foregroundStyle(Color.white)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(continueBackground)
-                )
-                .opacity(isContinueDisabled ? 0.45 : 1)
-                .disabled(isContinueDisabled)
-            }
-        }
-        .background(
-            GeometryReader { geometry in
-                Color.clear
-                    .preference(key: BottomOverlayHeightPreferenceKey.self, value: geometry.size.height)
-            }
-        )
-    }
-
-    private func overlayCircleButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 48, height: 48)
-                .foregroundStyle(palette.overlayButtonForeground)
-                .background(
-                    Circle()
-                        .fill(palette.overlayButtonBackground)
-                )
-                .overlay {
-                    Circle()
-                        .stroke(palette.overlayButtonBorder, lineWidth: 1)
-                }
-                .shadow(color: Color.black.opacity(palette.overlayButtonShadowOpacity), radius: 14, x: 0, y: 8)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func overlayCapsuleButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemName)
-                    .font(.system(size: 16, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            .foregroundStyle(palette.overlayButtonForeground)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                Capsule()
-                    .fill(palette.overlayButtonBackground)
-            )
-            .overlay {
-                Capsule()
-                    .stroke(palette.overlayButtonBorder, lineWidth: 1)
-            }
-            .shadow(color: Color.black.opacity(palette.overlayButtonShadowOpacity), radius: 14, x: 0, y: 8)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func overlayCapsuleBadge(title: String, systemName: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemName)
-                .font(.system(size: 16, weight: .semibold))
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-        }
-        .foregroundStyle(palette.overlayButtonForeground.opacity(0.9))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(
-            Capsule()
-                .fill(palette.overlayButtonBackground)
-        )
-        .overlay {
-            Capsule()
-                .stroke(palette.overlayButtonBorder, lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(palette.overlayButtonShadowOpacity), radius: 14, x: 0, y: 8)
-        .allowsHitTesting(false)
     }
 
     private func alert(for alert: ActiveAlert) -> Alert {

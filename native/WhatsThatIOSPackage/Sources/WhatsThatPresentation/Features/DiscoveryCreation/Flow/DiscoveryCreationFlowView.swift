@@ -1,30 +1,13 @@
-import Foundation
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
-#if canImport(MarkdownUI)
-import MarkdownUI
-#endif
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
-#if canImport(MapKit)
-import MapKit
-#endif
 
 struct DiscoveryCreationFlowView: View {
-    enum LayoutConstants {
-        static let previewHeight: CGFloat = 320
-        static let controlHeight: CGFloat = 56
-        static let cornerRadius: CGFloat = 20
-    }
-
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
     let placeholderEmoji: String
     let ctaTitle: String
     let retryTitle: String
+
     @Environment(\.colorScheme) private var colorScheme
 
     init(
@@ -39,29 +22,32 @@ struct DiscoveryCreationFlowView: View {
         self.retryTitle = retryTitle
     }
 
+    private var palette: DiscoveryCreationPalette {
+        DiscoveryCreationPalette.resolve(for: colorScheme)
+    }
+
     var body: some View {
         mainContent
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(backgroundColor.ignoresSafeArea())
-        .alert(
-            item: Binding(
-                get: { viewModel.error.map(IdentifiedError.init) },
-                set: { _ in viewModel.clearError() }
-            )
-        ) { identifiedError in
-            Alert(
-                title: Text("Oops"),
-                message: Text(identifiedError.error.localizedDescription),
-                dismissButton: .default(Text("OK"))
-            )
-        }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(palette.background.ignoresSafeArea())
+            .alert(
+                item: Binding(
+                    get: { viewModel.error.map(IdentifiedError.init) },
+                    set: { _ in viewModel.clearError() }
+                )
+            ) { identifiedError in
+                Alert(
+                    title: Text("Oops"),
+                    message: Text(identifiedError.error.localizedDescription),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
     }
 
     @ViewBuilder
     private var mainContent: some View {
         switch viewModel.flowState {
         case .confirming, .analyzing:
-            // Full-bleed overlays should not inherit outer padding.
             content
         default:
             VStack(spacing: BrandSpacing.large) {
@@ -99,16 +85,13 @@ struct DiscoveryCreationFlowView: View {
                 onContinue: { viewModel.beginAnalysis() },
                 onCancel: { viewModel.cancelFlow() }
             )
-        case .analyzing(_):
-            makeAnalysisView()
+        case .analyzing:
+            streamingStage
         }
     }
 
-    private var backgroundColor: Color {
-        BrandTheme.palette(for: colorScheme).background
-    }
-
-    private func makeAnalysisView() -> DiscoveryStreamingStageView {
+    @ViewBuilder
+    private var streamingStage: some View {
         DiscoveryStreamingStageView(
             viewModel: viewModel,
             imageData: viewModel.confirmationState?.displayImageData,

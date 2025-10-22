@@ -30,7 +30,7 @@ struct ShimmerTextView: View {
     // Tunables
     private let fontSize: CGFloat = 30
     private let passDuration: Double = 2.0  // seconds for one shimmer pass (slower)
-    private let highlightWidthRatio: CGFloat = 0.22 // fraction of availableWidth
+    private let highlightWidthRatio: CGFloat = 0.28 // fraction of availableWidth
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var notified = false
@@ -55,7 +55,10 @@ struct ShimmerTextView: View {
         let travel = width + stripeWidth
         let xOffset = -stripeWidth/2 + Double(progress) * travel - (travel - width)/2
 
-        let highlightPalette = ShimmerHighlightPalette.forScheme(colorScheme)
+        let highlightPalette = ShimmerHighlightPalette.palette(
+            for: color,
+            fallbackScheme: colorScheme
+        )
         return ShimmerFrameView(
             text: text,
             color: color,
@@ -139,25 +142,53 @@ struct ShimmerTextView: View {
         let beamFeather: Color
         let beamCore: Color
 
-        static func forScheme(_ colorScheme: ColorScheme) -> ShimmerHighlightPalette {
-            if colorScheme == .dark {
-                // Cool-toned glint keeps the shimmer readable on bright text.
-                return ShimmerHighlightPalette(
-                    textHighlight: Color(red: 0.9, green: 0.96, blue: 1.0),
-                    beamEdge: Color.white.opacity(0),
-                    beamFeather: Color(red: 0.42, green: 0.72, blue: 1.0).opacity(0.45),
-                    beamCore: Color(red: 0.82, green: 0.96, blue: 1.0)
-                )
-            } else {
-                // Keep the shimmer white-hot against darker text in light mode.
-                return ShimmerHighlightPalette(
-                    textHighlight: Color.white,
-                    beamEdge: Color.white.opacity(0),
-                    beamFeather: Color.white.opacity(0.35),
-                    beamCore: Color.white
-                )
+        static func palette(for textColor: Color, fallbackScheme: ColorScheme) -> ShimmerHighlightPalette {
+#if canImport(UIKit)
+            if let brightness = perceivedBrightness(for: textColor), brightness > 0.75 {
+                return .silvery
             }
+            return .whiteHot
+#else
+            return fallbackScheme == .dark ? .silvery : .whiteHot
+#endif
         }
+
+        // Keep the shimmer white-hot against darker text so it pops instantly.
+        static let whiteHot = ShimmerHighlightPalette(
+            textHighlight: Color.white,
+            beamEdge: Color.white.opacity(0.08),
+            beamFeather: Color.white.opacity(0.58),
+            beamCore: Color.white
+        )
+
+        // Cool-toned glint maintains contrast against already-bright lettering.
+        static let silvery = ShimmerHighlightPalette(
+            textHighlight: Color(red: 0.88, green: 0.94, blue: 1.0),
+            beamEdge: Color(red: 0.56, green: 0.72, blue: 0.96).opacity(0.05),
+            beamFeather: Color(red: 0.66, green: 0.8, blue: 1.0).opacity(0.65),
+            beamCore: Color(red: 0.95, green: 0.98, blue: 1.0)
+        )
+
+#if canImport(UIKit)
+        private static func perceivedBrightness(for color: Color) -> CGFloat? {
+            let uiColor = UIColor(color)
+
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            if uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+                return (0.299 * red) + (0.587 * green) + (0.114 * blue)
+            }
+
+            var white: CGFloat = 0
+            if uiColor.getWhite(&white, alpha: &alpha) {
+                return white
+            }
+
+            return nil
+        }
+#endif
     }
 
     private struct ShimmerStripe: View {
@@ -170,9 +201,9 @@ struct ShimmerTextView: View {
             LinearGradient(
                 gradient: Gradient(stops: [
                     .init(color: palette.beamEdge, location: 0.0),
-                    .init(color: palette.beamFeather, location: 0.22),
+                    .init(color: palette.beamFeather, location: 0.18),
                     .init(color: palette.beamCore, location: 0.5),
-                    .init(color: palette.beamFeather, location: 0.78),
+                    .init(color: palette.beamFeather, location: 0.82),
                     .init(color: palette.beamEdge, location: 1.0)
                 ]),
                 startPoint: .leading,
@@ -193,38 +224,36 @@ struct ShimmerTextView: View {
         let xOffset: CGFloat
 
         var body: some View {
-            ZStack {
-                Text(text)
-                    .font(.system(size: fontSize, weight: .bold))
-                    .foregroundStyle(color.opacity(0.58))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .allowsHitTesting(false)
+            let textLayer = Text(text)
+                .font(.system(size: fontSize, weight: .bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .allowsHitTesting(false)
 
-                Text(text)
-                    .font(.system(size: fontSize, weight: .bold))
-                    .foregroundStyle(highlightPalette.textHighlight)
-                    .mask(
-                        ShimmerStripe(
-                            width: stripeWidth,
-                            height: fontSize * 1.6,
-                            xOffset: xOffset,
-                            palette: highlightPalette
+            return textLayer
+                .foregroundStyle(color.opacity(0.68))
+                .overlay {
+                    textLayer
+                        .foregroundStyle(color)
+                        .opacity(0.94)
+                }
+                .overlay {
+                    textLayer
+                        .foregroundStyle(highlightPalette.textHighlight)
+                        .mask(
+                            ShimmerStripe(
+                                width: stripeWidth,
+                                height: fontSize * 1.85,
+                                xOffset: xOffset,
+                                palette: highlightPalette
+                            )
                         )
-                    )
-                    .blendMode(.screen)
-                    .allowsHitTesting(false)
-
-                Text(text)
-                    .font(.system(size: fontSize, weight: .bold))
-                    .foregroundStyle(color.opacity(0.82))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .allowsHitTesting(false)
-            }
-            .scaleEffect(scale, anchor: .center)
-            .frame(maxWidth: .infinity)
-            .multilineTextAlignment(.center)
+                        .blendMode(.plusLighter)
+                        .shadow(color: highlightPalette.beamCore.opacity(0.28), radius: 6, x: 0, y: 0)
+                }
+                .scaleEffect(scale, anchor: .center)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
         }
     }
 

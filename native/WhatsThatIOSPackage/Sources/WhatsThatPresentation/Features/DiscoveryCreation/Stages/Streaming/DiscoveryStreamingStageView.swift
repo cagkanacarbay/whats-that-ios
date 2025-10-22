@@ -58,8 +58,8 @@ struct DiscoveryStreamingStageView: View {
     private let debugLoggingEnabled = false
     #endif
 
-    private var palette: BrandTheme.Palette {
-        BrandTheme.palette(for: colorScheme)
+    private var palette: DiscoveryCreationPalette {
+        DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
     // Read the current analysis state from the view model to allow streaming updates
@@ -154,19 +154,13 @@ struct DiscoveryStreamingStageView: View {
                     Button(action: onCancel) {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 48, height: 48)
-                            .foregroundStyle(palette.overlayButtonForeground)
-                            .background(
-                                Circle()
-                                    .fill(palette.overlayButtonBackground)
-                            )
-                            .overlay {
-                                Circle()
-                                    .stroke(palette.overlayButtonBorder, lineWidth: 1)
-                            }
-                            .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 8)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(
+                        DiscoveryCreationOverlayButtonStyle(
+                            palette: palette,
+                            shape: .circle()
+                        )
+                    )
                     .padding(.leading, BrandSpacing.large)
                     .padding(.top, BrandSpacing.xLarge)
                 }
@@ -421,61 +415,20 @@ struct DiscoveryStreamingStageView: View {
 
     private func headerOverlayContent(width: CGFloat) -> some View {
         let availableWidth = max(width - (BrandSpacing.large * 2), 0)
-        return VStack(spacing: BrandSpacing.medium) {
-            if shouldShowLoader {
-                if !currentLoadingMessage.isEmpty {
-                    ZStack {
-                        if let prev = previousMessage, previousMessageOpacity > 0 {
-                            ShimmerTextView(
-                                text: prev,
-                                availableWidth: availableWidth,
-                                color: palette.textPrimary,
-                                isActive: false,
-                                logger: { debugLog($0) }
-                            )
-                            .opacity(previousMessageOpacity)
-                        }
-
-                        ShimmerTextView(
-                            text: currentLoadingMessage,
-                            availableWidth: availableWidth,
-                            color: palette.textPrimary,
-                            logger: { debugLog($0) },
-                            onFinished: { advanceMessage() }
-                        )
-                        .opacity(currentMessageOpacity)
-                    }
-                }
-
-            } else {
-                VStack(spacing: BrandSpacing.small) {
-                    if let title = state.metadataTitle, !title.isEmpty {
-                        Text(title)
-                            .font(.system(size: 26, weight: .bold))
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(palette.textPrimary)
-                            .frame(maxWidth: .infinity)
-                    }
-                    if let date = capturedAt {
-                        Text(date.formatted(.dateTime.month().day().year()))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(palette.textSecondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                    if let short = state.metadataShortDescription, !short.isEmpty {
-                        Text(short)
-                            .font(.system(size: 14))
-                            .foregroundStyle(palette.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, BrandSpacing.large)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .opacity(metadataVisible ? 1 : 0)
-                .animation(.easeInOut(duration: 0.25), value: metadataVisible)
-            }
-        }
-        .frame(maxWidth: .infinity)
+        return DiscoveryStreamingLoaderView(
+            palette: palette,
+            shouldShowLoader: shouldShowLoader,
+            currentMessage: currentLoadingMessage,
+            previousMessage: previousMessage,
+            currentMessageOpacity: currentMessageOpacity,
+            previousMessageOpacity: previousMessageOpacity,
+            metadataVisible: metadataVisible,
+            state: state,
+            capturedAt: capturedAt,
+            availableWidth: availableWidth,
+            onMessageFinished: { advanceMessage() },
+            debugLog: { debugLog($0) }
+        )
     }
 
     private func advanceMessage() {
@@ -513,30 +466,13 @@ struct DiscoveryStreamingStageView: View {
         }
     }
 
-    @ViewBuilder
     private var markdownSection: some View {
-        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-            if shouldShowLoader {
-                if !state.isStreaming {
-                    Text("Analysis complete.")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(palette.textSecondary)
-                }
-            } else if !displayedMarkdown.isEmpty {
-                #if canImport(MarkdownUI)
-                Markdown(displayedMarkdown)
-                    .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
-                #else
-                Text(displayedMarkdown)
-                    .font(.system(size: 16))
-                    .foregroundStyle(palette.textSecondary)
-                #endif
-            } // else: show nothing until the first markdown chunk lands
-        }
-        .padding(.top, BrandSpacing.large)
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.bottom, BrandSpacing.xLarge)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        DiscoveryStreamingMarkdownView(
+            palette: palette,
+            displayedMarkdown: displayedMarkdown,
+            shouldShowLoader: shouldShowLoader,
+            isStreaming: state.isStreaming
+        )
     }
 
     private static let loadingMessages: [String] = [
@@ -559,60 +495,8 @@ struct DiscoveryStreamingStageView: View {
         static let markdown = "analysisMarkdown"
     }
 
-    private func makeShareAction(for discovery: DiscoverySummary) -> (() -> Void)? {
-        guard let shareURL = shareURL(for: discovery) else { return nil }
-        return {
-            presentShareSheet(for: discovery, url: shareURL)
-        }
-    }
-
-    private func shareURL(for discovery: DiscoverySummary) -> URL? {
-        if let token = discovery.shareToken {
-            return URL(string: "https://whats-that.app/\(token.uuidString)")
-        }
-
-        if let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !path.isEmpty,
-           let url = URL(string: path) {
-            return url
-        }
-
-        return nil
-    }
-
     private func debugLog(_ message: String) {
         guard debugLoggingEnabled else { return }
         print("[DiscoveryStreamingStageView] \(message)")
     }
-
-    private func presentShareSheet(for discovery: DiscoverySummary, url: URL) {
-        #if canImport(UIKit)
-        let message = [
-            discovery.title,
-            discovery.shortDescription ?? discovery.highlight
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n\n")
-
-        let items: [Any] = message.isEmpty ? [url] : [message, url]
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-
-        guard let root = keyWindowRootViewController() else { return }
-        DispatchQueue.main.async {
-            root.present(controller, animated: true)
-        }
-        #endif
-    }
-
-    #if canImport(UIKit)
-    private func keyWindowRootViewController() -> UIViewController? {
-        UIApplication.shared
-            .connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap { $0.windows }
-            .first(where: { $0.isKeyWindow })?
-            .rootViewController
-    }
-    #endif
 }

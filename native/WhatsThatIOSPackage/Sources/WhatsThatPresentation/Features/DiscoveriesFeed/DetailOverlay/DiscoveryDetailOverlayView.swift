@@ -89,7 +89,8 @@ struct DiscoveryDetailOverlayView: View {
                 targetAspectRatio: context.cardAspectRatio,
                 progress: progress,
                 targetExpandedHeightFraction: DiscoveryDetailLayout.expandedImageHeightFraction,
-                enforceAspectForImage: isClosing
+                enforceAspectForImage: isClosing,
+                isClosing: isClosing
             )
 
             ZStack(alignment: .topLeading) {
@@ -113,6 +114,18 @@ struct DiscoveryDetailOverlayView: View {
                 let finalOffsetY = geometry.offset.y + gestureTranslation.height
                 let finalScale = gestureScale
                 let rotationAngle = gestureRotation
+                let transformProgress = DiscoveryDetailUniformCloseTransform.transformProgress(for: progress)
+                let uniformCloseScale = DiscoveryDetailUniformCloseTransform.resolvedScale(
+                    transformProgress: transformProgress,
+                    startFrame: destinationFrame,
+                    containerFrame: containerFrame,
+                    initialScale: closeStartScale
+                )
+                let appliedScale = isClosing ? uniformCloseScale : finalScale
+                let maskCornerRadius = resolvedCornerRadius(
+                    targetCornerRadius: combinedCornerRadius,
+                    scale: appliedScale
+                )
                 let isChromeReady = isContentReady && !isClosing
                 let detailOpacity = isChromeReady ? contentOpacity : 0
                 let headerOpacityRaw: Double = {
@@ -154,7 +167,7 @@ struct DiscoveryDetailOverlayView: View {
                     preferPlaceholderImage: (!isChromeReady) || isInteracting,
                     height: heroHeaderHeight,
                     pullDownOffset: effectivePullDown,
-                    cornerRadius: geometry.cornerRadius,
+                    cornerRadius: maskCornerRadius,
                     width: cardWidth,
                     namespace: nil,
                     isGeometrySource: false,
@@ -186,8 +199,8 @@ struct DiscoveryDetailOverlayView: View {
                     )
                 }
                 .frame(width: cardWidth, height: cardHeight)
-                .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: combinedCornerRadius, style: .continuous))
+                .background(isClosing ? Color.clear : backgroundColor)
+                .clipShape(RoundedRectangle(cornerRadius: maskCornerRadius, style: .continuous))
 
                 heroCard
                     .overlay(alignment: .topLeading) {
@@ -236,6 +249,11 @@ struct DiscoveryDetailOverlayView: View {
                 scrollOffset = 0
             }
         }
+    }
+
+    private func resolvedCornerRadius(targetCornerRadius: CGFloat, scale: CGFloat) -> CGFloat {
+        let safeScale = scale.isFinite ? max(scale, 0.0001) : 1
+        return targetCornerRadius / safeScale
     }
 
     private func overlayOpacity(for progress: CGFloat) -> Double {

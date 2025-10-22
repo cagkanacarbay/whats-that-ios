@@ -37,7 +37,8 @@ struct DiscoveryDetailHeroGeometry {
         targetAspectRatio: CGFloat,
         progress: CGFloat,
         targetExpandedHeightFraction: CGFloat,
-        enforceAspectForImage: Bool = false
+        enforceAspectForImage: Bool = false,
+        isClosing: Bool = false
     ) {
         let clamped = max(0, min(progress, 1))
         let startX = startFrame.minX - containerOrigin.x
@@ -67,7 +68,7 @@ struct DiscoveryDetailHeroGeometry {
 
         self.size = CGSize(width: width, height: height)
         self.offset = CGPoint(x: x, y: y)
-        self.cornerRadius = Self.cornerRadius(for: clamped)
+        self.cornerRadius = Self.cornerRadius(for: clamped, isClosing: isClosing)
         self.imageHeight = imageHeight
         self.shadowOpacity = Double(clamped) * 0.3
         self.shadowRadius = shadowOpacity > 0 ? 20 : 0
@@ -78,8 +79,23 @@ struct DiscoveryDetailHeroGeometry {
         from + (to - from) * fraction
     }
 
-    private static func cornerRadius(for _: CGFloat) -> CGFloat {
-        DiscoveryDetailLayout.cardCornerRadius
+    private static func cornerRadius(for progress: CGFloat, isClosing: Bool) -> CGFloat {
+        if isClosing {
+            return DiscoveryDetailLayout.cardCornerRadius
+        }
+
+        let start: CGFloat = 0.75
+        let clamped = max(0, min(progress, 1))
+        if clamped >= 1 {
+            return 0
+        }
+        if clamped <= start {
+            return DiscoveryDetailLayout.cardCornerRadius
+        }
+
+        let normalization = max(0, min((clamped - start) / (1 - start), 1))
+        let eased = normalization * normalization * (3 - 2 * normalization)
+        return DiscoveryDetailLayout.cardCornerRadius * (1 - eased)
     }
 }
 
@@ -121,23 +137,41 @@ struct DiscoveryDetailUniformCloseTransform: ViewModifier {
     let baseWidth: CGFloat
     let baseHeight: CGFloat
 
+    static func transformProgress(for progress: CGFloat) -> CGFloat {
+        max(0, min(1, 1 - progress))
+    }
+
+    static func resolvedScale(
+        transformProgress: CGFloat,
+        startFrame: CGRect,
+        containerFrame: CGRect,
+        initialScale: CGFloat
+    ) -> CGFloat {
+        let containerWidth = max(containerFrame.width, 1)
+        let startScale = max(startFrame.width, 1) / containerWidth
+        let clampedInitialScale = initialScale.isFinite ? max(0.5, min(initialScale, 1.2)) : 1
+        return clampedInitialScale + (startScale - clampedInitialScale) * transformProgress
+    }
+
     @ViewBuilder
     func body(content: Content) -> some View {
         if isClosing {
-            let t = max(0, min(1, 1 - progress))
+            let transformProgress = Self.transformProgress(for: progress)
             let targetCenterX = startFrame.midX - containerFrame.origin.x
             let targetCenterY = startFrame.midY - containerFrame.origin.y
-            let containerWidth = max(containerFrame.width, 1)
-            let startScale = max(startFrame.width, 1) / containerWidth
-            let clampedInitialScale = initialScale.isFinite ? max(0.5, min(initialScale, 1.2)) : 1
-            let scale = clampedInitialScale + (startScale - clampedInitialScale) * t
+            let scale = Self.resolvedScale(
+                transformProgress: transformProgress,
+                startFrame: startFrame,
+                containerFrame: containerFrame,
+                initialScale: initialScale
+            )
             let currentCenterX = baseWidth / 2
             let currentCenterY = baseHeight / 2
             let targetOffsetX = targetCenterX - currentCenterX
             let targetOffsetY = targetCenterY - currentCenterY
-            let offsetX = initialOffset.width + (targetOffsetX - initialOffset.width) * t
-            let offsetY = initialOffset.height + (targetOffsetY - initialOffset.height) * t
-            let rotation = initialRotation + (0 - initialRotation) * t
+            let offsetX = initialOffset.width + (targetOffsetX - initialOffset.width) * transformProgress
+            let offsetY = initialOffset.height + (targetOffsetY - initialOffset.height) * transformProgress
+            let rotation = initialRotation + (0 - initialRotation) * transformProgress
 
             content
                 .scaleEffect(scale, anchor: .center)

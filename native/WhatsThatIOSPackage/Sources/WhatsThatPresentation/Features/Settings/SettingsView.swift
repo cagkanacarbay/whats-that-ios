@@ -2,25 +2,30 @@ import SwiftUI
 import WhatsThatShared
 
 struct SettingsView: View {
-    enum AlertState: Equatable {
-        case confirmReset
-        case confirmSignOut
-        case finished
-        case error(String)
-    }
+    private let makeCreditsView: (@escaping (Int?) -> Void) -> AnyView
+    private let onClose: () -> Void
 
-    let onResetOnboarding: () async -> Result<Void, Error>
-    let onFetchCreditBalance: () async -> Result<Int, Error>
-    let makeCreditsView: (@escaping (Int?) -> Void) -> AnyView
-    let onSignOut: () async -> Result<Void, Error>
-    let onClose: () -> Void
-
-    @State private var isProcessing = false
-    @State private var isSigningOut = false
-    @State private var isLoadingCredits = false
-    @State private var creditBalance: Int?
-    @State private var alertState: AlertState?
+    @StateObject private var viewModel: SettingsViewModel
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
+
+    init(
+        onResetOnboarding: @escaping () async -> Result<Void, Error>,
+        onFetchCreditBalance: @escaping () async -> Result<Int, Error>,
+        makeCreditsView: @escaping (@escaping (Int?) -> Void) -> AnyView,
+        onSignOut: @escaping () async -> Result<Void, Error>,
+        onClose: @escaping () -> Void
+    ) {
+        self.makeCreditsView = makeCreditsView
+        self.onClose = onClose
+        _viewModel = StateObject(
+            wrappedValue: SettingsViewModel(
+                onResetOnboarding: onResetOnboarding,
+                onFetchCreditBalance: onFetchCreditBalance,
+                onSignOut: onSignOut,
+                onClose: onClose
+            )
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -30,7 +35,7 @@ struct SettingsView: View {
                 onboardingSection
             }
             .task {
-                await refreshCreditBalance()
+                await viewModel.refreshCreditBalance()
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -38,28 +43,24 @@ struct SettingsView: View {
                     Button("Done", action: onClose)
                 }
             }
-            .alert(item: $alertState) { state in
+            .alert(item: alertBinding) { state in
                 switch state {
                 case .confirmReset:
                     return Alert(
                         title: Text("Reset onboarding?"),
                         message: Text("This will clear cached onboarding progress. You can re-run it immediately."),
-                        primaryButton: .destructive(Text("Reset")) {
-                            Task { await performReset() }
-                        },
+                        primaryButton: .destructive(Text("Reset"), action: resetOnboarding),
                         secondaryButton: .cancel {
-                            alertState = nil
+                            viewModel.dismissAlert()
                         }
                     )
                 case .confirmSignOut:
                     return Alert(
                         title: Text("Sign out?"),
                         message: Text("You will need to log in again to access your discoveries."),
-                        primaryButton: .destructive(Text("Sign out")) {
-                            Task { await performSignOut() }
-                        },
+                        primaryButton: .destructive(Text("Sign out"), action: signOut),
                         secondaryButton: .cancel {
-                            alertState = nil
+                            viewModel.dismissAlert()
                         }
                     )
                 case .finished:
@@ -85,7 +86,7 @@ struct SettingsView: View {
         Section(header: Text("Account")) {
             NavigationLink {
                 makeCreditsView { newBalance in
-                    creditBalance = newBalance
+                    viewModel.updateCreditBalance(newBalance)
                 }
             } label: {
                 HStack(spacing: 12) {
@@ -100,10 +101,10 @@ struct SettingsView: View {
 
                     Spacer()
 
-                    if isLoadingCredits {
+                    if viewModel.isLoadingCredits {
                         ProgressView()
                             .progressViewStyle(.circular)
-                    } else if let balance = creditBalance {
+                    } else if let balance = viewModel.creditBalance {
                         Text("\(balance)")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.secondary)
@@ -121,17 +122,17 @@ struct SettingsView: View {
             }
 
             Button(role: .destructive) {
-                alertState = .confirmSignOut
+                viewModel.presentSignOutConfirmation()
             } label: {
                 HStack {
-                    if isSigningOut {
+                    if viewModel.isSigningOut {
                         ProgressView()
                             .progressViewStyle(.circular)
                     }
                     Text("Sign out")
                 }
             }
-            .disabled(isSigningOut)
+            .disabled(viewModel.isSigningOut)
             .accessibilityIdentifier("settings.signOut")
         }
     }
@@ -157,17 +158,17 @@ struct SettingsView: View {
     private var onboardingSection: some View {
         Section(header: Text("Cache & Onboarding")) {
             Button(role: .destructive) {
-                alertState = .confirmReset
+                viewModel.presentResetConfirmation()
             } label: {
                 HStack {
-                    if isProcessing {
+                    if viewModel.isProcessing {
                         ProgressView()
                             .progressViewStyle(.circular)
                     }
                     Text("Reset onboarding experience")
                 }
             }
-            .disabled(isProcessing)
+            .disabled(viewModel.isProcessing)
             .accessibilityIdentifier("settings.resetOnboarding")
 
             Text("Clears saved onboarding state so you can replay the intro slides and permission prompts. Your account stays signed in.")
@@ -191,94 +192,18 @@ struct SettingsView: View {
         )
     }
 
-    private func performReset() async {
-        guard await setProcessingState(active: true) else { return }
-
-        let result = await onResetOnboarding()
-
-        await MainActor.run {
-            isProcessing = false
-            switch result {
-            case .success:
-                alertState = .finished
-            case .failure(let error):
-                alertState = .error(error.localizedDescription)
-            }
-        }
+    private var alertBinding: Binding<SettingsViewModel.AlertState?> {
+        Binding(
+            get: { viewModel.alertState },
+            set: { viewModel.alertState = $0 }
+        )
     }
 
-    private func performSignOut() async {
-        await MainActor.run {
-            alertState = nil
-        }
-
-        guard await setSignOutState(active: true) else { return }
-
-        let result = await onSignOut()
-
-        await MainActor.run {
-            isSigningOut = false
-            switch result {
-            case .success:
-                onClose()
-            case .failure(let error):
-                alertState = .error(error.localizedDescription)
-            }
-        }
+    private func resetOnboarding() {
+        Task { await viewModel.performReset() }
     }
 
-    @MainActor
-    private func setProcessingState(active: Bool) -> Bool {
-        if active && isProcessing { return false }
-        isProcessing = active
-        if active {
-            alertState = nil
-        }
-        return true
-    }
-
-    @MainActor
-    private func setSignOutState(active: Bool) -> Bool {
-        if active && isSigningOut { return false }
-        isSigningOut = active
-        if active {
-            alertState = nil
-        }
-        return true
-    }
-
-    private func refreshCreditBalance() async {
-        if isLoadingCredits { return }
-        await MainActor.run {
-            isLoadingCredits = true
-        }
-
-        let result = await onFetchCreditBalance()
-
-        await MainActor.run {
-            isLoadingCredits = false
-            switch result {
-            case .success(let balance):
-                creditBalance = balance
-            case .failure(let error):
-                alertState = .error(error.localizedDescription)
-                creditBalance = nil
-            }
-        }
-    }
-}
-
-extension SettingsView.AlertState: Identifiable {
-    var id: String {
-        switch self {
-        case .confirmReset:
-            return "confirm"
-        case .confirmSignOut:
-            return "signOut"
-        case .finished:
-            return "finished"
-        case .error(let message):
-            return "error_\(message)"
-        }
+    private func signOut() {
+        Task { await viewModel.performSignOut() }
     }
 }

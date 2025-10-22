@@ -15,6 +15,17 @@ All planning documents now live under `docs/port/`:
 - `dependency-audit.md` – compatibility matrix for Swift packages/services we will adopt.
 - `theme-system.md` – overview of the user-selectable light/dark appearance and integration guidelines.
 
+## Presentation Module Layout
+- `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/App` – root shell views and the `AppRootViewModel`.
+- `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Features` – feature-specific SwiftUI flows (Discovery Creation/Feed, Settings, Credits, Onboarding).
+- `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Shared` – reusable brand components and controllers.
+- `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Support` – shared exports or glue code for the presentation package.
+
+## Build Commands
+- `swift package resolve --package-path native/WhatsThatIOSPackage` – refresh Swift Package dependencies.
+- `USE_REMOTE_DEPS=1 xcodebuild -workspace native/WhatsThatIOS.xcworkspace -scheme WhatsThatIOS -destination 'platform=iOS Simulator,name=iPhone 16' build`
+- `USE_REMOTE_DEPS=1 xcodebuild test -workspace native/WhatsThatIOS.xcworkspace -scheme WhatsThatIOS -destination 'platform=iOS Simulator,name=iPhone 16' -testPlan WhatsThatIOS`
+
 ## High-Level Direction
 1. **Preserve product behavior, not Expo implementation details.** All surfaces described in the docs must be functionally equivalent (or improved) on iOS.
 2. **Adopt a modular clean architecture.** SwiftUI presentation, a domain/use-case layer, and actor-backed services keep the app testable and scalable.

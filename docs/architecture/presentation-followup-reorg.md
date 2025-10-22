@@ -124,3 +124,9 @@ _Every stage must compile via Xcode or `xcodebuild` before advancing. After each
 - **Feature encapsulation**: All features must be self-contained using View + ViewModel (+ Coordinator when needed). Settings and Credits will follow this immediately; future work should not add presentation code outside feature folders.
 - **Voiceover architecture**: `VoiceoverPlaybackController` stays under `Shared/Controllers` but will expose a controller interface compatible with the feature MVVM/MVC approach. Longer term, evaluate extracting persistence/audio concerns into infrastructure while keeping the presentation-facing controller here.
 - **Documentation**: After moves complete, update the main README (or a dedicated architecture overview) to explain feature folders, build commands (`swift build` and `USE_REMOTE_DEPS=1 xcodebuild …`), and contribution guidelines.
+
+## Implementation Snapshot
+
+- `App/`, `Features/Settings`, `Features/Credits`, `Features/Onboarding`, and `Shared/*` directories now host their respective components.
+- `SettingsViewModel` centralizes async actions and alert orchestration for the settings sheet.
+- Placeholder `PresentationExports` file created under `Support/` for future type re-exports.

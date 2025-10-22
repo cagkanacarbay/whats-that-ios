@@ -40,38 +40,11 @@ struct DiscoveriesHomeView: View {
     @State private var headerHeight: CGFloat = 110
     @State private var safeAreaTopInset: CGFloat = 0
 
-    private var headerContentHeight: CGFloat {
-        max(headerHeight - safeAreaTopInset, 0)
-    }
-
-    private var headerDesiredSpacing: CGFloat {
-        BrandSpacing.small
-    }
-
-    private var headerSpacerHeight: CGFloat {
-        max(headerContentHeight - headerDesiredSpacing, 0)
-    }
-
-    private var headerTopPadding: CGFloat {
-        BrandSpacing.small * 0.5
-    }
-
-    private var headerStackSpacing: CGFloat {
-        BrandSpacing.small * 0.5
-    }
-
-    private var headerDividerBottomPadding: CGFloat {
-        BrandSpacing.small * 0.25
-    }
-
-    private var gridTopPadding: CGFloat {
-        let approximateTitleToNotch = safeAreaTopInset + headerTopPadding
-        let desiredGap = approximateTitleToNotch * 0.35
-        return max(desiredGap, BrandSpacing.small * 0.75)
-    }
-
-    private var collapseDistance: CGFloat {
-        max(headerContentHeight, 1)
+    private var headerMetrics: DiscoveriesHeaderMetrics {
+        DiscoveriesHeaderMetrics(
+            headerHeight: headerHeight,
+            safeAreaTopInset: safeAreaTopInset
+        )
     }
     private let gridSpacing: CGFloat = 1
     private let gridHorizontalPadding: CGFloat = 1
@@ -120,6 +93,7 @@ struct DiscoveriesHomeView: View {
             let _ = proxy.size // retain to keep dependency updates
             let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
             let contentWidth = max(gridAvailableWidth - (gridHorizontalPadding * 2), 0)
+            let metrics = headerMetrics
 
             ZStack(alignment: .top) {
                 backgroundColor
@@ -127,9 +101,9 @@ struct DiscoveriesHomeView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: headerSpacerHeight)
+                        Color.clear.frame(height: metrics.headerSpacerHeight)
 
-                        DiscoveriesGrid(
+                        DiscoveriesGridView(
                             viewModel: viewModel,
                             availableWidth: contentWidth,
                             cardSpacing: gridSpacing,
@@ -147,7 +121,7 @@ struct DiscoveriesHomeView: View {
                             }
                         )
                         .padding(.horizontal, gridHorizontalPadding)
-                        .padding(.top, gridTopPadding)
+                        .padding(.top, metrics.gridTopPadding)
                         .padding(.bottom, gridBottomPadding)
                     }
                 }
@@ -161,7 +135,7 @@ struct DiscoveriesHomeView: View {
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
-                    let adjusted = rawValue - headerSpacerHeight
+                    let adjusted = rawValue - metrics.headerSpacerHeight
                     scrollOffset = adjusted
                 }
                 .onChange(of: viewModel.discoveries) {
@@ -192,7 +166,13 @@ struct DiscoveriesHomeView: View {
                     }
                 }
 
-                header(opacity: headerOpacity)
+                DiscoveriesHeaderView(
+                    opacity: headerOpacity,
+                    metrics: metrics,
+                    backgroundColor: backgroundColor,
+                    onSignOut: onSignOut,
+                    onSettings: onSettings
+                )
                     .onPreferenceChange(HeaderHeightPreferenceKey.self) { value in
                         guard value > 0 else { return }
                         if abs(value - headerHeight) > 0.5 {
@@ -578,215 +558,7 @@ struct DiscoveriesHomeView: View {
     }
 
     private var headerOpacity: Double {
-        let offset = max(0, -scrollOffset)
-        let progress = min(offset / collapseDistance, 1)
-        return 1 - Double(progress)
-    }
-
-    @ViewBuilder
-    private func header(opacity: Double) -> some View {
-        VStack(spacing: headerStackSpacing) {
-            HStack {
-                Text("My Discoveries")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(headerTitleColor)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-
-                if let onSettings {
-                    Menu {
-                        Button("Sign out", role: .destructive) {
-                            onSignOut()
-                        }
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(headerTitleColor)
-                            .padding(10)
-                            .background(headerIconBackground)
-                            .clipShape(Circle())
-                            .accessibilityLabel("Settings")
-                    } primaryAction: {
-                        onSettings()
-                    }
-                } else {
-                    Menu {
-                        Button("Sign out", role: .destructive) {
-                            onSignOut()
-                        }
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(headerTitleColor)
-                            .padding(10)
-                            .background(headerIconBackground)
-                            .clipShape(Circle())
-                            .accessibilityLabel("Options")
-                    }
-                }
-            }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.top, headerTopPadding)
-
-            Divider()
-                .background(dividerColor)
-                .padding(.horizontal, BrandSpacing.large)
-                .padding(.bottom, headerDividerBottomPadding)
-        }
-        .background(
-            LinearGradient(
-                colors: [
-                    backgroundColor,
-                    backgroundColor.opacity(0.92),
-                    backgroundColor.opacity(0.75)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(key: HeaderHeightPreferenceKey.self, value: proxy.size.height)
-            }
-        )
-        .opacity(opacity)
-    }
-
-    private var headerTitleColor: Color {
-        colorScheme == .dark ? Color.white : BrandColors.Light.accentText
-    }
-
-    private var headerIconBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : BrandColors.Light.border
-    }
-
-    private var dividerColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.1) : BrandColors.Light.border
-    }
-}
-
-
-private struct DiscoveryCardSkeleton: View {
-    let width: CGFloat
-    let height: CGFloat
-    @State private var animate = false
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.gray.opacity(0.2))
-                .frame(width: width, height: height)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.gray.opacity(0.1),
-                                    Color.gray.opacity(0.3),
-                                    Color.gray.opacity(0.1)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .mask {
-                            Rectangle()
-                                .fill(Color.white.opacity(animate ? 1 : 0))
-                                .blur(radius: 40)
-                                .offset(x: animate ? width : -width)
-                        }
-                        .animation(
-                            .easeInOut(duration: 1.2)
-                                .repeatForever(autoreverses: false),
-                            value: animate
-                        )
-                }
-                .onAppear {
-                    animate = true
-                }
-
-            VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white.opacity(0.4))
-                    .frame(width: width * 0.7, height: 12)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: width * 0.5, height: 12)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.02),
-                        Color.black.opacity(0.3)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-        }
-    }
-}
-
-private struct DiscoveriesErrorView: View {
-    let message: String
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: BrandSpacing.medium) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 42))
-                .foregroundStyle(Color.orange)
-
-            Text("We couldn’t refresh your discoveries.")
-                .font(.system(size: 18, weight: .semibold))
-                .multilineTextAlignment(.center)
-
-            Text(message)
-                .font(.system(size: 15))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-
-            BrandPrimaryButton(title: "Try again", action: action)
-                .frame(maxWidth: 240)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(BrandSpacing.large)
-    }
-}
-
-private struct EmptyDiscoveriesView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: BrandSpacing.medium) {
-            Image("BrandLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 140, height: 140)
-
-            Text("Start making discoveries")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(titleColor)
-
-            Text("Snap a photo or upload from your library to unlock stories about the world around you.")
-                .font(.system(size: 16, weight: .medium))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(bodyColor)
-                .frame(maxWidth: 280)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(.horizontal, BrandSpacing.large)
-    }
-
-    private var titleColor: Color {
-        colorScheme == .dark ? Color.white : BrandColors.Light.accentText
-    }
-
-    private var bodyColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.7) : BrandColors.Light.bodyText
+        headerMetrics.headerOpacity(for: scrollOffset)
     }
 }
 
@@ -844,248 +616,9 @@ private struct FeedErrorToast: View {
     private var toastTextColor: Color {
         colorScheme == .dark ? Color.white.opacity(0.85) : Color.white.opacity(0.92)
     }
+
 }
 
-private struct DiscoveriesGrid: View {
-    @ObservedObject var viewModel: DiscoveryFeedViewModel
-    let availableWidth: CGFloat
-    let cardSpacing: CGFloat
-    @Binding var cardFrames: [Int64: CGRect]
-    let hiddenDiscovery: HiddenDiscovery?
-    let onLoadMore: (DiscoverySummary) async -> Void
-    let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
-
-    private var gridColumns: [GridItem] {
-        [
-            GridItem(.fixed(cardWidth), spacing: cardSpacing, alignment: .top),
-            GridItem(.fixed(cardWidth), spacing: cardSpacing, alignment: .top)
-        ]
-    }
-
-    private var cardWidth: CGFloat {
-        let totalSpacing = cardSpacing
-        return max((availableWidth - totalSpacing) / 2, 120)
-    }
-
-    private var cardHeight: CGFloat {
-        cardWidth * 1.2
-    }
-
-    var body: some View {
-        switch viewModel.loadState {
-        case .idle where viewModel.discoveries.isEmpty:
-            if viewModel.isRefreshing {
-                skeletonGrid
-            } else {
-                EmptyDiscoveriesView()
-            }
-        case .loading:
-            skeletonGrid
-        case .failed(let message):
-            DiscoveriesErrorView(
-                message: message,
-                action: {
-                    Task { await viewModel.reload() }
-                }
-            )
-        case .loaded, .idle:
-            if viewModel.discoveries.isEmpty {
-                EmptyDiscoveriesView()
-            } else {
-                gridContent
-            }
-        }
-    }
-
-    private var skeletonGrid: some View {
-        let placeholderItems = Array(0..<8)
-        return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
-            ForEach(placeholderItems, id: \.self) { _ in
-                DiscoveryCardSkeleton(width: cardWidth, height: cardHeight)
-            }
-        }
-        .frame(width: availableWidth, alignment: .leading)
-    }
-
-    private var gridContent: some View {
-        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
-            ForEach(viewModel.discoveries) { discovery in
-                DiscoveryCard(
-                    discovery: discovery,
-                    width: cardWidth,
-                    height: cardHeight,
-                    isHidden: hiddenDiscovery?.id == discovery.id,
-                    onSelect: { selectedDiscovery, imageURL in
-                        let frame = cardFrames[selectedDiscovery.id] ?? .zero
-                        onSelect(selectedDiscovery, imageURL, frame)
-                    }
-                )
-                .background(
-                    GeometryReader { proxy in
-                        let isFirstDiscovery = discovery.id == viewModel.discoveries.first?.id
-                        let globalFrame = proxy.frame(in: .global)
-                        let localFrame = proxy.frame(in: .named("discoveriesScroll"))
-                        Color.clear
-                            .preference(
-                                key: DiscoveryCardFramePreferenceKey.self,
-                                value: [discovery.id: globalFrame]
-                            )
-                            .if(isFirstDiscovery) { view in
-                                view.preference(
-                                    key: ScrollOffsetPreferenceKey.self,
-                                    value: localFrame.minY
-                                )
-                            }
-                    }
-                    .transaction { tx in tx.animation = nil }
-                )
-                .onAppear {
-                    Task { await onLoadMore(discovery) }
-                }
-            }
-        }
-        .frame(width: availableWidth, alignment: .leading)
-        .onPreferenceChange(DiscoveryCardFramePreferenceKey.self) { value in
-            // Guard to avoid redundant state writes that can cause multiple updates per frame warnings
-            if cardFrames != value {
-                cardFrames = value
-            }
-        }
-    }
-}
-
-private struct DiscoveryCard: View {
-    let discovery: DiscoverySummary
-    let width: CGFloat
-    let height: CGFloat
-    let isHidden: Bool
-    let onSelect: (DiscoverySummary, URL?) -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Button {
-            onSelect(discovery, imageURL)
-        } label: {
-            ZStack(alignment: .bottom) {
-                DiscoveryCardImage(
-                    discoveryId: discovery.id,
-                    url: imageURL,
-                    width: width,
-                    height: height
-                )
-                DiscoveryCardChrome(discovery: discovery)
-            }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(borderColor, lineWidth: 0.3)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .opacity(isHidden ? 0 : 1)
-    }
-
-    private var imageURL: URL? {
-        guard let path = discovery.imagePath else { return nil }
-        return URL(string: path)
-    }
-
-    private var borderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : BrandColors.Light.border
-    }
-}
-
-private struct DiscoveryCardImage: View {
-    let discoveryId: Int64
-    let url: URL?
-    let width: CGFloat
-    let height: CGFloat
-    @State private var didCacheSnapshot = false
-
-    var body: some View {
-        DiscoveryCachedImage(
-            discoveryId: discoveryId,
-            remoteURL: url
-        ) { phase in
-            ZStack {
-                placeholder
-
-                switch phase {
-                case .success(let platformImage):
-                    Image(uiImage: platformImage)
-                        .resizable()
-                        .scaledToFill()
-                        .onAppear {
-                            cacheIfNeeded(image: platformImage)
-                        }
-                case .loading, .empty:
-                    EmptyView()
-                case .failure:
-                    EmptyView()
-                }
-            }
-        }
-        .frame(width: width, height: height)
-        .clipped()
-    }
-
-    private func cacheIfNeeded(image: DiscoveryPlatformImage) {
-        guard !didCacheSnapshot else { return }
-        didCacheSnapshot = true
-        DiscoveryHeroImageCache.shared.store(image, for: discoveryId)
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(hex: "#20293A"),
-                    Color(hex: "#141927")
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Image("BrandLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 44, height: 44)
-                .opacity(0.25)
-        }
-    }
-}
-
-private struct DiscoveryCardChrome: View {
-    let discovery: DiscoverySummary
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(discovery.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .shadow(color: Color.black.opacity(0.6), radius: 3, x: 0, y: 1)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0),
-                    Color.black.opacity(0.25),
-                    Color.black.opacity(0.4)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-    }
-}
 private struct DiscoveryHeroContext: Identifiable {
     let sessionId: UUID
     let discovery: DiscoverySummary
@@ -1097,12 +630,7 @@ private struct DiscoveryHeroContext: Identifiable {
     var id: UUID { sessionId }
 }
 
-private struct HiddenDiscovery {
-    let id: Int64
-    let sessionId: UUID
-}
-
-private final class DiscoveryHeroImageCache {
+final class DiscoveryHeroImageCache {
     static let shared = DiscoveryHeroImageCache()
 
     private let cache = NSCache<NSNumber, UIImage>()
@@ -1542,7 +1070,7 @@ private struct UniformCloseTransform: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
     func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
         if condition {
@@ -1979,7 +1507,7 @@ private struct DiscoveryHeroTopControls: View {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
     func conditionalScrollDisabled(_ disabled: Bool) -> some View {
         if #available(iOS 16.0, *) {

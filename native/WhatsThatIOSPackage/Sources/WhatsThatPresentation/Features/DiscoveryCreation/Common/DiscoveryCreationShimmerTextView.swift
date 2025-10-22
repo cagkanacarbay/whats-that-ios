@@ -55,11 +55,11 @@ struct ShimmerTextView: View {
         let travel = width + stripeWidth
         let xOffset = -stripeWidth/2 + Double(progress) * travel - (travel - width)/2
 
-        let highlight = (colorScheme == .dark) ? Color.white.opacity(0.9) : Color.white
+        let highlightPalette = ShimmerHighlightPalette.forScheme(colorScheme)
         return ShimmerFrameView(
             text: text,
             color: color,
-            highlightColor: highlight,
+            highlightPalette: highlightPalette,
             fontSize: fontSize,
             scale: scale,
             stripeWidth: stripeWidth,
@@ -133,19 +133,47 @@ struct ShimmerTextView: View {
         logger("[ShimmerTextView] \(message)")
     }
 
+    private struct ShimmerHighlightPalette {
+        let textHighlight: Color
+        let beamEdge: Color
+        let beamFeather: Color
+        let beamCore: Color
+
+        static func forScheme(_ colorScheme: ColorScheme) -> ShimmerHighlightPalette {
+            if colorScheme == .dark {
+                // Cool-toned glint keeps the shimmer readable on bright text.
+                return ShimmerHighlightPalette(
+                    textHighlight: Color(red: 0.9, green: 0.96, blue: 1.0),
+                    beamEdge: Color.white.opacity(0),
+                    beamFeather: Color(red: 0.42, green: 0.72, blue: 1.0).opacity(0.45),
+                    beamCore: Color(red: 0.82, green: 0.96, blue: 1.0)
+                )
+            } else {
+                // Keep the shimmer white-hot against darker text in light mode.
+                return ShimmerHighlightPalette(
+                    textHighlight: Color.white,
+                    beamEdge: Color.white.opacity(0),
+                    beamFeather: Color.white.opacity(0.35),
+                    beamCore: Color.white
+                )
+            }
+        }
+    }
+
     private struct ShimmerStripe: View {
         let width: CGFloat
         let height: CGFloat
         let xOffset: CGFloat
+        let palette: ShimmerHighlightPalette
 
         var body: some View {
             LinearGradient(
                 gradient: Gradient(stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: .white.opacity(0.12), location: 0.28),
-                    .init(color: .white, location: 0.5),
-                    .init(color: .white.opacity(0.12), location: 0.72),
-                    .init(color: .clear, location: 1.0)
+                    .init(color: palette.beamEdge, location: 0.0),
+                    .init(color: palette.beamFeather, location: 0.22),
+                    .init(color: palette.beamCore, location: 0.5),
+                    .init(color: palette.beamFeather, location: 0.78),
+                    .init(color: palette.beamEdge, location: 1.0)
                 ]),
                 startPoint: .leading,
                 endPoint: .trailing
@@ -158,7 +186,7 @@ struct ShimmerTextView: View {
     private struct ShimmerFrameView: View {
         let text: String
         let color: Color
-        let highlightColor: Color
+        let highlightPalette: ShimmerHighlightPalette
         let fontSize: CGFloat
         let scale: CGFloat
         let stripeWidth: CGFloat
@@ -175,12 +203,13 @@ struct ShimmerTextView: View {
 
                 Text(text)
                     .font(.system(size: fontSize, weight: .bold))
-                    .foregroundStyle(highlightColor)
+                    .foregroundStyle(highlightPalette.textHighlight)
                     .mask(
                         ShimmerStripe(
                             width: stripeWidth,
                             height: fontSize * 1.6,
-                            xOffset: xOffset
+                            xOffset: xOffset,
+                            palette: highlightPalette
                         )
                     )
                     .blendMode(.screen)

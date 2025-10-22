@@ -846,33 +846,6 @@ private struct FeedErrorToast: View {
     }
 }
 
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat? = nil
-
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        let newValue = nextValue()
-        if let newValue {
-            value = newValue
-        }
-    }
-}
-
-private struct HeaderHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct DiscoveryCardFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [Int64: CGRect] = [:]
-
-    static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
-        value.merge(nextValue()) { _, new in new }
-    }
-}
-
 private struct DiscoveriesGrid: View {
     @ObservedObject var viewModel: DiscoveryFeedViewModel
     let availableWidth: CGFloat
@@ -1733,14 +1706,6 @@ private struct DiscoveryHeroContentView: View {
         }
     }
 
-}
-
-private struct HeroScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 private struct VoiceoverPlayerBar: View {

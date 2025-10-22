@@ -209,6 +209,9 @@ Additional utilities inside `AnalysisStateView` (loader messages array, markdown
 - Plan for snapshot/unit tests once structure stabilizes (placeholder files already accounted for in proposed tree).
 
 ## Implementation Phases (Detailed)
+
+_Stage gate for every step_: run `swift build` via MCP before proceeding (must finish cleanly). After each successful build, notify the user so they can perform a visual check in the app.
+
 1. **Scaffold & Common Extraction**
    - Create directory tree.
    - Move common helpers (preference keys, error identifier) into new files.
@@ -225,10 +228,10 @@ Additional utilities inside `AnalysisStateView` (loader messages array, markdown
 4. **Hero Overlay & Voiceover Modules**
    - Create detail overlay module files; integrate animator/interactor objects.
    - Move image cache, hero context, and voiceover player out of monolith.
-   - Reconnect gestures and voiceover controller toggles.
+   - Reconnect gestures and voiceover controller toggles; build again.
 5. **Error & Empty States + Final Cleanup**
    - Relocate error/empty views.
-  - Audit `DiscoveriesHomeView` for leftover nested structs; remove or reference from new modules.
+   - Audit `DiscoveriesHomeView` for leftover nested structs; remove or reference from new modules.
    - Run formatting/linting; update doc with final component map.
 6. **Validation & Testing**
    - Perform manual QA across major flows.

@@ -11,22 +11,25 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 - ⬜️ Remaining: split modules into Swift packages (if we pursue multi-package structure), add CI hooks, lint/format scripts.
 
 ## Phase 2 – Core Account & Onboarding Flows
-- 🟡 In progress. `AppRootView` now gates between pre-onboarding slides, email/password auth, post-onboarding reminders, and the discovery feed. The pre/onboarding, sign up, log in, and forgot password screens mirror the React Native Tamagui styling (brand colors, logo, copy, social buttons). Supabase email/password auth is live and Google Sign-in now runs through the native SDK + Supabase `signInWithIdToken` bridge. Post-onboarding adds a permissions card so we can request location or push notifications without leaving the flow. We continue to use `UserDefaultsOnboardingRepository` for flags while onboarding polish proceeds. Added `BrandTheme` + SwiftUI brand components (primary/secondary/social buttons, floating text fields) and dropped shared assets (`BrandLogo`, onboarding illustrations, Google/Apple icons) so the native UI reuses the RN look-and-feel.
+- 🟡 In progress. `AppRootView` now gates between pre-onboarding slides, email/password auth, post-onboarding reminders, and the discovery feed. The pre/onboarding, sign up, log in, and forgot password screens mirror the React Native Tamagui styling (brand colors, logo, copy, social buttons). Supabase email/password auth is live, Google Sign-in runs through the native SDK + Supabase `signInWithIdToken` bridge, and Sign in with Apple is wired end-to-end via `AuthenticationServices`. Post-onboarding adds a permissions card so we can request location or push notifications without leaving the flow. We continue to use `UserDefaultsOnboardingRepository` for flags while onboarding polish proceeds. Added `BrandTheme` + SwiftUI brand components (primary/secondary/social buttons, floating text fields) and dropped shared assets (`BrandLogo`, onboarding illustrations, Google/Apple icons) so the native UI reuses the RN look-and-feel.
 - ✅ Added a lightweight Settings sheet within the discoveries header menu so QA can reset onboarding flags (replaying the intro + permissions without reinstalling).
-- ⬜️ Remaining: wire deep-link reset handling, finish Terms/Privacy copy, and implement Apple sign-in.
+- ⬜️ Remaining: finish the Terms/Privacy Markdown modals + acceptance copy, hook up Supabase password reset deep links (`supabase.auth.setSession`), and tighten authentication error handling/accessibility so parity with the RN build is complete.
 
 ## Phase 3 – Discovery Consumption, Modal Voiceover & Quick Actions
-- 🟡 In progress. Discovery home screen mirrors the Tamagui grid and now presents a native detail experience with a custom hero overlay – the discovery card animates smoothly into place using the measured card frame, cached image snapshot, and border-radius interpolation. Gradient overlay, Markdown body, share/map actions, and voiceover playback (Supabase-backed repository + `VoiceoverPlaybackController` with inline and persistent controls) are all live.
-- ⬜️ Remaining: wire the “Take another photo” / “Upload a photo” quick action buttons to the creation flows, add interactive drag dismissal parity with the React Native modal, and extend the playback controller with skip/queue + global controls.
+- 🟡 In progress. Discovery home screen mirrors the Tamagui grid and now presents a native detail experience with a custom hero overlay – the discovery card animates smoothly into place using the measured card frame, cached image snapshot, and border-radius interpolation. Markdown rendering and the persistent voiceover player are functional, but the inline voiceover controls still need UX polish and the detail view is missing share/map/delete affordances.
+- ⬜️ Remaining: add share + map routing and delete controls inside the detail sheet, rework the voiceover experience (correct transport controls, persistent state, global controls), and land the interactive drag dismissal parity with the React Native modal.
+- 🛈 Descoped: “Take another photo” / “Upload a photo” quick action buttons will not be implemented on the native client.
 
 ## Phase 4 – Discovery Creation Pipeline & Streaming Polish
-- ⬜️ Not started. Camera/upload flows, SSE streaming, and shared state machine pending.
+- ✅ Completed. Camera capture and photo upload flows share the new `DiscoveryCreationFlowViewModel` state machine, SSE streaming mirrors the RN experience (status events, token batches, cancellation), and Supabase analysis integration now hydrates the feed + cached assets once summaries arrive.
 
 ## Phase 5 – Monetization, Settings, & System Surfaces
-- ⬜️ Not started. StoreKit and settings modules are placeholders only.
+- 🟡 In progress. Credits purchase UI, StoreKit 2 purchasing (`StoreKitCreditsStore`), Supabase receipt validation, and the in-app Credits screen are live; the Settings sheet exposes onboarding reset and appearance toggles.
+- ⬜️ Remaining: implement restore purchases, low-credit alerts, additional settings/diagnostics surfaces, and the broader system overlays (updates screen, cache management).
 
 ## Phase 6 – Notifications, QA & Polish
-- ⬜️ Not started. No APNs integration or QA harness yet.
+- 🟡 In progress. Onboarding surfaces location/notification opt-ins and the creation pipeline requests notification permission via `NativePushService`.
+- ⬜️ Remaining: wire APNs token registration to Supabase, decide on Expo vs APNs delivery, fill out analytics/logging, and stand up the QA automation harness (unit + UI).
 
 ## Phase 7 – Launch & Post-Launch
 - ⬜️ Not applicable yet.
@@ -53,8 +56,8 @@ This log mirrors the migration roadmap and supporting plan documents so we can t
 ---
 
 ## Next Suggested Steps
-1. Phase 2: Add Google sign-in, password reset deep-link handling, and tighten copy/accessibility on onboarding screens.
-2. Phase 3: Implement discovery quick action buttons (camera/upload) and voiceover playback (detail + persistent player), then backfill tests around the new flows.
-3. Phase 4: Begin camera/upload state machine work once voiceover parity lands, then expand automated tests to cover repository mappings and auth edge cases.
+1. Phase 2: Deliver the Terms/Privacy Markdown modals, hook up Supabase password reset deep links, and address remaining authentication accessibility/error states.
+2. Phase 3: Add share/map/delete actions to the discovery detail sheet, overhaul the voiceover controller UI/transport behaviour, and finish the interactive dismissal polish.
+3. Phase 5 & 6: Ship restore purchases + credit alerts, then wire APNs token upload and outline the QA automation harness.
 
 This document should be updated whenever a plan item is started or completed, so it remains a parallel source of truth with the roadmap and architecture plan.

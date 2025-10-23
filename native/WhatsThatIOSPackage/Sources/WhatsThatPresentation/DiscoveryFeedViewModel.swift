@@ -64,6 +64,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
         }
 
         isFetchingPage = true
+        let previousLoadState = loadState
 
         switch mode {
         case .initial:
@@ -72,6 +73,19 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             isRefreshing = true
         case .loadMore:
             isPaginating = true
+        }
+
+        defer {
+            switch mode {
+            case .initial:
+                break
+            case .refresh:
+                isRefreshing = false
+            case .loadMore:
+                isPaginating = false
+            }
+
+            isFetchingPage = false
         }
 
         let cursor: Int64?
@@ -84,6 +98,12 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
         do {
             errorMessage = nil
+
+            if Task.isCancelled {
+                loadState = previousLoadState
+                return
+            }
+
             let page = try await feedUseCase.loadPage(limit: pageSize, before: cursor)
 
             switch mode {
@@ -95,6 +115,9 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
             hasMore = page.count == pageSize
             loadState = discoveries.isEmpty ? .idle : .loaded
+        } catch is CancellationError {
+            loadState = previousLoadState
+            return
         } catch {
             errorMessage = error.localizedDescription
             if discoveries.isEmpty {
@@ -103,17 +126,6 @@ public final class DiscoveryFeedViewModel: ObservableObject {
                 loadState = .loaded
             }
         }
-
-        switch mode {
-        case .initial:
-            break
-        case .refresh:
-            isRefreshing = false
-        case .loadMore:
-            isPaginating = false
-        }
-
-        isFetchingPage = false
     }
 
     private func applyNewPage(_ page: [DiscoverySummary], replaceExisting: Bool) {

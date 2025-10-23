@@ -97,6 +97,9 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistory
                 return summaries.sorted(by: { $0.capturedAt > $1.capturedAt })
             }
         } catch {
+            if error.isCancellationError {
+                throw CancellationError()
+            }
             supabaseDiscoveryLogger.error("Failed to fetch discoveries: \(error.localizedDescription, privacy: .public)")
             throw DiscoveryFeedError.failedToLoad
         }
@@ -253,6 +256,25 @@ private extension SupabaseDiscoveryRepository {
             await assetCache.invalidateSignedURL(for: discoveryId)
             return nil
         }
+    }
+}
+
+private extension Error {
+    var isCancellationError: Bool {
+        if self is CancellationError {
+            return true
+        }
+
+        let nsError = self as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return underlying.isCancellationError
+        }
+
+        return false
     }
 }
 #endif

@@ -117,7 +117,7 @@ struct OverlaySnapshot {
 
 ### 4.3 HeroSurface lifecycle
 
-1. On `present`, the coordinator first attempts to read the cached snapshot from `DiscoveryDetailImageCache`. If the cache misses, it kicks off an asynchronous pre-render using `ImageRenderer` (or similar) on a background priority. While that work happens, the opening animation begins with the existing gradient/placeholder surface so taps never stall. The newly rendered snapshot is promoted into the hero as soon as rendering completes (with a cross-fade identical to the remote swap), ensuring subsequent frames still converge on the card-accurate texture without blocking the main actor.
+1. On `present`, the coordinator first attempts to read the cached snapshot from `DiscoveryDetailImageCache`. If the cache misses, it starts the hero animation immediately using the existing gradient/placeholder surface and schedules a high-priority render for the card snapshot. Because SwiftUI view construction must occur on the main actor, the render runs inside `MainActor.run` (after the current runloop tick) via `ImageRenderer` and uses the lightweight `DiscoveryCardView` template so work stays brief. When rendering completes, `HeroSurfaceManager` cross-fades the new snapshot into place, mirroring the remote image swap, so fidelity converges without the tap ever stalling.
 2. The coordinator computes the card’s visible crop by comparing the card aspect ratio with the source image aspect. The result is stored as a normalized `CGRect` (`visibleCropCard`) representing the portion of the bitmap that was on-screen in the grid card. If the cached snapshot was already rendered with `.scaledToFill().clipped()`, we treat that snapshot as fully cropped and set `visibleCropCard = .unit`.
 3. To guarantee the high-res swap matches the card exactly, the coordinator pre-rasterizes a card-sized bitmap from the full-resolution asset using `CGImageCreateWithImageInRect` (or `UIGraphicsImageRenderer`). When rasterizing, it reuses the same gradient + title compositing helper that `DiscoveryCardView` employs so the lighting/contrast stays identical during the cross-fade. This produces a `CroppedImage` (bitmap + scale) that mirrors the card framing pixel-for-pixel.
 4. It constructs a composite `HeroSurface`:
@@ -136,6 +136,7 @@ struct OverlaySnapshot {
 - `DiscoveryHeroHeaderView` is rewritten to host `HeroSurfaceView` and accept a `HeroSurface` binding instead of spinning up its own `DiscoveryCachedImage`. This keeps image ownership inside the coordinator and prevents double-fetching. `DiscoveryCardImageView` continues caching snapshots eagerly on appearance so the asynchronous fallback path above remains rare in practice.
 - The CALayer-backed `HeroSurfaceView` sits inside a `HeroSurfaceContainer` SwiftUI wrapper that preserves the existing `matchedGeometryEffect`. The container owns the namespace identifiers, wraps the UIKit view, and reports measured size back to the coordinator so the hero-to-card handoff continues to use SwiftUI’s layout engine while still benefiting from the layer-backed masking.
 - `HeroSurfaceContainer` exposes a feature flag that lets us fall back to the existing pure SwiftUI rendering path during rollout/testing, protecting us from regressions if layout forwarding ever drifts.
+- Before rolling the CALayer path into production, we will run a dedicated spike that mounts `HeroSurfaceView` inside the current overlay hierarchy and exercises the open/close animations plus interactive dismissal. The spike explicitly checks for: (1) coordinate drift between the layer tree and SwiftUI’s matched-geometry frames, (2) opacity or transform mismatches that could reintroduce flickers, and (3) gesture/input quirks where the UIKit container might swallow drag events. If any issue surfaces, the feature flag keeps the SwiftUI-only renderer available while we resolve the gap.
 5. The coordinator calls into the non-view image loader (`DiscoveryImageLoader`) or `DiscoveryAssetCache` directly to ensure the high-resolution bitmap is cached. Once the file exists, it loads the data on a background task, instantiates `UIImage`, and invokes `preparingForDisplay()` (or an explicit CoreGraphics draw) to pre-decode the bitmap before hopping back to the main actor.
 6. Before publishing the transition state, the coordinator rasterizes the card crop using the decoded bitmap and stores both the cropped and original variants. The cropped image becomes `transition`, ensuring the crossfade never reveals a different aspect.
 7. After the decoded bitmap is ready, the coordinator updates the snapshot with `transition` set, `transitionProgress = 0`, `visibleCrop = cardCrop`, and retains the full bitmap for future expansions.
@@ -325,7 +326,6 @@ presented ──back button──► closing
     - Forward `HeroScrollOffsetPreferenceKey` updates into `detailCoordinator.updateScroll`.
     - Remove legacy `hiddenDiscovery` and voiceover toggles in favour of coordinator-driven snapshot data.
     - Capture the card’s frame (global CGRect) before hiding it via `hiddenDiscovery` and pass it to `detailCoordinator.present`; the coordinator freezes this rect until dismissal completes.
-    - Queue selection intents until both `cardFrames[id]` and an initial `OverlayMeasurements` arrive, then drain the queue inside `updateMeasurements` while the coordinator is idle.
 
 3. **Refactor overlay view hierarchy**
    - Update `DiscoveryDetailOverlayView` to consume snapshots.
@@ -341,6 +341,7 @@ presented ──back button──► closing
     - Ensure snapshot updates are published on the main actor with micro-timed fades (e.g., `withAnimation(.linear(duration: 0.12))` for image crossfade) and promotion of the new bitmap once the fade completes.
     - Apply normalized crop rects to both cached and high-res bitmaps so the crossfade never exposes a different aspect until the coordinator intentionally expands it.
     - Prototype `HeroSurfaceView` (CALayer-backed) to validate mask stability; fall back to pure SwiftUI only if the prototype proves unnecessary.
+    - Run the `HeroSurfaceView` spike described in §4.3: integrate the CALayer renderer behind the feature flag, profile coordinate alignment, opacity/transform parity, and gesture handling, then decide whether to ship the CALayer path or keep the SwiftUI renderer for this iteration.
     - On dismissal or coordinator deinit, cancel outstanding loader tasks and release cached bitmaps that are no longer needed.
 
 5. **QA & polish**
@@ -363,7 +364,8 @@ presented ──back button──► closing
 | Coordinator becoming a monolith | Keep responsibilities modular: extract `HeroGeometryCalculator`, `ChromeStateReducer`, etc., so coordinator orchestrates them. |
 | Crossfade causes noticeable brightness shift | Optionally apply a brief blur or run through `UIView.transition` to soften swap. Guard behind feature flags for tuning. |
 | Gesture metrics diverge from existing dismissal behaviour | Reuse `DiscoveryDetailDismissInteractor` logic inside coordinator; add golden tests matching current thresholds. |
-| Dependency on cached snapshot | Ensure `DiscoveryCardImageView` caches the bitmap. On cache miss, synchronously render a thumbnail or fall back to the loading gradient with a short delay to avoid blank hero. |
+| Dependency on cached snapshot | Continue eager caching in `DiscoveryCardImageView`. If a cache miss occurs, kick off the main-actor render described in §4.3 via `HeroSurfaceManager` while keeping the placeholder visible, then cross-fade the rendered snapshot when ready. Profile the render duration early and keep the off-screen card view lightweight to avoid jank. |
+| HeroSurfaceView layer bridging regresses animation | Execute the spike in §4.3 / Step 4 to verify alignment, opacity, and gesture parity. If regressions appear, fall back to the SwiftUI renderer via the feature flag while addressing the gaps. |
 | Geometry drift during rotations | Feed `OverlayMeasurements` on every `GeometryReader` change; add unit tests that simulate mid-animation size changes to ensure continuity. |
 | Crop rendering regresses to flicker | Prototype `HeroSurfaceView` early; if SwiftUI-only cropping flickers, keep the CALayer-backed implementation. Add snapshot tests comparing card-aligned and expanded crops. |
 | Snapshot publish loop overloads main thread | Enforce display-link throttling and tolerance checks; add diagnostics to log publish frequency during UI testing. |

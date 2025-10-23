@@ -7,7 +7,7 @@ struct DiscoveriesGridView: View {
     let availableWidth: CGFloat
     let cardSpacing: CGFloat
     @Binding var cardFrames: [Int64: CGRect]
-    let hiddenDiscovery: HiddenDiscovery?
+    let activeDiscoveryId: Int64?
     let onLoadMore: (DiscoverySummary) async -> Void
     let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
 
@@ -70,7 +70,7 @@ struct DiscoveriesGridView: View {
                     discovery: discovery,
                     width: cardWidth,
                     height: cardHeight,
-                    isHidden: hiddenDiscovery?.id == discovery.id,
+                    isHidden: activeDiscoveryId == discovery.id,
                     onSelect: { selectedDiscovery, imageURL in
                         let frame = cardFrames[selectedDiscovery.id] ?? .zero
                         onSelect(selectedDiscovery, imageURL, frame)

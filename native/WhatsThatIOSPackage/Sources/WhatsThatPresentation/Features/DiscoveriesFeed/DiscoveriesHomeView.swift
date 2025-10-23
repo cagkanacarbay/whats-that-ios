@@ -21,24 +21,9 @@ struct DiscoveriesHomeView: View {
     private let onSettings: (() -> Void)?
 
     @StateObject private var viewModel: DiscoveryFeedViewModel
+    @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @State private var scrollOffset: CGFloat = 0
-    @State private var detailContext: DiscoveryDetailContext?
-    @State private var detailProgress: CGFloat = 0
-    @State private var detailDismissProgress: CGFloat = 0
-    @State private var detailContentOpacity: Double = 0
-    @State private var detailIsSettled = false
-    @State private var detailIsClosing = false
-    @State private var detailIsInteracting = false
-    @State private var detailDragTranslation: CGSize = .zero
-    @State private var detailDragScale: CGFloat = 1
-    @State private var detailDragRotation: Double = 0
-    @State private var detailDragShadowOpacity: Double = 0
-    @State private var detailDragCornerRadius: CGFloat = 0
-    @State private var detailCloseStartTranslation: CGSize = .zero
-    @State private var detailCloseStartScale: CGFloat = 1
-    @State private var detailCloseStartRotation: Double = 0
-    @State private var hiddenDiscovery: HiddenDiscovery?
     @State private var cardFrames: [Int64: CGRect] = [:]
     @State private var isCardFramesReactionScheduled: Bool = false
     @State private var safeAreaBottomInset: CGFloat = 0
@@ -56,29 +41,6 @@ struct DiscoveriesHomeView: View {
     private let gridHorizontalPadding: CGFloat = 1
     private let gridBottomPadding: CGFloat = 16
     private let refreshIndicatorRevealThreshold: CGFloat = 12
-    private let detailEdgeActivationWidth: CGFloat = 30
-    private let detailDismissalThreshold: CGFloat = 150
-    private let heroAnimator = DiscoveryDetailHeroAnimator()
-
-    private var detailDismissalDistance: CGFloat {
-        if let window = UIApplication.shared
-            .connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows })
-            .first(where: { $0.isKeyWindow })
-        {
-            return max(window.bounds.width, 1)
-        }
-        return max(UIScreen.main.bounds.width, 1)
-    }
-
-    private var dismissInteractor: DiscoveryDetailDismissInteractor {
-        DiscoveryDetailDismissInteractor(
-            edgeActivationWidth: detailEdgeActivationWidth,
-            dismissalDistance: detailDismissalDistance,
-            dismissalThreshold: detailDismissalThreshold
-        )
-    }
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -95,6 +57,9 @@ struct DiscoveriesHomeView: View {
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
+        _detailCoordinator = StateObject(
+            wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
+        )
     }
 
     var body: some View {
@@ -120,7 +85,7 @@ struct DiscoveriesHomeView: View {
                             availableWidth: contentWidth,
                             cardSpacing: gridSpacing,
                             cardFrames: $cardFrames,
-                            hiddenDiscovery: hiddenDiscovery,
+                            activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
                             onLoadMore: { discovery in
                                 await viewModel.loadMoreIfNeeded(currentItem: discovery)
                             },
@@ -205,29 +170,16 @@ struct DiscoveriesHomeView: View {
                         }
                     }
 
-                if let context = detailContext {
+                let detailSnapshot = detailCoordinator.snapshot
+                if detailSnapshot.hasActiveOverlay, let context = detailSnapshot.context {
                     let targetCloseFrame = cardFrames[context.discovery.id] ?? context.startFrame
                     DiscoveryDetailOverlayView(
-                        context: context,
+                        snapshot: detailSnapshot,
                         destinationFrame: targetCloseFrame,
-                        progress: detailProgress,
-                        dismissProgress: detailDismissProgress,
-                        contentOpacity: detailContentOpacity,
-                        isContentReady: detailIsSettled,
-                        isClosing: detailIsClosing,
-                        isInteracting: detailIsInteracting,
-                        gestureTranslation: detailDragTranslation,
-                        gestureScale: detailDragScale,
-                        gestureRotation: detailDragRotation,
-                        gestureShadowOpacity: detailDragShadowOpacity,
-                        gestureCornerRadius: detailDragCornerRadius,
-                        closeStartTranslation: detailCloseStartTranslation,
-                        closeStartScale: detailCloseStartScale,
-                        closeStartRotation: detailCloseStartRotation,
                         backgroundColor: backgroundColor,
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
-                        onClose: { handleDetailDismissal(fromGesture: false) },
+                        onClose: { detailCoordinator.dismiss(reason: .backButton) },
                         onShowOptions: nil
                     )
                     .ignoresSafeArea(edges: .top)
@@ -293,58 +245,17 @@ struct DiscoveriesHomeView: View {
     }
 
     private func handleDiscoverySelection(discovery: DiscoverySummary, imageURL: URL?, startFrame: CGRect) {
-        guard detailContext?.discovery.id != discovery.id || detailIsClosing else {
-            return
-        }
-
         let resolvedImageURL = imageURL ?? self.imageURL(for: discovery)
-        let resolvedFrame: CGRect
-
-        if startFrame.width <= 0 || startFrame.height <= 0 {
-            let fallbackWidth: CGFloat = 200
-            let fallbackHeight: CGFloat = fallbackWidth * 1.2
-            let bounds = UIScreen.main.bounds
-            resolvedFrame = CGRect(
-                x: bounds.midX - (fallbackWidth / 2),
-                y: bounds.midY - (fallbackHeight / 2),
-                width: fallbackWidth,
-                height: fallbackHeight
-            )
-        } else {
-            resolvedFrame = startFrame
-        }
-
-        let sessionId = UUID()
-        let cachedImage = DiscoveryDetailImageCache.shared.image(for: discovery.id)
-
-        hiddenDiscovery = HiddenDiscovery(id: discovery.id, sessionId: sessionId)
-        detailContext = DiscoveryDetailContext(
-            sessionId: sessionId,
+        detailCoordinator.present(
             discovery: discovery,
-            imageURL: resolvedImageURL,
-            startFrame: resolvedFrame,
-            placeholderImage: cachedImage,
-            cardAspectRatio: resolvedFrame.height / max(resolvedFrame.width, 1)
+            cardFrame: startFrame,
+            imageURL: resolvedImageURL
         )
-        detailProgress = 0
-        detailContentOpacity = 0
-        detailIsSettled = false
-        detailIsClosing = false
-        detailIsInteracting = false
-        resetDetailInteraction(animated: false)
-        updateDetailPresentationVisibility()
-        voiceoverController.ensureMetadata(for: discovery)
-        voiceoverController.isDetailOverlayActive = true
-
-        withAnimation(heroAnimator.openAnimation()) {
-            detailProgress = 1
-        }
-        scheduleDetailSettled(for: sessionId)
     }
 
     private func presentPendingDiscoveryIfNeeded() {
         guard let pendingId = pendingDiscoveryId,
-              detailContext == nil
+              !detailCoordinator.snapshot.phase.isActive
         else {
             return
         }
@@ -381,148 +292,12 @@ struct DiscoveriesHomeView: View {
         return frame
     }
 
-    private func resetDetailInteraction(animated: Bool, resetDismissProgress: Bool = true) {
-        let animations = {
-            detailDragTranslation = .zero
-            detailDragScale = 1
-            detailDragRotation = 0
-            detailDragShadowOpacity = 0
-            detailDragCornerRadius = 0
-            if resetDismissProgress {
-                detailDismissProgress = 0
-            }
-        }
-
-        if animated {
-            withAnimation(.interpolatingSpring(mass: 1, stiffness: 100, damping: 15)) {
-                animations()
-            }
-        } else {
-            animations()
-        }
-
-        detailIsInteracting = false
-    }
-
-    private func updateDetailPresentationVisibility() {
-        let shouldShow = !detailIsClosing && detailIsSettled
-        let targetOpacity: Double = shouldShow ? 1 : 0
-        guard detailContentOpacity != targetOpacity else { return }
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            detailContentOpacity = targetOpacity
-        }
-    }
-
-    private func scheduleDetailSettled(for sessionId: UUID) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + heroAnimator.openDuration) {
-            guard detailContext?.sessionId == sessionId,
-                  !detailIsClosing,
-                  !detailIsInteracting
-            else { return }
-
-            if !detailIsSettled {
-                detailIsSettled = true
-                updateDetailPresentationVisibility()
-            }
-        }
-    }
-
     private func handleDetailDragChanged(_ value: DragGesture.Value) {
-        guard detailContext != nil, !detailIsClosing else { return }
-
-        if !detailIsInteracting {
-            guard dismissInteractor.canBeginInteraction(startLocation: value.startLocation, translation: value.translation) else {
-                return
-            }
-            detailIsInteracting = true
-            if detailIsSettled {
-                detailIsSettled = false
-                updateDetailPresentationVisibility()
-            }
-        }
-
-        guard detailIsInteracting else { return }
-
-        let metrics = dismissInteractor.metrics(for: value.translation)
-        detailDragTranslation = metrics.translation
-        detailDragScale = metrics.scale
-        detailDragRotation = metrics.rotation
-        detailDragCornerRadius = metrics.cornerRadius
-        detailDragShadowOpacity = metrics.shadowOpacity
-        let dismissalProgress = min(
-            max(metrics.translation.width / max(detailDismissalDistance, 1), 0),
-            1
-        )
-        detailDismissProgress = dismissalProgress
+        detailCoordinator.updateDrag(value)
     }
 
     private func handleDetailDragEnded(_ value: DragGesture.Value) {
-        guard detailIsInteracting else { return }
-        detailIsInteracting = false
-
-        let shouldDismiss = dismissInteractor.shouldDismiss(
-            translation: value.translation,
-            predictedTranslation: value.predictedEndTranslation
-        )
-
-        if shouldDismiss {
-            detailCloseStartTranslation = detailDragTranslation
-            detailCloseStartScale = detailDragScale
-            detailCloseStartRotation = detailDragRotation
-            detailDismissProgress = 1
-            resetDetailInteraction(animated: true, resetDismissProgress: false)
-            handleDetailDismissal(fromGesture: true)
-        } else {
-            resetDetailInteraction(animated: true)
-            if let sessionId = detailContext?.sessionId {
-                scheduleDetailSettled(for: sessionId)
-            }
-        }
-    }
-
-    private func handleDetailDismissal(fromGesture: Bool = false) {
-        guard let context = detailContext else { return }
-
-        detailIsInteracting = false
-        if !fromGesture {
-            // Back button dismissal should close from the expanded state.
-            detailCloseStartTranslation = .zero
-            detailCloseStartScale = 1
-            detailCloseStartRotation = 0
-        }
-        detailDismissProgress = 1
-        resetDetailInteraction(animated: true, resetDismissProgress: false)
-        detailIsClosing = true
-        detailIsSettled = false
-        updateDetailPresentationVisibility()
-
-        withAnimation(heroAnimator.closeAnimation()) {
-            detailProgress = 0
-        }
-
-        let closingSessionId = context.sessionId
-        DispatchQueue.main.asyncAfter(deadline: .now() + heroAnimator.closeDuration + 0.1) {
-            if detailContext?.sessionId == closingSessionId {
-                detailContext = nil
-                detailIsClosing = false
-                detailProgress = 0
-                detailContentOpacity = 0
-                detailIsSettled = false
-            } else if detailContext == nil {
-                detailIsClosing = false
-                detailProgress = 0
-                detailContentOpacity = 0
-                detailIsSettled = false
-            }
-
-            detailIsInteracting = false
-            if hiddenDiscovery?.sessionId == closingSessionId {
-                hiddenDiscovery = nil
-            }
-            detailDismissProgress = 0
-            voiceoverController.isDetailOverlayActive = false
-        }
+        detailCoordinator.endDrag(value)
     }
 
     private func updateSafeAreaBottomInsetIfNeeded(_ value: CGFloat) {

@@ -3,7 +3,7 @@ import WhatsThatDomain
 import WhatsThatShared
 import UIKit
 
-struct VoiceoverPlayerBar: View {
+struct VoiceoverPersistentPlayerView: View {
     @ObservedObject private var controller: VoiceoverPlaybackController
     let discovery: DiscoverySummary
     let imageURL: URL?
@@ -30,36 +30,10 @@ struct VoiceoverPlayerBar: View {
     }
 
     var body: some View {
-        VStack(spacing: BrandSpacing.medium) {
-            HStack(spacing: BrandSpacing.medium) {
-                artwork
+        HStack(spacing: BrandSpacing.medium) {
+            artwork
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(discovery.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(2)
-                    if let subtitle = playbackBindings.subtitleText {
-                        Text(subtitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                Button(action: { controller.stop() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.16))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            VStack(spacing: BrandSpacing.small) {
+            VStack(spacing: 6) {
                 Slider(
                     value: playbackBindings.sliderBinding,
                     in: 0...playbackBindings.sliderRangeUpperBound,
@@ -69,46 +43,48 @@ struct VoiceoverPlayerBar: View {
 
                 HStack {
                     Text(formatTime(playbackBindings.currentSliderValue))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(formatTime(controller.duration ?? 0))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            HStack(spacing: BrandSpacing.medium) {
+            HStack(spacing: BrandSpacing.small) {
                 Button(action: handlePrimaryAction) {
                     Image(systemName: playbackBindings.primaryActionIcon)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(Color.white)
-                        .frame(width: 56, height: 56)
+                        .frame(width: 36, height: 36)
                         .background(BrandColors.Dark.primaryAction)
                         .clipShape(Circle())
+                        .accessibilityLabel(primaryActionAccessibilityLabel)
                 }
                 .buttonStyle(.plain)
 
-                if case let .failed(id, message) = controller.playbackState, id == discovery.id {
-                    Text(message ?? "Playback failed")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(2)
+                Button(action: { controller.stop() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.18))
+                        .clipShape(Circle())
+                        .accessibilityLabel("Close player")
                 }
-
-                Spacer()
+                .buttonStyle(.plain)
             }
         }
-        .padding(BrandSpacing.medium)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
-        .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 10)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, BrandSpacing.large)
+        .padding(.vertical, BrandSpacing.medium)
+        .background(.thinMaterial)
         .animation(.easeInOut, value: controller.playbackState)
     }
 
     private var artwork: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 8)
                 .fill(Color.gray.opacity(0.25))
 
             if let imageURL {
@@ -118,7 +94,7 @@ struct VoiceoverPlayerBar: View {
                 ) { phase in
                     switch phase {
                     case .success(let platformImage):
-                        platformImageView(for: platformImage)
+                        Image(uiImage: platformImage)
                             .resizable()
                             .scaledToFill()
                     case .failure:
@@ -128,23 +104,20 @@ struct VoiceoverPlayerBar: View {
                             .progressViewStyle(.circular)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 fallbackIcon
             }
         }
-        .frame(width: 60, height: 60)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(width: 40, height: 40)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityHidden(true)
     }
 
     private var fallbackIcon: some View {
         Image(systemName: "waveform")
-            .font(.system(size: 18))
+            .font(.system(size: 14))
             .foregroundStyle(Color.secondary)
-    }
-
-    private func platformImageView(for image: DiscoveryPlatformImage) -> Image {
-        Image(uiImage: image)
     }
 
     private func handleSliderEditingChanged(_ isEditing: Bool) {
@@ -162,6 +135,15 @@ struct VoiceoverPlayerBar: View {
             controller.resume()
         default:
             controller.togglePlayback(for: discovery)
+        }
+    }
+
+    private var primaryActionAccessibilityLabel: String {
+        switch controller.playbackState {
+        case let .playing(id) where id == discovery.id:
+            return "Pause"
+        default:
+            return "Play"
         }
     }
 

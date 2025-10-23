@@ -19,6 +19,7 @@ struct MainTabView: View {
     @State private var awaitingSummaryId: Int64?
     @State private var summaryFallbackTask: Task<Void, Never>?
     @State private var activeOverlayTab: Tab?
+    @StateObject private var playerInsetStore = VoiceoverPlayerInsetStore()
 
     private let feedUseCase: DiscoveryFeedUseCase
     private let onSignOut: () -> Void
@@ -79,7 +80,7 @@ struct MainTabView: View {
                     Label("Upload", systemImage: "square.and.arrow.up")
                 }
             }
-
+        
             if let overlayTab = activeOverlayTab,
                let overlayViewModel = viewModel(for: overlayTab),
                shouldShowOverlay(for: overlayViewModel.flowState)
@@ -94,6 +95,18 @@ struct MainTabView: View {
                 .zIndex(1)
             }
         }
+        // Attach the voiceover bar to the bottom only when needed.
+        .safeAreaInset(edge: .bottom) {
+            if shouldShowPlayerInset {
+                VoiceoverPlayerHost(
+                    controller: voiceoverController,
+                    overlayPhase: activeOverlayPhase,
+                    imageURLResolver: imageURL(for:)
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .environmentObject(playerInsetStore)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
             uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
@@ -219,5 +232,47 @@ struct MainTabView: View {
         if !shouldShowOverlay(for: phase) {
             activeOverlayTab = nil
         }
+    }
+
+    private var activeOverlayPhase: DiscoveryCreationPhase? {
+        guard let tab = activeOverlayTab else { return nil }
+        switch tab {
+        case .camera:
+            return cameraViewModel.flowState.phase
+        case .upload:
+            return uploadViewModel.flowState.phase
+        case .discoveries:
+            return nil
+        }
+    }
+
+    private var shouldShowPlayerInset: Bool {
+        // Only in the Discoveries tab context.
+        guard selectedTab == .discoveries else { return false }
+
+        // Hide during capture/selection/confirmation stages of the creation overlay.
+        if let phase = activeOverlayPhase {
+            switch phase {
+            case .capturingInitial, .capturingRetake, .selectingInitial, .selectingRetake, .confirming, .requestingPermissions:
+                return false
+            case .analyzing, .idle, .cancelled, .error:
+                break
+            }
+        }
+
+        // Only when the player has something to show.
+        switch voiceoverController.playbackState {
+        case .idle, .unavailable:
+            return false
+        default:
+            return voiceoverController.currentDiscovery != nil
+        }
+    }
+
+    private func imageURL(for discovery: DiscoverySummary) -> URL? {
+        guard let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+            return nil
+        }
+        return URL(string: path)
     }
 }

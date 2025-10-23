@@ -162,6 +162,7 @@ private struct DiscoveryDetailContentView: View {
     let scrollOverlayOpacity: Double
     let overlayNamespace: Namespace.ID
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
+    // Player inset store is not required when using a bottom safeAreaInset.
     @Binding var scrollOffset: CGFloat
     @State private var baselineOffset: CGFloat?
 
@@ -302,14 +303,7 @@ private struct DiscoveryDetailContentView: View {
         palette.textPrimary
     }
 
-    private var additionalBottomPadding: CGFloat {
-        switch voiceoverController.playbackState {
-        case .idle, .unavailable:
-            return 0
-        default:
-            return 132
-        }
-    }
+    private var additionalBottomPadding: CGFloat { 0 }
 
     @ViewBuilder
     private func detailDescriptionView(isReady: Bool) -> some View {

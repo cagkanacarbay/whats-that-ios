@@ -1,5 +1,11 @@
 import Foundation
+import OSLog
 import WhatsThatDomain
+
+private let discoveryFeedLogger = Logger(
+    subsystem: "com.example.whatsthatios",
+    category: "DiscoveryFeedViewModel"
+)
 
 @MainActor
 public final class DiscoveryFeedViewModel: ObservableObject {
@@ -39,6 +45,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
     }
 
     public func refresh() async {
+        discoveryFeedLogger.info("refresh() invoked. isRefreshing=\(self.isRefreshing, privacy: .public)")
         await fetchPage(mode: .refresh)
     }
 
@@ -48,31 +55,32 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
     public func loadMoreIfNeeded(currentItem item: DiscoverySummary?) async {
         guard let item else { return }
-        guard hasMore else { return }
+        guard self.hasMore else { return }
 
-        let thresholdIndex = discoveries.index(discoveries.endIndex, offsetBy: -4, limitedBy: discoveries.startIndex) ?? discoveries.startIndex
-        if discoveries.indices.contains(thresholdIndex), discoveries[thresholdIndex].id == item.id {
+        let thresholdIndex = self.discoveries.index(self.discoveries.endIndex, offsetBy: -4, limitedBy: self.discoveries.startIndex) ?? self.discoveries.startIndex
+        if self.discoveries.indices.contains(thresholdIndex), self.discoveries[thresholdIndex].id == item.id {
             await fetchPage(mode: .loadMore)
-        } else if item.id == discoveries.last?.id {
+        } else if item.id == self.discoveries.last?.id {
             await fetchPage(mode: .loadMore)
         }
     }
 
     private func fetchPage(mode: FetchMode, force: Bool = false) async {
-        if isFetchingPage && !force {
+        if self.isFetchingPage && !force {
             return
         }
 
-        isFetchingPage = true
-        let previousLoadState = loadState
+        self.isFetchingPage = true
+        let previousLoadState = self.loadState
+        discoveryFeedLogger.info("fetchPage start mode=\(mode.logDescription, privacy: .public) force=\(force, privacy: .public)")
 
         switch mode {
         case .initial:
-            loadState = .loading
+            self.loadState = .loading
         case .refresh:
-            isRefreshing = true
+            self.isRefreshing = true
         case .loadMore:
-            isPaginating = true
+            self.isPaginating = true
         }
 
         defer {
@@ -80,50 +88,55 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             case .initial:
                 break
             case .refresh:
-                isRefreshing = false
+                self.isRefreshing = false
             case .loadMore:
-                isPaginating = false
+                self.isPaginating = false
             }
 
-            isFetchingPage = false
+            self.isFetchingPage = false
+            discoveryFeedLogger.info("fetchPage finished mode=\(mode.logDescription, privacy: .public) isRefreshing=\(self.isRefreshing, privacy: .public) isPaginating=\(self.isPaginating, privacy: .public)")
         }
 
         let cursor: Int64?
         switch mode {
         case .loadMore:
-            cursor = discoveries.last?.id
+            cursor = self.discoveries.last?.id
         case .initial, .refresh:
             cursor = nil
         }
 
         do {
-            errorMessage = nil
+            self.errorMessage = nil
 
             if Task.isCancelled {
-                loadState = previousLoadState
+                self.loadState = previousLoadState
+                discoveryFeedLogger.notice("fetchPage cancelled before request mode=\(mode.logDescription, privacy: .public)")
                 return
             }
 
-            let page = try await feedUseCase.loadPage(limit: pageSize, before: cursor)
+            let page = try await self.feedUseCase.loadPage(limit: self.pageSize, before: cursor)
 
             switch mode {
             case .initial, .refresh:
-                applyNewPage(page, replaceExisting: true)
+                self.applyNewPage(page, replaceExisting: true)
             case .loadMore:
-                applyNewPage(page, replaceExisting: false)
+                self.applyNewPage(page, replaceExisting: false)
             }
 
-            hasMore = page.count == pageSize
-            loadState = discoveries.isEmpty ? .idle : .loaded
+            self.hasMore = page.count == self.pageSize
+            self.loadState = self.discoveries.isEmpty ? .idle : .loaded
+            discoveryFeedLogger.debug("fetchPage succeeded mode=\(mode.logDescription, privacy: .public) received=\(page.count, privacy: .public) total=\(self.discoveries.count, privacy: .public) hasMore=\(self.hasMore, privacy: .public)")
         } catch is CancellationError {
-            loadState = previousLoadState
+            self.loadState = previousLoadState
+            discoveryFeedLogger.notice("fetchPage received CancellationError mode=\(mode.logDescription, privacy: .public)")
             return
         } catch {
-            errorMessage = error.localizedDescription
-            if discoveries.isEmpty {
-                loadState = .failed(error.localizedDescription)
+            self.errorMessage = error.localizedDescription
+            discoveryFeedLogger.error("fetchPage failed mode=\(mode.logDescription, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            if self.discoveries.isEmpty {
+                self.loadState = .failed(error.localizedDescription)
             } else {
-                loadState = .loaded
+                self.loadState = .loaded
             }
         }
     }
@@ -134,12 +147,12 @@ public final class DiscoveryFeedViewModel: ObservableObject {
         if replaceExisting {
             deduplicated = page.uniqued()
         } else {
-            let existingIds = Set(discoveries.map(\.id))
+            let existingIds = Set(self.discoveries.map(\.id))
             let filtered = page.filter { !existingIds.contains($0.id) }
-            deduplicated = discoveries + filtered
+            deduplicated = self.discoveries + filtered
         }
 
-        discoveries = deduplicated
+        self.discoveries = deduplicated
     }
 }
 
@@ -176,5 +189,16 @@ private extension DiscoveryFeedViewModel {
         case initial
         case refresh
         case loadMore
+
+        var logDescription: String {
+            switch self {
+            case .initial:
+                return "initial"
+            case .refresh:
+                return "refresh"
+            case .loadMore:
+                return "loadMore"
+            }
+        }
     }
 }

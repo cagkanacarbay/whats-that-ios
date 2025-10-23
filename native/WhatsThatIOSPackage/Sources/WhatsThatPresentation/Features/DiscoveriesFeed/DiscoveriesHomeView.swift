@@ -5,6 +5,12 @@ import UIKit
 #if canImport(MarkdownUI)
 import MarkdownUI
 #endif
+import OSLog
+
+private let discoveriesHomeLogger = Logger(
+    subsystem: "com.example.whatsthatios",
+    category: "DiscoveriesHomeView"
+)
 
 struct DiscoveriesHomeView: View {
     private let feedUseCase: DiscoveryFeedUseCase
@@ -49,6 +55,7 @@ struct DiscoveriesHomeView: View {
     private let gridSpacing: CGFloat = 1
     private let gridHorizontalPadding: CGFloat = 1
     private let gridBottomPadding: CGFloat = 16
+    private let refreshIndicatorRevealThreshold: CGFloat = 12
     private let detailEdgeActivationWidth: CGFloat = 30
     private let detailDismissalThreshold: CGFloat = 150
     private let heroAnimator = DiscoveryDetailHeroAnimator()
@@ -106,18 +113,7 @@ struct DiscoveriesHomeView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: metrics.headerSpacerHeight)
-
-                        if viewModel.isRefreshing {
-                            HStack(spacing: BrandSpacing.small) {
-                                ProgressView()
-                                    .progressViewStyle(.circular)
-                                Text("Checking for new discoveries...")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, BrandSpacing.medium)
-                        }
+                        refreshHeaderView(metrics: metrics)
 
                         DiscoveriesGridView(
                             viewModel: viewModel,
@@ -153,6 +149,9 @@ struct DiscoveriesHomeView: View {
                     guard let rawValue else { return }
                     let adjusted = rawValue - metrics.headerSpacerHeight
                     scrollOffset = adjusted
+                    if adjusted > refreshIndicatorRevealThreshold {
+                        discoveriesHomeLogger.debug("Pull distance above threshold: \(adjusted, privacy: .public)")
+                    }
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
@@ -164,6 +163,9 @@ struct DiscoveriesHomeView: View {
                     guard let summary = newValue else { return }
                     viewModel.upsert(summary)
                     pendingCreatedSummary = nil
+                }
+                .onChange(of: viewModel.isRefreshing) { _, newValue in
+                    discoveriesHomeLogger.info("isRefreshing changed: \(newValue, privacy: .public)")
                 }
                 .onChange(of: cardFrames) {
                     // Defer reacting to card frame changes to the next runloop tick.
@@ -246,9 +248,7 @@ struct DiscoveriesHomeView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            VStack(spacing: BrandSpacing.medium) {
-                voiceoverPlayerOverlay
-
+            Group {
                 if viewModel.isPaginating {
                     HStack(spacing: BrandSpacing.small) {
                         ProgressView()
@@ -263,10 +263,10 @@ struct DiscoveriesHomeView: View {
                             .blur(radius: 20)
                     )
                     .clipShape(Capsule())
+                    .padding(.horizontal, BrandSpacing.large)
+                    .padding(.bottom, BrandSpacing.medium)
                 }
             }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.bottom, BrandSpacing.medium + max(safeAreaBottomInset - 8, 0))
         }
         .animation(.easeInOut, value: viewModel.loadState)
         .alert(
@@ -542,34 +542,67 @@ struct DiscoveriesHomeView: View {
         return URL(string: path)
     }
 
-    @ViewBuilder
-    private var voiceoverPlayerOverlay: some View {
-        if shouldShowVoiceoverPlayer,
-           let discovery = voiceoverController.currentDiscovery {
-            VoiceoverPlayerBar(
-                controller: voiceoverController,
-                discovery: discovery,
-                imageURL: imageURL(for: discovery)
-            )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
-    }
-
-    private var shouldShowVoiceoverPlayer: Bool {
-        switch voiceoverController.playbackState {
-        case .idle, .unavailable:
-            return false
-        default:
-            return voiceoverController.currentDiscovery != nil
-        }
-    }
-
     private var detailEdgeDragGesture: AnyGesture<DragGesture.Value> {
         AnyGesture(
             DragGesture(minimumDistance: 5, coordinateSpace: .global)
                 .onChanged(handleDetailDragChanged)
                 .onEnded(handleDetailDragEnded)
         )
+    }
+
+    @ViewBuilder
+    private func refreshHeaderView(metrics: DiscoveriesHeaderMetrics) -> some View {
+        let pullDistance = max(scrollOffset, 0)
+        let shouldShowIndicator = viewModel.isRefreshing || pullDistance > refreshIndicatorRevealThreshold
+        let indicatorOpacity: Double = {
+            if viewModel.isRefreshing {
+                return 1
+            } else if shouldShowIndicator {
+                let pullBeyondThreshold = max(Double(pullDistance - refreshIndicatorRevealThreshold), 0)
+                return min(max(pullBeyondThreshold / 60, 0.25), 1)
+            } else {
+                return 0
+            }
+        }()
+
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: metrics.headerSpacerHeight)
+
+            if shouldShowIndicator {
+                refreshIndicator(opacity: indicatorOpacity)
+                    .padding(.top, BrandSpacing.small)
+                    .padding(.bottom, BrandSpacing.medium)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                EmptyView()
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: shouldShowIndicator)
+        .animation(.easeInOut(duration: 0.18), value: indicatorOpacity)
+    }
+
+    private func refreshIndicator(opacity: Double) -> some View {
+        ProgressView()
+            .progressViewStyle(.circular)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, BrandSpacing.medium)
+            .padding(.vertical, BrandSpacing.small)
+            .background(
+                backgroundColor
+                    .opacity(colorScheme == .dark ? 0.95 : 0.98)
+            )
+            .clipShape(Capsule())
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.2),
+                radius: 10,
+                x: 0,
+                y: 4
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Refreshing discoveries")
+            .opacity(opacity)
+            .allowsHitTesting(false)
     }
 
     private var backgroundColor: Color {

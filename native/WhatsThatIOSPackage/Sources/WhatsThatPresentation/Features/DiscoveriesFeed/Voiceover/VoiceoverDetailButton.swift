@@ -18,7 +18,11 @@ struct VoiceoverDetailButton: View {
     }
 
     var body: some View {
-        Button(action: { controller.togglePlayback(for: discovery) }) {
+        Button(action: {
+            // Do nothing when narration is unavailable
+            guard canPlay else { return }
+            controller.togglePlayback(for: discovery)
+        }) {
             HStack(spacing: BrandSpacing.small) {
                 if isLoading {
                     ProgressView()
@@ -42,7 +46,7 @@ struct VoiceoverDetailButton: View {
             .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(isLoading)
+        .disabled(!canPlay)
     }
 
     private var asset: DiscoveryVoiceoverAsset? {
@@ -55,6 +59,11 @@ struct VoiceoverDetailButton: View {
 
     private var isUnavailable: Bool {
         asset?.status == .missing
+    }
+
+    private var canPlay: Bool {
+        // Only allow taps if not loading and narration is available/unknown
+        !isLoading && !isUnavailable
     }
 
     private var playbackIconName: String {

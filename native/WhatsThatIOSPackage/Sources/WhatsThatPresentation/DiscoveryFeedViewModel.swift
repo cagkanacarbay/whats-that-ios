@@ -46,7 +46,17 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
     public func refresh() async {
         discoveryFeedLogger.info("refresh() invoked. isRefreshing=\(self.isRefreshing, privacy: .public)")
-        await fetchPage(mode: .refresh)
+        await withCheckedContinuation { continuation in
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else {
+                    continuation.resume()
+                    return
+                }
+
+                await self.fetchPage(mode: .refresh)
+                continuation.resume()
+            }
+        }
     }
 
     public func clearError() {
@@ -66,19 +76,16 @@ public final class DiscoveryFeedViewModel: ObservableObject {
     }
 
     private func fetchPage(mode: FetchMode, force: Bool = false) async {
-        if Task.isCancelled {
-            discoveryFeedLogger.notice("fetchPage called while task is cancelled mode=\(mode.logDescription, privacy: .public)")
-            return
-        }
-
         if self.isFetchingPage && !force {
             discoveryFeedLogger.notice("fetchPage skipped due to in-flight request mode=\(mode.logDescription, privacy: .public)")
             return
         }
 
         self.isFetchingPage = true
-        let previousLoadState = self.loadState
         discoveryFeedLogger.info("fetchPage start mode=\(mode.logDescription, privacy: .public) force=\(force, privacy: .public)")
+        if Task.isCancelled {
+            discoveryFeedLogger.warning("fetchPage invoked with cancelled task mode=\(mode.logDescription, privacy: .public)")
+        }
 
         switch mode {
         case .initial:
@@ -126,15 +133,23 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             self.hasMore = page.count == self.pageSize
             self.loadState = self.discoveries.isEmpty ? .idle : .loaded
             discoveryFeedLogger.debug("fetchPage succeeded mode=\(mode.logDescription, privacy: .public) received=\(page.count, privacy: .public) total=\(self.discoveries.count, privacy: .public) hasMore=\(self.hasMore, privacy: .public)")
-        } catch is CancellationError {
-            self.loadState = previousLoadState
-            discoveryFeedLogger.notice("fetchPage received CancellationError mode=\(mode.logDescription, privacy: .public)")
-            return
         } catch {
-            self.errorMessage = error.localizedDescription
-            discoveryFeedLogger.error("fetchPage failed mode=\(mode.logDescription, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            let resolvedError: Error
+            let resolvedMessage: String
+
+            if error is CancellationError {
+                resolvedError = DiscoveryFeedError.failedToLoad
+                resolvedMessage = resolvedError.localizedDescription
+                discoveryFeedLogger.error("fetchPage unexpectedly cancelled mode=\(mode.logDescription, privacy: .public) treatingAsError=\(resolvedMessage, privacy: .public)")
+            } else {
+                resolvedError = error
+                resolvedMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                discoveryFeedLogger.error("fetchPage failed mode=\(mode.logDescription, privacy: .public) error=\(resolvedMessage, privacy: .public)")
+            }
+
+            self.errorMessage = resolvedMessage
             if self.discoveries.isEmpty {
-                self.loadState = .failed(error.localizedDescription)
+                self.loadState = .failed(resolvedMessage)
             } else {
                 self.loadState = .loaded
             }

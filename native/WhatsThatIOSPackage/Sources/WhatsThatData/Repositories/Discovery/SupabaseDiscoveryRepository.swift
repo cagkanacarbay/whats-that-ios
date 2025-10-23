@@ -54,6 +54,10 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistory
             throw DiscoveryFeedError.unauthorized
         }
 
+        supabaseDiscoveryLogger.debug(
+            "fetchDiscoveries start limit=\(limit, privacy: .public) cursor=\(String(describing: discoveryId), privacy: .public) taskCancelled=\(Task.isCancelled, privacy: .public)"
+        )
+
         do {
             let params = GetDiscoveriesParams(
                 p_limit: limit,
@@ -97,10 +101,25 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistory
                 return summaries.sorted(by: { $0.capturedAt > $1.capturedAt })
             }
         } catch {
+            let nsError = error as NSError
             if error.isCancellationError {
-                throw CancellationError()
+                supabaseDiscoveryLogger.error(
+                    """
+                    Discovery fetch cancelled unexpectedly: \(error.localizedDescription, privacy: .public) \
+                    domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) \
+                    underlying=\(String(describing: nsError.userInfo[NSUnderlyingErrorKey]), privacy: .public) \
+                    taskCancelled=\(Task.isCancelled, privacy: .public)
+                    """
+                )
+            } else {
+                supabaseDiscoveryLogger.error(
+                    """
+                    Failed to fetch discoveries: \(error.localizedDescription, privacy: .public) \
+                    domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) \
+                    underlying=\(String(describing: nsError.userInfo[NSUnderlyingErrorKey]), privacy: .public)
+                    """
+                )
             }
-            supabaseDiscoveryLogger.error("Failed to fetch discoveries: \(error.localizedDescription, privacy: .public)")
             throw DiscoveryFeedError.failedToLoad
         }
     }

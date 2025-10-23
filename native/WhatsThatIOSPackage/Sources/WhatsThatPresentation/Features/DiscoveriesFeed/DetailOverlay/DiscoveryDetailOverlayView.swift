@@ -98,8 +98,10 @@ struct DiscoveryDetailOverlayView: View {
                     targetCornerRadius: combinedCornerRadius,
                     scale: appliedScale
                 )
-                let isChromeReady = snapshot.isContentReady && !snapshot.isClosing
-                let detailOpacity = isChromeReady ? snapshot.contentOpacity : 0
+                let closePreparation = snapshot.isClosing ? max(0, min(snapshot.closePreparationProgress, 1)) : 0
+                let isChromeReady = snapshot.isContentReady && (snapshot.isClosing ? closePreparation < 1 : true)
+                let detailOpacityBase = isChromeReady ? snapshot.contentOpacity : 0
+                let detailOpacity = detailOpacityBase * (snapshot.isClosing ? max(0, 1 - closePreparation) : 1)
                 let headerOpacityRaw: Double = {
                     guard !snapshot.isClosing && !snapshot.isInteracting else { return 0 }
                     let start: CGFloat = 0.88
@@ -108,7 +110,7 @@ struct DiscoveryDetailOverlayView: View {
                 }()
                 let headerOverlayBaseOpacity: Double = {
                     if isChromeReady {
-                        return snapshot.isClosing ? 0 : 1
+                        return 1
                     }
                     return headerOpacityRaw
                 }()
@@ -119,9 +121,7 @@ struct DiscoveryDetailOverlayView: View {
                     isClosing: snapshot.isClosing,
                     isInteracting: snapshot.isInteracting
                 )
-                let collapseProgress: CGFloat = snapshot.isClosing ? 1 : 0
-                let isCollapseActive = collapseProgress > 0.0001
-                let cardWidth: CGFloat = snapshot.isClosing ? containerSize.width : geometry.size.width
+                let cardWidth: CGFloat = geometry.size.width + (containerSize.width - geometry.size.width) * closePreparation
                 let targetImageHeight = geometry.imageHeight
                 let closingImageHeight: CGFloat = {
                     let aspectHeight = cardWidth * context.cardAspectRatio
@@ -129,17 +129,24 @@ struct DiscoveryDetailOverlayView: View {
                     let maximumHeight = containerSize.height
                     return min(max(aspectHeight, minimumHeight), maximumHeight)
                 }()
-                let imageHeightForView = snapshot.isClosing ? closingImageHeight : targetImageHeight
+                let imageHeightForView = snapshot.isClosing
+                    ? targetImageHeight + (closingImageHeight - targetImageHeight) * closePreparation
+                    : targetImageHeight
                 let expandedCardHeight = geometry.size.height
                 let collapsedCardHeight = imageHeightForView
-                let cardHeight = snapshot.isClosing ? collapsedCardHeight : expandedCardHeight
-                let cardBackgroundOpacity = snapshot.isClosing ? 0 : Double(max(0, min(1 - collapseProgress, 1)))
-                let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
-                let headerOffset: CGFloat = (snapshot.isClosing || snapshot.isInteracting || isCollapseActive) ? 0 : min(scrollOffset, 0)
-                let heroTopInset = snapshot.isClosing ? 0 : safeAreaInsets.top * (1 - collapseProgress)
+                let cardHeight = expandedCardHeight + (collapsedCardHeight - expandedCardHeight) * closePreparation
+                let cardBackgroundOpacity = Double(max(0, min(1 - closePreparation, 1)))
+                let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady)
+                    ? 0
+                    : max(scrollOffset, 0) * (1 - closePreparation)
+                let headerOffset: CGFloat = (snapshot.isClosing || snapshot.isInteracting)
+                    ? 0
+                    : min(scrollOffset, 0) * (1 - closePreparation)
+                let heroTopInset = safeAreaInsets.top * (1 - closePreparation)
                 let heroHeaderHeight = imageHeightForView + heroTopInset
-                let heroOverlayOpacity: Double = snapshot.isClosing ? 0 : overlayOpacities.hero
-                let scrollOverlayOpacity: Double = snapshot.isClosing ? 0 : overlayOpacities.scroll
+                let fadeMultiplier = snapshot.isClosing ? max(0, 1 - closePreparation) : 1
+                let heroOverlayOpacity: Double = overlayOpacities.hero * fadeMultiplier
+                let scrollOverlayOpacity: Double = overlayOpacities.scroll * fadeMultiplier
 
                 let detailLayout = DiscoveryDetailView.LayoutConfiguration(
                     cardSize: CGSize(width: cardWidth, height: cardHeight),

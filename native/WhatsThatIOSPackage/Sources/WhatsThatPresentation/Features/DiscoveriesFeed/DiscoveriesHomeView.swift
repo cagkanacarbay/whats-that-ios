@@ -98,7 +98,6 @@ struct DiscoveriesHomeView: View {
                             }
                         )
                         .padding(.horizontal, gridHorizontalPadding)
-                        .padding(.top, metrics.gridTopPadding)
                         .padding(.bottom, gridBottomPadding)
                     }
                 }
@@ -113,11 +112,7 @@ struct DiscoveriesHomeView: View {
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
                     let adjusted = rawValue - metrics.headerSpacerHeight
-                    let overscroll = max(adjusted - metrics.gridTopPadding, 0)
                     scrollOffset = adjusted
-                    if overscroll > refreshIndicatorRevealThreshold {
-                        discoveriesHomeLogger.debug("Pull distance above threshold: \(overscroll, privacy: .public)")
-                    }
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
@@ -344,14 +339,14 @@ struct DiscoveriesHomeView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(height: metrics.headerSpacerHeight)
+            Color.clear
+                .frame(height: metrics.gridTopPadding)
         }
         .frame(maxWidth: .infinity)
-        .overlay(alignment: .top) {
+        .overlay {
             if shouldShowIndicator {
                 refreshIndicator(opacity: indicatorOpacity)
-                    .padding(.top, BrandSpacing.small)
-                    .padding(.bottom, BrandSpacing.medium)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.opacity.combined(with: .scale))
             }
         }
         .animation(.easeInOut(duration: 0.18), value: shouldShowIndicator)
@@ -362,7 +357,7 @@ struct DiscoveriesHomeView: View {
         ProgressView()
             .progressViewStyle(.circular)
             .controlSize(.large)
-            .scaleEffect(1.3, anchor: .center)
+            .scaleEffect(1.1, anchor: .center)
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Refreshing discoveries")

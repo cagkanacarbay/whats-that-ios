@@ -17,7 +17,7 @@ final class DiscoveryFeedViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.discoveries.isEmpty)
     }
 
-    func testRefreshIgnoresCancellationErrors() async {
+    func testRefreshSurfacesCancellationErrors() async {
         let repository = QueueingDiscoveryRepository()
         let sample = DiscoverySummary(
             id: 1,
@@ -42,7 +42,7 @@ final class DiscoveryFeedViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.discoveries, [sample])
         XCTAssertEqual(viewModel.loadState, .loaded)
-        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.errorMessage, DiscoveryFeedError.failedToLoad.errorDescription)
         XCTAssertFalse(viewModel.isRefreshing)
     }
 }

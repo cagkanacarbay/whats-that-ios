@@ -14,7 +14,6 @@ struct DiscoveryDetailOverlayView: View {
     let onClose: () -> Void
     let onShowOptions: (() -> Void)?
     @State private var scrollOffset: CGFloat = 0
-    @State private var closeBaselineImageHeight: CGFloat?
 
     init(
         snapshot: DiscoveryDetailOverlaySnapshot,
@@ -65,26 +64,7 @@ struct DiscoveryDetailOverlayView: View {
                 enforceAspectForImage: snapshot.isClosing,
                 isClosing: snapshot.isClosing
             )
-            let openHeroImageHeight: CGFloat = {
-                guard snapshot.isClosing else { return geometry.imageHeight }
-                let openGeometry = DiscoveryDetailHeroGeometry(
-                    startFrame: context.startFrame,
-                    containerSize: containerSize,
-                    containerOrigin: containerOrigin,
-                    targetAspectRatio: context.cardAspectRatio,
-                    progress: snapshot.progress,
-                    targetExpandedHeightFraction: DiscoveryDetailLayout.expandedImageHeightFraction,
-                    enforceAspectForImage: false,
-                    isClosing: false
-                )
-                return openGeometry.imageHeight
-            }()
-            let baselineOpenImageHeight = resolvedCloseBaselineHeight(
-                current: openHeroImageHeight,
-                isClosing: snapshot.isClosing
-            )
             let transformProgress = DiscoveryDetailUniformCloseTransform.transformProgress(for: snapshot.progress)
-            let closeTransformProgress: CGFloat = snapshot.isClosing ? transformProgress : 0
 
             ZStack(alignment: .topLeading) {
                 Color.black
@@ -120,12 +100,6 @@ struct DiscoveryDetailOverlayView: View {
                 )
                 let isChromeReady = snapshot.isContentReady && !snapshot.isClosing
                 let detailOpacity = isChromeReady ? snapshot.contentOpacity : 0
-                let normalizedDismiss = max(0, min(snapshot.dismissProgress, 1))
-                let collapseThreshold: CGFloat = 0.005
-                let gestureCollapseProgress: CGFloat = normalizedDismiss > collapseThreshold ? 1 : 0
-                let collapseProgress = snapshot.isClosing ? closeTransformProgress : gestureCollapseProgress
-                let isCollapseActive = collapseProgress > 0.0001
-                let cardBackgroundOpacity = Double(max(0, min(1 - collapseProgress, 1)))
                 let headerOpacityRaw: Double = {
                     guard !snapshot.isClosing && !snapshot.isInteracting else { return 0 }
                     let start: CGFloat = 0.88
@@ -134,7 +108,7 @@ struct DiscoveryDetailOverlayView: View {
                 }()
                 let headerOverlayBaseOpacity: Double = {
                     if isChromeReady {
-                        return (snapshot.isClosing || snapshot.isInteracting) ? 0 : 1
+                        return snapshot.isClosing ? 0 : 1
                     }
                     return headerOpacityRaw
                 }()
@@ -145,34 +119,27 @@ struct DiscoveryDetailOverlayView: View {
                     isClosing: snapshot.isClosing,
                     isInteracting: snapshot.isInteracting
                 )
-                let heroOverlayOpacity = overlayOpacities.hero
-                let scrollOverlayOpacity = overlayOpacities.scroll
+                let collapseProgress: CGFloat = snapshot.isClosing ? 1 : 0
+                let isCollapseActive = collapseProgress > 0.0001
                 let cardWidth: CGFloat = snapshot.isClosing ? containerSize.width : geometry.size.width
                 let targetImageHeight = geometry.imageHeight
-                let imageHeightForView: CGFloat = {
-                    guard snapshot.isClosing else { return targetImageHeight }
-                    let startingScale = DiscoveryDetailUniformCloseTransform.resolvedScale(
-                        transformProgress: 0,
-                        startFrame: destinationFrame,
-                        containerFrame: containerFrame,
-                        initialScale: snapshot.closeStartScale
-                    )
-                    let startVisualHeight = baselineOpenImageHeight * startingScale
-                    let finalVisualHeight = destinationFrame.height
-                    let visualHeight = startVisualHeight
-                        + (finalVisualHeight - startVisualHeight) * closeTransformProgress
-                    let safeScale = max(uniformCloseScale, 0.0001)
-                    return visualHeight / safeScale
+                let closingImageHeight: CGFloat = {
+                    let aspectHeight = cardWidth * context.cardAspectRatio
+                    let minimumHeight = destinationFrame.height
+                    let maximumHeight = containerSize.height
+                    return min(max(aspectHeight, minimumHeight), maximumHeight)
                 }()
+                let imageHeightForView = snapshot.isClosing ? closingImageHeight : targetImageHeight
                 let expandedCardHeight = geometry.size.height
                 let collapsedCardHeight = imageHeightForView
-                let cardHeight = collapsedCardHeight
-                    + (expandedCardHeight - collapsedCardHeight) * (1 - collapseProgress)
-                let effectivePullDown = (snapshot.isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
-
-                let headerOffset = (snapshot.isClosing || snapshot.isInteracting || isCollapseActive) ? 0 : min(scrollOffset, 0)
-                let heroTopInset = safeAreaInsets.top * (1 - collapseProgress)
+                let cardHeight = snapshot.isClosing ? collapsedCardHeight : expandedCardHeight
+                let cardBackgroundOpacity = snapshot.isClosing ? 0 : Double(max(0, min(1 - collapseProgress, 1)))
+                let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
+                let headerOffset: CGFloat = (snapshot.isClosing || snapshot.isInteracting || isCollapseActive) ? 0 : min(scrollOffset, 0)
+                let heroTopInset = snapshot.isClosing ? 0 : safeAreaInsets.top * (1 - collapseProgress)
                 let heroHeaderHeight = imageHeightForView + heroTopInset
+                let heroOverlayOpacity: Double = snapshot.isClosing ? 0 : overlayOpacities.hero
+                let scrollOverlayOpacity: Double = snapshot.isClosing ? 0 : overlayOpacities.scroll
 
                 let detailLayout = DiscoveryDetailView.LayoutConfiguration(
                     cardSize: CGSize(width: cardWidth, height: cardHeight),
@@ -189,7 +156,7 @@ struct DiscoveryDetailOverlayView: View {
                     scrollOverlayOpacity: scrollOverlayOpacity,
                     isChromeReady: isChromeReady,
                     isMarkdownReady: isChromeReady,
-                    isScrollDisabled: !isChromeReady || snapshot.isInteracting || snapshot.isClosing
+                    isScrollDisabled: snapshot.isClosing || snapshot.isInteracting || !isChromeReady
                 )
 
                 let heroCard = DiscoveryDetailView(
@@ -206,7 +173,6 @@ struct DiscoveryDetailOverlayView: View {
                     onClose: onClose,
                     onShowOptions: onShowOptions
                 )
-                .animation(.easeOut(duration: 0.12), value: isCollapseActive)
 
                 heroCard
                     .shadow(
@@ -245,30 +211,6 @@ struct DiscoveryDetailOverlayView: View {
         }
     }
 
-    private func resolvedCloseBaselineHeight(current: CGFloat, isClosing: Bool) -> CGFloat {
-        if isClosing {
-            if let baseline = closeBaselineImageHeight {
-                return baseline
-            } else {
-                scheduleBaselineUpdate(to: current)
-                return current
-            }
-        } else {
-            scheduleBaselineUpdate(to: current)
-            return current
-        }
-    }
-
-    private func scheduleBaselineUpdate(to value: CGFloat) {
-        let threshold: CGFloat = 0.5
-        if let existing = closeBaselineImageHeight, abs(existing - value) < threshold {
-            return
-        }
-        DispatchQueue.main.async {
-            self.closeBaselineImageHeight = value
-        }
-    }
-
     private func resolvedOverlayOpacities(
         detailOpacity: Double,
         baseOpacity: Double,
@@ -276,11 +218,14 @@ struct DiscoveryDetailOverlayView: View {
         isClosing: Bool,
         isInteracting: Bool
     ) -> (hero: Double, scroll: Double) {
-        if isClosing || isInteracting {
+        if isClosing {
             return (hero: baseOpacity, scroll: 0)
         }
         guard isChromeReady else {
             return (hero: baseOpacity, scroll: 0)
+        }
+        if isInteracting {
+            return (hero: baseOpacity, scroll: detailOpacity)
         }
         return (hero: 0, scroll: detailOpacity)
     }

@@ -88,10 +88,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             }
             snapshot.isInteracting = true
             snapshot.phase = .interactiveDismiss
-            if snapshot.isContentReady {
-                snapshot.isContentReady = false
-                updateContentVisibility()
-            }
         }
 
         guard snapshot.isInteracting else { return }
@@ -152,7 +148,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         snapshot.isClosing = true
         snapshot.phase = .closing
         snapshot.isContentReady = false
-        updateContentVisibility()
+        updateContentVisibility(animated: false)
 
         withAnimation(heroAnimator.closeAnimation()) {
             snapshot.progress = 0
@@ -191,13 +187,21 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         return frame
     }
 
-    private func updateContentVisibility() {
+    private func updateContentVisibility(animated: Bool = true) {
         let shouldShow = !snapshot.isClosing && snapshot.isContentReady
         let targetOpacity: Double = shouldShow ? 1 : 0
         guard snapshot.contentOpacity != targetOpacity else { return }
 
-        withAnimation(.easeInOut(duration: 0.18)) {
-            snapshot.contentOpacity = targetOpacity
+        let update = {
+            self.snapshot.contentOpacity = targetOpacity
+        }
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                update()
+            }
+        } else {
+            update()
         }
     }
 

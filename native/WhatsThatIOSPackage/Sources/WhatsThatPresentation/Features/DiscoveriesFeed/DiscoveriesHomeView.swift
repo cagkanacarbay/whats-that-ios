@@ -361,20 +361,9 @@ struct DiscoveriesHomeView: View {
     private func refreshIndicator(opacity: Double) -> some View {
         ProgressView()
             .progressViewStyle(.circular)
+            .controlSize(.large)
+            .scaleEffect(1.3, anchor: .center)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, BrandSpacing.medium)
-            .padding(.vertical, BrandSpacing.small)
-            .background(
-                backgroundColor
-                    .opacity(colorScheme == .dark ? 0.95 : 0.98)
-            )
-            .clipShape(Capsule())
-            .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.2),
-                radius: 10,
-                x: 0,
-                y: 4
-            )
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Refreshing discoveries")
             .opacity(opacity)

@@ -66,6 +66,11 @@ public final class DiscoveryFeedViewModel: ObservableObject {
     }
 
     private func fetchPage(mode: FetchMode, force: Bool = false) async {
+        if Task.isCancelled {
+            discoveryFeedLogger.notice("fetchPage called while task is cancelled mode=\(mode.logDescription, privacy: .public)")
+            return
+        }
+
         if self.isFetchingPage && !force {
             discoveryFeedLogger.notice("fetchPage skipped due to in-flight request mode=\(mode.logDescription, privacy: .public)")
             return
@@ -108,12 +113,6 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
         do {
             self.errorMessage = nil
-
-            if Task.isCancelled {
-                self.loadState = previousLoadState
-                discoveryFeedLogger.notice("fetchPage cancelled before request mode=\(mode.logDescription, privacy: .public)")
-                return
-            }
 
             let page = try await self.feedUseCase.loadPage(limit: self.pageSize, before: cursor)
 

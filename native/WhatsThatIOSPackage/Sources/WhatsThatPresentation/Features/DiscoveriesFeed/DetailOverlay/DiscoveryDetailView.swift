@@ -18,7 +18,6 @@ struct DiscoveryDetailView: View {
         let backgroundOpacity: Double
         let heroOverlayOpacity: Double
         let scrollOverlayOpacity: Double
-        let preferPlaceholderImage: Bool
         let isChromeReady: Bool
         let isMarkdownReady: Bool
         let isScrollDisabled: Bool
@@ -74,7 +73,6 @@ struct DiscoveryDetailView: View {
             DiscoveryHeroHeaderView(
                 imageURL: imageURL,
                 placeholderImage: placeholderImage,
-                preferPlaceholderImage: layout.preferPlaceholderImage,
                 height: layout.heroHeight,
                 pullDownOffset: layout.pullDownOffset,
                 cornerRadius: layout.cornerRadius,
@@ -83,24 +81,23 @@ struct DiscoveryDetailView: View {
                 isGeometrySource: false,
                 discoveryId: discovery.id
             )
-            .overlay(alignment: .bottom) {
-                DiscoveryHeaderOverlayView(
-                    discovery: discovery,
-                    palette: palette,
-                    maxDescriptionLines: 3,
-                    gradientFalloff: 0.55,
-                    contentWidth: layout.cardSize.width
-                )
-                .frame(height: layout.heroHeight)
-                .opacity(layout.heroOverlayOpacity)
-                .matchedGeometryEffect(
-                    id: overlayGeometryId,
-                    in: overlayNamespace,
-                    properties: .frame,
-                    anchor: .bottom,
-                    isSource: !layout.isChromeReady
-                )
-            }
+            // Initial hero overlay removed during hero animation to prevent flashing.
+            // DiscoveryHeaderOverlayView(
+            //     discovery: discovery,
+            //     palette: palette,
+            //     maxDescriptionLines: 3,
+            //     gradientFalloff: 0.55,
+            //     contentWidth: layout.cardSize.width
+            // )
+            // .frame(height: layout.heroHeight)
+            // .opacity(layout.heroOverlayOpacity)
+            // .matchedGeometryEffect(
+            //     id: overlayGeometryId,
+            //     in: overlayNamespace,
+            //     properties: .frame,
+            //     anchor: .bottom,
+            //     isSource: !layout.isChromeReady
+            // )
             .offset(y: layout.headerOffset)
 
             DiscoveryDetailContentView(

@@ -169,7 +169,6 @@ struct DiscoveryDetailOverlayView: View {
                 let cardHeight = collapsedCardHeight
                     + (expandedCardHeight - collapsedCardHeight) * (1 - collapseProgress)
                 let effectivePullDown = (snapshot.isClosing || !isChromeReady) ? 0 : max(scrollOffset, 0)
-                let preferPlaceholder = (!isChromeReady) || snapshot.isInteracting
 
                 let headerOffset = (snapshot.isClosing || snapshot.isInteracting || isCollapseActive) ? 0 : min(scrollOffset, 0)
                 let heroTopInset = safeAreaInsets.top * (1 - collapseProgress)
@@ -188,7 +187,6 @@ struct DiscoveryDetailOverlayView: View {
                     backgroundOpacity: cardBackgroundOpacity,
                     heroOverlayOpacity: heroOverlayOpacity,
                     scrollOverlayOpacity: scrollOverlayOpacity,
-                    preferPlaceholderImage: preferPlaceholder,
                     isChromeReady: isChromeReady,
                     isMarkdownReady: isChromeReady,
                     isScrollDisabled: !isChromeReady || snapshot.isInteracting || snapshot.isClosing

@@ -113,9 +113,10 @@ struct DiscoveriesHomeView: View {
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
                     let adjusted = rawValue - metrics.headerSpacerHeight
+                    let overscroll = max(adjusted - metrics.gridTopPadding, 0)
                     scrollOffset = adjusted
-                    if adjusted > refreshIndicatorRevealThreshold {
-                        discoveriesHomeLogger.debug("Pull distance above threshold: \(adjusted, privacy: .public)")
+                    if overscroll > refreshIndicatorRevealThreshold {
+                        discoveriesHomeLogger.debug("Pull distance above threshold: \(overscroll, privacy: .public)")
                     }
                 }
                 .onChange(of: viewModel.discoveries) {
@@ -327,7 +328,7 @@ struct DiscoveriesHomeView: View {
 
     @ViewBuilder
     private func refreshHeaderView(metrics: DiscoveriesHeaderMetrics) -> some View {
-        let pullDistance = max(scrollOffset, 0)
+        let pullDistance = max(scrollOffset - metrics.gridTopPadding, 0)
         let shouldShowIndicator = viewModel.isRefreshing || pullDistance > refreshIndicatorRevealThreshold
         let indicatorOpacity: Double = {
             if viewModel.isRefreshing {
@@ -343,14 +344,14 @@ struct DiscoveriesHomeView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(height: metrics.headerSpacerHeight)
-
+        }
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) {
             if shouldShowIndicator {
                 refreshIndicator(opacity: indicatorOpacity)
                     .padding(.top, BrandSpacing.small)
                     .padding(.bottom, BrandSpacing.medium)
                     .transition(.move(edge: .top).combined(with: .opacity))
-            } else {
-                EmptyView()
             }
         }
         .animation(.easeInOut(duration: 0.18), value: shouldShowIndicator)

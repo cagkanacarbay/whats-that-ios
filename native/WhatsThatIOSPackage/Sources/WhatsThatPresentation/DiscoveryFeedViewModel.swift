@@ -67,6 +67,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
     private func fetchPage(mode: FetchMode, force: Bool = false) async {
         if self.isFetchingPage && !force {
+            discoveryFeedLogger.notice("fetchPage skipped due to in-flight request mode=\(mode.logDescription, privacy: .public)")
             return
         }
 
@@ -152,6 +153,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             deduplicated = self.discoveries + filtered
         }
 
+        discoveryFeedLogger.debug("applyNewPage replaceExisting=\(replaceExisting, privacy: .public) incoming=\(page.count, privacy: .public) previous=\(self.discoveries.count, privacy: .public) resulting=\(deduplicated.count, privacy: .public)")
         self.discoveries = deduplicated
     }
 }

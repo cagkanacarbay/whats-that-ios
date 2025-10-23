@@ -68,6 +68,18 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Discoveries", systemImage: "square.grid.2x2")
                 }
+                // Attach the voiceover bar within the Discoveries tab so it
+                // appears above the tab bar rather than covering it.
+                .safeAreaInset(edge: .bottom) {
+                    if shouldShowPlayerInset {
+                        VoiceoverPlayerHost(
+                            controller: voiceoverController,
+                            overlayPhase: activeOverlayPhase,
+                            imageURLResolver: imageURL(for:)
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
 
                 DiscoveryCreationFlowView(
                     viewModel: uploadViewModel,
@@ -93,17 +105,6 @@ struct MainTabView: View {
                 )
                 .transition(.opacity)
                 .zIndex(1)
-            }
-        }
-        // Attach the voiceover bar to the bottom only when needed.
-        .safeAreaInset(edge: .bottom) {
-            if shouldShowPlayerInset {
-                VoiceoverPlayerHost(
-                    controller: voiceoverController,
-                    overlayPhase: activeOverlayPhase,
-                    imageURLResolver: imageURL(for:)
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .environmentObject(playerInsetStore)

@@ -7,7 +7,6 @@ typealias DiscoveryHeaderPlatformImage = UIImage
 struct DiscoveryHeroHeaderView: View {
     let imageURL: URL?
     let placeholderImage: DiscoveryHeaderPlatformImage?
-    let preferPlaceholderImage: Bool
     let height: CGFloat
     let pullDownOffset: CGFloat
     let cornerRadius: CGFloat
@@ -21,7 +20,6 @@ struct DiscoveryHeroHeaderView: View {
             discoveryId: discoveryId,
             imageURL: imageURL,
             placeholderImage: placeholderImage,
-            preferPlaceholder: preferPlaceholderImage,
             height: effectiveHeight,
             cornerRadius: cornerRadius,
             namespace: namespace,
@@ -42,7 +40,6 @@ private struct DiscoveryHeroHeaderImageView: View {
     let discoveryId: Int64
     let imageURL: URL?
     let placeholderImage: DiscoveryHeaderPlatformImage?
-    let preferPlaceholder: Bool
     let height: CGFloat
     let cornerRadius: CGFloat
     let namespace: Namespace.ID?
@@ -82,17 +79,9 @@ private struct DiscoveryHeroHeaderImageView: View {
     }
 
     private func resolvedImage(for platformImage: DiscoveryHeaderPlatformImage) -> some View {
-        Group {
-            if preferPlaceholder, let placeholderImage {
-                Image(platformImage: placeholderImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Image(platformImage: platformImage)
-                    .resizable()
-                    .scaledToFill()
-            }
-        }
+        Image(platformImage: platformImage)
+            .resizable()
+            .scaledToFill()
     }
 
     @ViewBuilder

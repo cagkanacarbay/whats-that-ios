@@ -110,7 +110,6 @@ func logDiscoveryDetailHeroGeometry(
     height: CGFloat,
     imageHeight: CGFloat,
     cardAspect: CGFloat,
-    preferPlaceholder: Bool,
     pullDown: CGFloat,
     isChromeReady: Bool,
     isClosing: Bool
@@ -122,7 +121,7 @@ func logDiscoveryDetailHeroGeometry(
     let heightDelta = imageHeight - widthDrivenHeight
 
     discoveryDetailHeroLogger.debug(
-        "[Hero] phase=\(phase, privacy: .public) progress=\(progress, privacy: .public) width=\(width, privacy: .public) height=\(height, privacy: .public) imageHeight=\(imageHeight, privacy: .public) widthDrivenHeight=\(widthDrivenHeight, privacy: .public) heightDelta=\(heightDelta, privacy: .public) currentAspect=\(currentAspect, privacy: .public) cardAspect=\(cardAspect, privacy: .public) container=\(String(describing: containerSize), privacy: .public) start=\(String(describing: startFrame), privacy: .public) placeholder=\(preferPlaceholder, privacy: .public) pullDown=\(pullDown, privacy: .public) chromeReady=\(isChromeReady, privacy: .public)"
+        "[Hero] phase=\(phase, privacy: .public) progress=\(progress, privacy: .public) width=\(width, privacy: .public) height=\(height, privacy: .public) imageHeight=\(imageHeight, privacy: .public) widthDrivenHeight=\(widthDrivenHeight, privacy: .public) heightDelta=\(heightDelta, privacy: .public) currentAspect=\(currentAspect, privacy: .public) cardAspect=\(cardAspect, privacy: .public) container=\(String(describing: containerSize), privacy: .public) start=\(String(describing: startFrame), privacy: .public) pullDown=\(pullDown, privacy: .public) chromeReady=\(isChromeReady, privacy: .public)"
     )
 }
 

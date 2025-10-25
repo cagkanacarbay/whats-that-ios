@@ -135,7 +135,9 @@ struct DiscoveryDetailOverlayView: View {
                 let expandedCardHeight = geometry.size.height
                 let collapsedCardHeight = imageHeightForView
                 let cardHeight = expandedCardHeight + (collapsedCardHeight - expandedCardHeight) * collapseProgress
-                let cardBackgroundOpacity = Double(max(0, min(1 - collapseProgress, 1)))
+                let cardBackgroundOpacity: Double = snapshot.isClosing
+                    ? 0
+                    : Double(max(0, min(1 - collapseProgress, 1)))
                 let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady)
                     ? 0
                     : max(scrollOffset, 0) * (1 - collapseProgress)

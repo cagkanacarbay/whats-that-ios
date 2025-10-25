@@ -29,7 +29,6 @@ struct DiscoveryDetailOverlaySnapshot {
     var context: DiscoveryDetailContext?
     var progress: CGFloat = 0
     var dismissProgress: CGFloat = 0
-    var closePreparationProgress: CGFloat = 0
     var contentOpacity: Double = 0
     var isContentReady: Bool = false
     var isClosing: Bool = false

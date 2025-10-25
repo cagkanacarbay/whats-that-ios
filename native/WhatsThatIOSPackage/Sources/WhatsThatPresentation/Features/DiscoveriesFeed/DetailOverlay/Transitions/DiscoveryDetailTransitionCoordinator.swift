@@ -17,7 +17,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     private let heroAnimator: DiscoveryDetailHeroAnimator
     private var settleWorkItem: DispatchWorkItem?
     private var closeWorkItem: DispatchWorkItem?
-    private let closePreparationDuration: TimeInterval = 0.12
     private let chromeRevealFraction: Double = 0.7
 
     private let detailEdgeActivationWidth: CGFloat = 30
@@ -149,31 +148,26 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         resetGestureState(animated: true, resetDismissProgress: false)
         snapshot.isClosing = true
         snapshot.phase = .closing
-        snapshot.closePreparationProgress = 0
 
         settleWorkItem?.cancel()
         settleWorkItem = nil
 
         let sessionId = context.sessionId
 
-        withAnimation(.easeInOut(duration: closePreparationDuration)) {
-            snapshot.closePreparationProgress = 1
-            snapshot.contentOpacity = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + closePreparationDuration) { [weak self] in
+        // Unified one-pass close: fade chrome and collapse in a single animation.
+        // Important: schedule the progress animation to the next runloop tick so that
+        // the initial frame of the uniform transform starts at transformProgress = 0.
+        // This avoids a visible jump to the target (small) scale at gesture release.
+        DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard self.snapshot.context?.sessionId == sessionId else { return }
-
-            self.snapshot.isContentReady = false
-            self.updateContentVisibility(animated: false)
-
             withAnimation(self.heroAnimator.closeAnimation()) {
                 self.snapshot.progress = 0
+                self.snapshot.contentOpacity = 0
             }
         }
 
-        scheduleCloseCleanup(for: sessionId, additionalDelay: closePreparationDuration)
+        scheduleCloseCleanup(for: sessionId)
     }
 
     func resetIfNeeded() {
@@ -280,7 +274,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             snapshot.gestureRotation = 0
             snapshot.gestureShadowOpacity = 0
             snapshot.gestureCornerRadius = 0
-            snapshot.closePreparationProgress = 0
             if resetDismissProgress {
                 snapshot.dismissProgress = 0
             }

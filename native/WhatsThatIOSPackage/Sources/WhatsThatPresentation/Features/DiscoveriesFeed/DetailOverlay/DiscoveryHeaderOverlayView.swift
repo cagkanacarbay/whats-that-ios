@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WhatsThatDomain
 import WhatsThatShared
 
@@ -12,31 +13,43 @@ struct DiscoveryHeaderOverlayView: View {
     var contentWidth: CGFloat? = nil
     var onShare: (() -> Void)? = nil
     var onShowMap: (() -> Void)? = nil
-    private let actionRowBottomInset: CGFloat = 120 // makes sure the map and share buttons are placed above the title
+    var isClosing: Bool = false
+    var showTopControls: Bool = false
+    var topControlsSafeAreaInsets: EdgeInsets = EdgeInsets()
+    var onClose: (() -> Void)? = nil
+    var onShowOptions: (() -> Void)? = nil
+    var isOptionsEnabled: Bool = true
+    private let topControlsBottomPadding: CGFloat = BrandSpacing.small
 
     var body: some View {
         ZStack(alignment: .bottom) {
             backgroundGradient
 
-            VStack(spacing: BrandSpacing.small) {
-                Text(discovery.title)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(palette.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+            VStack(spacing: BrandSpacing.small / 2) {
+                if shouldShowActionRow {
+                    actionRow
+                }
 
-                Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(palette.textSecondary)
-                    .frame(maxWidth: .infinity)
-
-                if let shortDescription = overlayShortDescription {
-                    Text(shortDescription)
-                        .font(.system(size: 13))
-                        .foregroundStyle(palette.textSecondary)
+                VStack(spacing: BrandSpacing.small) {
+                    Text(discovery.title)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(palette.textPrimary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
-                        .lineLimit(maxDescriptionLines == 0 ? nil : maxDescriptionLines)
+
+                    Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.textSecondary)
+                        .frame(maxWidth: .infinity)
+
+                    if let shortDescription = overlayShortDescription {
+                        Text(shortDescription)
+                            .font(.system(size: 13))
+                            .foregroundStyle(palette.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .lineLimit(maxDescriptionLines == 0 ? nil : maxDescriptionLines)
+                    }
                 }
             }
             .padding(.horizontal, BrandSpacing.large)
@@ -47,11 +60,15 @@ struct DiscoveryHeaderOverlayView: View {
         }
         .frame(width: contentWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .overlay(alignment: .bottom) {
-            if hasActionRow {
-                actionRow
+        .overlay(alignment: .top) {
+            if showTopControls {
+                topControls
+                    .frame(maxWidth: contentWidth ?? .infinity)
                     .padding(.horizontal, BrandSpacing.large)
-                    .padding(.bottom, actionRowBottomInset)
+                    .padding(.top, resolvedTopPadding(from: topControlsSafeAreaInsets))
+                    .padding(.bottom, topControlsBottomPadding)
+                    .frame(maxWidth: .infinity)
+                    .ignoresSafeArea()
             }
         }
     }
@@ -86,11 +103,40 @@ struct DiscoveryHeaderOverlayView: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: contentWidth ?? .infinity)
     }
 
     private var hasActionRow: Bool {
         onShare != nil || onShowMap != nil
+    }
+
+    private var shouldShowActionRow: Bool {
+        hasActionRow && !isClosing
+    }
+
+    @ViewBuilder
+    private var topControls: some View {
+        HStack {
+            if let onClose {
+                DiscoveryOverlayButton(
+                    systemName: "chevron.left",
+                    action: onClose,
+                    accessibilityLabel: "Back"
+                )
+            }
+
+            Spacer()
+
+            if let onShowOptions {
+                DiscoveryOverlayButton(
+                    systemName: "ellipsis",
+                    action: onShowOptions,
+                    rotation: .degrees(90),
+                    accessibilityLabel: "More options",
+                    isDisabled: !isOptionsEnabled
+                )
+            }
+        }
     }
 
     private var backgroundGradient: some View {
@@ -116,5 +162,19 @@ struct DiscoveryHeaderOverlayView: View {
     private func normalized(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func resolvedTopPadding(from insets: EdgeInsets) -> CGFloat {
+        let baseInset = insets.top
+        if baseInset <= 0 {
+            let globalInset = UIApplication.shared
+                .connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first(where: { $0.isKeyWindow })?
+                .safeAreaInsets.top ?? 0
+            return globalInset + 12
+        }
+        return baseInset + 12
     }
 }

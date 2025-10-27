@@ -192,6 +192,7 @@ struct DiscoveryDetailOverlayView: View {
                     isChromeReady: isChromeReady,
                     isMarkdownReady: isChromeReady,
                     isScrollDisabled: snapshot.isClosing || snapshot.isInteracting || !isChromeReady,
+                    isClosing: snapshot.isClosing,
                     showTopControls: shouldShowTopControls
                 )
 

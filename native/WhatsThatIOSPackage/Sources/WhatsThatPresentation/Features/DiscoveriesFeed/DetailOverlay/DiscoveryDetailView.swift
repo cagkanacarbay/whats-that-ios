@@ -23,6 +23,7 @@ struct DiscoveryDetailView: View {
         let isChromeReady: Bool
         let isMarkdownReady: Bool
         let isScrollDisabled: Bool
+        let isClosing: Bool
         let showTopControls: Bool
     }
 
@@ -105,6 +106,7 @@ struct DiscoveryDetailView: View {
                 backgroundOpacity: layout.backgroundOpacity,
                 colorScheme: colorScheme,
                 voiceoverController: voiceoverController,
+                safeAreaInsets: safeAreaInsets,
                 safeAreaTopInset: layout.safeAreaTopInset,
                 containerWidth: layout.containerWidth,
                 contentOpacity: layout.contentOpacity,
@@ -113,6 +115,11 @@ struct DiscoveryDetailView: View {
                 isScrollDisabled: layout.isScrollDisabled,
                 scrollOverlayOpacity: layout.scrollOverlayOpacity,
                 overlayNamespace: overlayNamespace,
+                isClosing: layout.isClosing,
+                showTopControls: layout.showTopControls,
+                onClose: onClose,
+                onShowOptions: handleOptionsTapped,
+                isOptionsEnabled: !isDeleting,
                 scrollOffset: $scrollOffset,
                 onShare: { presentShareSheet() },
                 onShowMap: discovery.location != nil ? { openLocationIfAvailable() } : nil
@@ -121,19 +128,6 @@ struct DiscoveryDetailView: View {
         .frame(width: layout.cardSize.width, height: layout.cardSize.height)
         .background(backgroundColor.opacity(layout.backgroundOpacity))
         .clipShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
-        .overlay(alignment: .topLeading) {
-            if layout.showTopControls {
-                DiscoveryDetailTopControls(
-                    safeAreaInsets: safeAreaInsets,
-                    onClose: onClose,
-                    onShowOptions: handleOptionsTapped,
-                    isOptionsEnabled: !isDeleting
-                )
-                .opacity(layout.contentOpacity)
-                .animation(.easeInOut(duration: 0.12), value: layout.contentOpacity)
-                .ignoresSafeArea()
-            }
-        }
         .sheet(item: $shareSheetPayload) { payload in
             DiscoveryShareSheet(activityItems: payload.items)
         }
@@ -202,6 +196,7 @@ private struct DiscoveryDetailContentView: View {
     let backgroundColor: Color
     let backgroundOpacity: Double
     let colorScheme: ColorScheme
+    let safeAreaInsets: EdgeInsets
     let safeAreaTopInset: CGFloat
     let containerWidth: CGFloat
     let contentOpacity: Double
@@ -210,6 +205,11 @@ private struct DiscoveryDetailContentView: View {
     let isScrollDisabled: Bool
     let scrollOverlayOpacity: Double
     let overlayNamespace: Namespace.ID
+    let isClosing: Bool
+    let showTopControls: Bool
+    let onClose: (() -> Void)?
+    let onShowOptions: (() -> Void)?
+    let isOptionsEnabled: Bool
     let onShare: (() -> Void)?
     let onShowMap: (() -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
@@ -229,6 +229,7 @@ private struct DiscoveryDetailContentView: View {
         backgroundOpacity: Double,
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
+        safeAreaInsets: EdgeInsets,
         safeAreaTopInset: CGFloat,
         containerWidth: CGFloat,
         contentOpacity: Double,
@@ -237,6 +238,11 @@ private struct DiscoveryDetailContentView: View {
         isScrollDisabled: Bool,
         scrollOverlayOpacity: Double,
         overlayNamespace: Namespace.ID,
+        isClosing: Bool,
+        showTopControls: Bool,
+        onClose: (() -> Void)? = nil,
+        onShowOptions: (() -> Void)? = nil,
+        isOptionsEnabled: Bool = true,
         scrollOffset: Binding<CGFloat>,
         onShare: (() -> Void)? = nil,
         onShowMap: (() -> Void)? = nil
@@ -250,6 +256,7 @@ private struct DiscoveryDetailContentView: View {
         self.backgroundColor = backgroundColor
         self.backgroundOpacity = backgroundOpacity
         self.colorScheme = colorScheme
+        self.safeAreaInsets = safeAreaInsets
         self.safeAreaTopInset = safeAreaTopInset
         self.containerWidth = containerWidth
         self.contentOpacity = contentOpacity
@@ -258,6 +265,11 @@ private struct DiscoveryDetailContentView: View {
         self.isScrollDisabled = isScrollDisabled
         self.scrollOverlayOpacity = scrollOverlayOpacity
         self.overlayNamespace = overlayNamespace
+        self.isClosing = isClosing
+        self.showTopControls = showTopControls
+        self.onClose = onClose
+        self.onShowOptions = onShowOptions
+        self.isOptionsEnabled = isOptionsEnabled
         self.onShare = onShare
         self.onShowMap = onShowMap
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
@@ -302,7 +314,13 @@ private struct DiscoveryDetailContentView: View {
                         gradientFalloff: 0.55,
                         contentWidth: containerWidth,
                         onShare: onShare,
-                        onShowMap: onShowMap
+                        onShowMap: onShowMap,
+                        isClosing: isClosing,
+                        showTopControls: showTopControls,
+                        topControlsSafeAreaInsets: safeAreaInsets,
+                        onClose: onClose,
+                        onShowOptions: onShowOptions,
+                        isOptionsEnabled: isOptionsEnabled
                     )
                     .frame(height: heroVisibleHeight)
                     .offset(y: overlayYOffset)
@@ -387,53 +405,6 @@ private struct DiscoveryDetailContentView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(palette.textSecondary)
         }
-    }
-}
-
-private struct DiscoveryDetailTopControls: View {
-    let safeAreaInsets: EdgeInsets
-    let onClose: () -> Void
-    let onShowOptions: (() -> Void)?
-    let isOptionsEnabled: Bool
-
-    var body: some View {
-        HStack {
-            DiscoveryOverlayButton(
-                systemName: "chevron.left",
-                action: onClose,
-                accessibilityLabel: "Back"
-            )
-
-            Spacer()
-
-            if let onShowOptions {
-                DiscoveryOverlayButton(
-                    systemName: "ellipsis",
-                    action: onShowOptions,
-                    rotation: .degrees(90),
-                    accessibilityLabel: "More options",
-                    isDisabled: !isOptionsEnabled
-                )
-            }
-        }
-        .padding(.horizontal, BrandSpacing.large)
-        .padding(.top, resolvedTopPadding(from: safeAreaInsets))
-        .padding(.bottom, BrandSpacing.small)
-        .zIndex(2)
-    }
-
-    private func resolvedTopPadding(from insets: EdgeInsets) -> CGFloat {
-        let baseInset = insets.top
-        if baseInset <= 0 {
-            let globalInset = UIApplication.shared
-                .connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .flatMap { $0.windows }
-                .first(where: { $0.isKeyWindow })?
-                .safeAreaInsets.top ?? 0
-            return globalInset + 12
-        }
-        return baseInset + 12
     }
 }
 private extension DiscoveryDetailContentView {

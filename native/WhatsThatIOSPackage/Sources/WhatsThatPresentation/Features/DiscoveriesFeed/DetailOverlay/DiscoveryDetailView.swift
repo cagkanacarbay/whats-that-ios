@@ -21,6 +21,7 @@ struct DiscoveryDetailView: View {
         let isChromeReady: Bool
         let isMarkdownReady: Bool
         let isScrollDisabled: Bool
+        let showTopControls: Bool
     }
 
     let discovery: DiscoverySummary
@@ -106,7 +107,7 @@ struct DiscoveryDetailView: View {
         .background(backgroundColor.opacity(layout.backgroundOpacity))
         .clipShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
         .overlay(alignment: .topLeading) {
-            if layout.isChromeReady {
+            if layout.showTopControls {
                 DiscoveryDetailTopControls(
                     safeAreaInsets: safeAreaInsets,
                     onClose: onClose,

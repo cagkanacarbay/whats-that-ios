@@ -67,8 +67,15 @@ struct DiscoveryDetailOverlayView: View {
             let transformProgress = DiscoveryDetailUniformCloseTransform.transformProgress(for: snapshot.progress)
 
             ZStack(alignment: .topLeading) {
+                // Remove background dimming during interactive dismiss to keep
+                // the feed fully visible while dragging the card.
+                let backdropOpacity: Double = {
+                    if snapshot.isInteracting { return 0 }
+                    if snapshot.isClosing { return 0 }
+                    return overlayOpacity(for: snapshot.progress)
+                }()
                 Color.black
-                    .opacity(overlayOpacity(for: snapshot.progress))
+                    .opacity(backdropOpacity)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
@@ -101,7 +108,8 @@ struct DiscoveryDetailOverlayView: View {
                 let collapseProgress = snapshot.isClosing ? transformProgress : 0
                 let isChromeReady = snapshot.isContentReady
                 let detailOpacityBase = isChromeReady ? snapshot.contentOpacity : 0
-                let detailOpacity = detailOpacityBase * (snapshot.isClosing ? max(0, 1 - collapseProgress) : 1)
+                // Pure collapse: do not fade content with collapse progress
+                let detailOpacity = detailOpacityBase
                 let headerOpacityRaw: Double = {
                     guard !snapshot.isClosing && !snapshot.isInteracting else { return 0 }
                     let start: CGFloat = 0.88
@@ -119,7 +127,8 @@ struct DiscoveryDetailOverlayView: View {
                     baseOpacity: headerOverlayBaseOpacity,
                     isChromeReady: isChromeReady,
                     isClosing: snapshot.isClosing,
-                    isInteracting: snapshot.isInteracting
+                    isInteracting: snapshot.isInteracting,
+                    progress: snapshot.progress
                 )
                 let cardWidth: CGFloat = snapshot.isClosing ? containerSize.width : geometry.size.width
                 let targetImageHeight = geometry.imageHeight
@@ -135,9 +144,6 @@ struct DiscoveryDetailOverlayView: View {
                 let expandedCardHeight = geometry.size.height
                 let collapsedCardHeight = imageHeightForView
                 let cardHeight = expandedCardHeight + (collapsedCardHeight - expandedCardHeight) * collapseProgress
-                let cardBackgroundOpacity: Double = snapshot.isClosing
-                    ? 0
-                    : Double(max(0, min(1 - collapseProgress, 1)))
                 let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady)
                     ? 0
                     : max(scrollOffset, 0) * (1 - collapseProgress)
@@ -150,6 +156,9 @@ struct DiscoveryDetailOverlayView: View {
                 let heroOverlayOpacity: Double = overlayOpacities.hero * fadeMultiplier
                 let scrollOverlayOpacity: Double = overlayOpacities.scroll * fadeMultiplier
 
+                // Show top controls with the header overlay once chrome is ready.
+                let shouldShowTopControls = (!snapshot.isClosing) && isChromeReady
+
                 let detailLayout = DiscoveryDetailView.LayoutConfiguration(
                     cardSize: CGSize(width: cardWidth, height: cardHeight),
                     heroHeight: heroHeaderHeight,
@@ -160,12 +169,16 @@ struct DiscoveryDetailOverlayView: View {
                     containerWidth: containerWidth,
                     safeAreaTopInset: heroTopInset,
                     contentOpacity: detailOpacity,
-                    backgroundOpacity: cardBackgroundOpacity,
+                    // Keep the body background fully opaque while visible; rely on the
+                    // container's `opacity(contentOpacity)` to fade both content and its
+                    // background together, avoiding double-fade artifacts.
+                    backgroundOpacity: 1,
                     heroOverlayOpacity: heroOverlayOpacity,
                     scrollOverlayOpacity: scrollOverlayOpacity,
                     isChromeReady: isChromeReady,
                     isMarkdownReady: isChromeReady,
-                    isScrollDisabled: snapshot.isClosing || snapshot.isInteracting || !isChromeReady
+                    isScrollDisabled: snapshot.isClosing || snapshot.isInteracting || !isChromeReady,
+                    showTopControls: shouldShowTopControls
                 )
 
                 let heroCard = DiscoveryDetailView(
@@ -225,10 +238,12 @@ struct DiscoveryDetailOverlayView: View {
         baseOpacity: Double,
         isChromeReady: Bool,
         isClosing: Bool,
-        isInteracting: Bool
+        isInteracting: Bool,
+        progress: CGFloat
     ) -> (hero: Double, scroll: Double) {
+        // During close, remove overlays immediately.
         if isClosing {
-            return (hero: baseOpacity, scroll: 0)
+            return (hero: 0, scroll: 0)
         }
         guard isChromeReady else {
             return (hero: baseOpacity, scroll: 0)
@@ -236,7 +251,19 @@ struct DiscoveryDetailOverlayView: View {
         if isInteracting {
             return (hero: baseOpacity, scroll: detailOpacity)
         }
-        return (hero: 0, scroll: detailOpacity)
+        // Hold the hero overlay pinned to the image bottom until the
+        // hero expansion animation is essentially complete, then
+        // crossfade to the scroll-based overlay. This keeps the
+        // gradient attached to the image edge throughout the open.
+        let holdThreshold: CGFloat = 0.995
+        if progress <= holdThreshold {
+            return (hero: baseOpacity, scroll: 0)
+        }
+        // Smooth crossfade within the final fraction of the transition.
+        let t = max(0, min((progress - holdThreshold) / (1 - holdThreshold), 1))
+        let hero = baseOpacity * Double(1 - t)
+        let scroll = detailOpacity * Double(t)
+        return (hero: hero, scroll: scroll)
     }
 
     private func resolvedCornerRadius(targetCornerRadius: CGFloat, scale: CGFloat) -> CGFloat {

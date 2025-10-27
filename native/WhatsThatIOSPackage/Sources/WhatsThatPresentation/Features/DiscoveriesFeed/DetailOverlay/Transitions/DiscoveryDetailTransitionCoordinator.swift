@@ -17,7 +17,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     private let heroAnimator: DiscoveryDetailHeroAnimator
     private var settleWorkItem: DispatchWorkItem?
     private var closeWorkItem: DispatchWorkItem?
-    private let chromeRevealFraction: Double = 0.7
+    private let chromeRevealFraction: Double = 0.1
 
     private let detailEdgeActivationWidth: CGFloat = 30
     private let detailDismissalThreshold: CGFloat = 150
@@ -163,7 +163,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             guard self.snapshot.context?.sessionId == sessionId else { return }
             withAnimation(self.heroAnimator.closeAnimation()) {
                 self.snapshot.progress = 0
-                self.snapshot.contentOpacity = 0
             }
         }
 

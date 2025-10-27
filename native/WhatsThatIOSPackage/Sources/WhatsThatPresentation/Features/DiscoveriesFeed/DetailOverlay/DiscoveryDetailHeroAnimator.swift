@@ -9,8 +9,8 @@ enum DiscoveryDetailLayout {
 }
 
 struct DiscoveryDetailHeroAnimator {
-    let openDuration: TimeInterval = 0.4
-    let closeDuration: TimeInterval = 0.48
+    let openDuration: TimeInterval = 2
+    let closeDuration: TimeInterval = 2
 
     func openAnimation() -> Animation {
         .timingCurve(0.33, 1.0, 0.68, 1.0, duration: openDuration)

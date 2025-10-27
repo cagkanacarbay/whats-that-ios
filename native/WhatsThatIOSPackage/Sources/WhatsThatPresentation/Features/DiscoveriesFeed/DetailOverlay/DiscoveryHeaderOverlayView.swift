@@ -12,8 +12,8 @@ struct DiscoveryHeaderOverlayView: View {
     var contentWidth: CGFloat? = nil
 
     var body: some View {
-        let horizontalPadding = BrandSpacing.large
-        let availableWidth = contentWidth.map { max($0 - (horizontalPadding * 2), 0) }
+        let titleAndDatePadding = BrandSpacing.large
+        let shortDescriptionPadding = BrandSpacing.medium
 
         ZStack(alignment: .bottom) {
             backgroundGradient
@@ -23,24 +23,25 @@ struct DiscoveryHeaderOverlayView: View {
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(palette.textPrimary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: availableWidth ?? .infinity)
+                    .padding(.horizontal, titleAndDatePadding)
+                    .frame(maxWidth: .infinity)
 
                 Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(palette.textSecondary)
-                    .frame(maxWidth: availableWidth ?? .infinity)
+                    .padding(.horizontal, titleAndDatePadding)
+                    .frame(maxWidth: .infinity)
 
                 if let shortDescription = overlayShortDescription {
                     Text(shortDescription)
-                        .font(.system(size: 14))
+                        .font(.system(size: 13))
                         .foregroundStyle(palette.textSecondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, horizontalPadding)
-                        .frame(maxWidth: availableWidth ?? .infinity)
+                        .padding(.horizontal, shortDescriptionPadding)
+                        .frame(maxWidth: .infinity)
                         .lineLimit(maxDescriptionLines == 0 ? nil : maxDescriptionLines)
                 }
             }
-            .padding(.horizontal, horizontalPadding)
             .padding(.bottom, BrandSpacing.xLarge)
             .frame(maxWidth: contentWidth ?? .infinity)
         }

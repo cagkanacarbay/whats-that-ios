@@ -159,6 +159,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         error = nil
     }
 
+    func syncCreditBalance(_ newValue: Int?) async {
+        let normalized = await creditBalanceStore.set(newValue)
+        creditBalance = normalized
+    }
+
     private func beginFlow(retake: Bool) async {
         error = nil
         analysisTask?.cancel()

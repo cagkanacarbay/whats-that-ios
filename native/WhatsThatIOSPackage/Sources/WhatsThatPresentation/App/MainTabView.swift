@@ -25,6 +25,7 @@ struct MainTabView: View {
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -33,12 +34,14 @@ struct MainTabView: View {
         uploadViewModel: DiscoveryCreationFlowViewModel,
         voiceoverControllerFactory: @escaping () -> VoiceoverPlaybackController,
         onSignOut: @escaping () -> Void,
-        onSettings: (() -> Void)? = nil
+        onSettings: (() -> Void)? = nil,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
         self.onSignOut = onSignOut
         self.onSettings = onSettings
+        self.makeCreditsViewModel = makeCreditsViewModel
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
         _voiceoverController = StateObject(wrappedValue: voiceoverControllerFactory())
@@ -51,7 +54,8 @@ struct MainTabView: View {
                     viewModel: cameraViewModel,
                     placeholderEmoji: "📷",
                     ctaTitle: "Take a photo to discover",
-                    retryTitle: "Try again"
+                    retryTitle: "Try again",
+                    makeCreditsViewModel: makeCreditsViewModel
                 )
                 .tag(Tab.camera)
                 .tabItem {
@@ -89,7 +93,8 @@ struct MainTabView: View {
                     viewModel: uploadViewModel,
                     placeholderEmoji: "📤",
                     ctaTitle: "Upload a photo to analyze",
-                    retryTitle: "Select again"
+                    retryTitle: "Select again",
+                    makeCreditsViewModel: makeCreditsViewModel
                 )
                 .tag(Tab.upload)
                 .tabItem {
@@ -105,7 +110,8 @@ struct MainTabView: View {
                     viewModel: overlayViewModel,
                     placeholderEmoji: overlayTab == .camera ? "📷" : "📤",
                     ctaTitle: overlayTab == .camera ? "Take a photo to discover" : "Upload a photo to analyze",
-                    retryTitle: overlayTab == .camera ? "Try again" : "Select again"
+                    retryTitle: overlayTab == .camera ? "Try again" : "Select again",
+                    makeCreditsViewModel: makeCreditsViewModel
                 )
                 .transition(.opacity)
                 .zIndex(1)

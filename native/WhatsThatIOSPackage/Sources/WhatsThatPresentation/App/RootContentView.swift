@@ -10,6 +10,7 @@ public struct RootContentView: View {
     @State private var authError: AuthError?
     @State private var authStartMode: AuthenticationFlowView.Mode = .signUp
     @State private var isSettingsPresented = false
+    @State private var settingsSheetDetent: PresentationDetent = .fraction(0.8)
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
@@ -120,7 +121,8 @@ public struct RootContentView: View {
                             },
                             onSettings: {
                                 isSettingsPresented = true
-                            }
+                            },
+                            makeCreditsViewModel: makeCreditsViewModel
                         )
                     } else {
                         Text("Voiceover playback is available on iOS builds only.")
@@ -131,7 +133,9 @@ public struct RootContentView: View {
             .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         }
         .animation(.easeInOut, value: viewModel.flowState)
-        .sheet(isPresented: $isSettingsPresented) {
+        .sheet(isPresented: $isSettingsPresented, onDismiss: {
+            settingsSheetDetent = .fraction(0.8)
+        }) {
             SettingsView(
                 onResetOnboarding: {
                     await viewModel.resetOnboarding()
@@ -162,7 +166,7 @@ public struct RootContentView: View {
                     isSettingsPresented = false
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
         .alert(
             authError?.errorDescription ?? "Something went wrong",

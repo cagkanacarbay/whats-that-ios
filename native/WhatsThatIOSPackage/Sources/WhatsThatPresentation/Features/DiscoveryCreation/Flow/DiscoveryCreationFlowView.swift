@@ -8,19 +8,25 @@ struct DiscoveryCreationFlowView: View {
     let placeholderEmoji: String
     let ctaTitle: String
     let retryTitle: String
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isCreditsPresented = false
+    @State private var presentedCreditsViewModel: CreditsViewModel?
+    @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
         placeholderEmoji: String,
         ctaTitle: String,
-        retryTitle: String
+        retryTitle: String,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         _viewModel = ObservedObject(initialValue: viewModel)
         self.placeholderEmoji = placeholderEmoji
         self.ctaTitle = ctaTitle
         self.retryTitle = retryTitle
+        self.makeCreditsViewModel = makeCreditsViewModel
     }
 
     private var palette: DiscoveryCreationPalette {
@@ -38,6 +44,22 @@ struct DiscoveryCreationFlowView: View {
                 )
             ) { identifiedError in
                 alert(for: identifiedError.error)
+            }
+            .sheet(isPresented: $isCreditsPresented, onDismiss: {
+                presentedCreditsViewModel = nil
+                creditsSheetDetent = .fraction(0.8)
+            }) {
+                NavigationStack {
+                    if let creditsViewModel = ensureCreditsViewModel() {
+                        CreditsView(viewModel: creditsViewModel)
+                    } else {
+                        Text("Credits unavailable")
+                            .font(.headline)
+                            .padding()
+                    }
+                }
+                .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
+                .presentationDragIndicator(.visible)
             }
     }
 
@@ -80,7 +102,8 @@ struct DiscoveryCreationFlowView: View {
                 flowType: viewModel.flowType,
                 onRetake: { viewModel.retake() },
                 onContinue: { viewModel.beginAnalysis() },
-                onCancel: { viewModel.cancelFlow() }
+                onCancel: { viewModel.cancelFlow() },
+                onRequestCredits: makeCreditsHandler
             )
         case .analyzing:
             streamingStage
@@ -95,6 +118,38 @@ struct DiscoveryCreationFlowView: View {
             capturedAt: viewModel.confirmationState?.media.createdAt,
             onCancel: { viewModel.cancelFlow() }
         )
+    }
+
+    private var makeCreditsHandler: (() -> Void)? {
+        guard makeCreditsViewModel != nil else {
+            return nil
+        }
+        return { presentCreditsSheet() }
+    }
+
+    @MainActor
+    private func presentCreditsSheet() {
+        guard ensureCreditsViewModel() != nil else { return }
+        creditsSheetDetent = .fraction(0.8)
+        isCreditsPresented = true
+    }
+
+    @MainActor
+    @discardableResult
+    private func ensureCreditsViewModel() -> CreditsViewModel? {
+        if let existing = presentedCreditsViewModel {
+            return existing
+        }
+        guard let factory = makeCreditsViewModel else { return nil }
+        let creditsViewModel = factory()
+        let flowViewModel = viewModel
+        creditsViewModel.onBalanceUpdated = { newBalance in
+            Task { [weak flowViewModel] in
+                await flowViewModel?.syncCreditBalance(newBalance)
+            }
+        }
+        presentedCreditsViewModel = creditsViewModel
+        return creditsViewModel
     }
 
     private func alert(for error: DiscoveryCreationFlowViewModel.FlowError) -> Alert {

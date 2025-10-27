@@ -28,6 +28,7 @@ struct DiscoveryConfirmationView: View {
     let onRetake: () -> Void
     let onContinue: () -> Void
     let onCancel: () -> Void
+    let onRequestCredits: (() -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var activeAlert: ActiveAlert?
@@ -82,10 +83,6 @@ struct DiscoveryConfirmationView: View {
             return "cart"
         }
         return "arrow.right"
-    }
-
-    private var isContinueDisabled: Bool {
-        creditBalance == 0
     }
 
     private var retakeTitle: String {
@@ -192,11 +189,10 @@ struct DiscoveryConfirmationView: View {
                     continueTitle: continueTitle,
                     continueIconName: continueIconName,
                     continueBackground: continueBackground,
-                    isContinueDisabled: isContinueDisabled,
                     palette: palette,
                     onRetake: onRetake,
                     onContinue: onContinue,
-                    onOutOfCredits: { activeAlert = .outOfCredits }
+                    onOutOfCredits: handleOutOfCredits
                 )
                 .padding(.top, previewBottomSpacing)
                 .padding(.horizontal, BrandSpacing.large)
@@ -257,6 +253,14 @@ struct DiscoveryConfirmationView: View {
                 primaryButton: .default(Text("Open Settings"), action: openSettings),
                 secondaryButton: .cancel()
             )
+        }
+    }
+
+    private func handleOutOfCredits() {
+        if let onRequestCredits {
+            onRequestCredits()
+        } else {
+            activeAlert = .outOfCredits
         }
     }
 

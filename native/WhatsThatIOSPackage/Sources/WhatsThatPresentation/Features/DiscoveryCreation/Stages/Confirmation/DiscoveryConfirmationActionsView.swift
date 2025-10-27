@@ -9,7 +9,6 @@ struct DiscoveryConfirmationActionsView: View {
     let continueTitle: String
     let continueIconName: String
     let continueBackground: Color
-    let isContinueDisabled: Bool
     let palette: DiscoveryCreationPalette
     let onRetake: () -> Void
     let onContinue: () -> Void
@@ -67,8 +66,6 @@ struct DiscoveryConfirmationActionsView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(continueBackground)
                 )
-                .opacity(isContinueDisabled ? 0.45 : 1)
-                .disabled(isContinueDisabled)
             }
         }
         .background(

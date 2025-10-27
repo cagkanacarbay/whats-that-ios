@@ -12,6 +12,9 @@ struct DiscoveryDetailOverlayView: View {
     let backgroundColor: Color
     let colorScheme: ColorScheme
     let onClose: () -> Void
+    let deletingDiscoveryId: Int64?
+    let isDeletingDiscovery: Bool
+    let onDelete: ((DiscoverySummary) -> Void)?
     let onShowOptions: (() -> Void)?
     @State private var scrollOffset: CGFloat = 0
 
@@ -22,6 +25,9 @@ struct DiscoveryDetailOverlayView: View {
         colorScheme: ColorScheme,
         voiceoverController: VoiceoverPlaybackController,
         onClose: @escaping () -> Void,
+        deletingDiscoveryId: Int64?,
+        isDeletingDiscovery: Bool,
+        onDelete: ((DiscoverySummary) -> Void)?,
         onShowOptions: (() -> Void)?
     ) {
         self.snapshot = snapshot
@@ -29,6 +35,9 @@ struct DiscoveryDetailOverlayView: View {
         self.backgroundColor = backgroundColor
         self.colorScheme = colorScheme
         self.onClose = onClose
+        self.deletingDiscoveryId = deletingDiscoveryId
+        self.isDeletingDiscovery = isDeletingDiscovery
+        self.onDelete = onDelete
         self.onShowOptions = onShowOptions
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
     }
@@ -193,6 +202,10 @@ struct DiscoveryDetailOverlayView: View {
                     overlayNamespace: overlayNamespace,
                     scrollOffset: $scrollOffset,
                     onClose: onClose,
+                    isDeleting: isDeletingDiscovery && deletingDiscoveryId == context.discovery.id,
+                    onDelete: {
+                        onDelete?(context.discovery)
+                    },
                     onShowOptions: onShowOptions
                 )
 

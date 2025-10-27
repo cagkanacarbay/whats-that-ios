@@ -14,6 +14,7 @@ import UIKit
 public struct AppDependencyContainer: Sendable {
     public let configuration: AppConfiguration
     public let discoveryFeedUseCase: DiscoveryFeedUseCase
+    public let discoveryDeletionUseCase: DiscoveryDeletionUseCase
     public let authUseCase: AuthUseCase
     public let onboardingUseCase: OnboardingUseCase
     public let flowResolver: AppFlowResolver
@@ -39,6 +40,7 @@ public struct AppDependencyContainer: Sendable {
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
+        self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
         self.authUseCase = AuthUseCase(service: authService)
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
         self.flowResolver = AppFlowResolver()
@@ -57,6 +59,7 @@ public struct AppDependencyContainer: Sendable {
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
+        self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
         self.authUseCase = AuthUseCase(service: authService)
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
         self.flowResolver = AppFlowResolver()

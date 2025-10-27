@@ -179,7 +179,8 @@ var package = Package(
             name: "WhatsThatPresentationTests",
             dependencies: [
                 "WhatsThatPresentation",
-                "WhatsThatData"
+                "WhatsThatData",
+                "WhatsThatShared"
             ],
             path: "Tests/WhatsThatPresentationTests",
             swiftSettings: targetSwiftSettings

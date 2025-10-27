@@ -198,6 +198,13 @@ public extension DiscoveryFeedViewModel {
         loadState = discoveries.isEmpty ? .idle : .loaded
         hasMore = true
     }
+
+    func remove(_ summary: DiscoverySummary) {
+        let previousCount = discoveries.count
+        discoveries.removeAll { $0.id == summary.id }
+        guard discoveries.count != previousCount else { return }
+        loadState = discoveries.isEmpty ? .idle : .loaded
+    }
 }
 
 private extension DiscoveryFeedViewModel {

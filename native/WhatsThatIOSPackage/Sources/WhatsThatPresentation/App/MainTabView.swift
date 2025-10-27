@@ -22,11 +22,13 @@ struct MainTabView: View {
     @StateObject private var playerInsetStore = VoiceoverPlayerInsetStore()
 
     private let feedUseCase: DiscoveryFeedUseCase
+    private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
+        deletionUseCase: DiscoveryDeletionUseCase,
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
         voiceoverControllerFactory: @escaping () -> VoiceoverPlaybackController,
@@ -34,6 +36,7 @@ struct MainTabView: View {
         onSettings: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
+        self.deletionUseCase = deletionUseCase
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
@@ -57,6 +60,7 @@ struct MainTabView: View {
 
                 DiscoveriesHomeView(
                     feedUseCase: feedUseCase,
+                    deletionUseCase: deletionUseCase,
                     voiceoverController: voiceoverController,
                     pendingDiscoveryId: $pendingDiscoveryId,
                     pendingCreatedSummary: $pendingCreatedSummary,

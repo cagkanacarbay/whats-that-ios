@@ -129,6 +129,39 @@ public extension SupabaseDiscoveryRepository {
     func fetchRecentDiscoveries(limit: Int) async throws -> [DiscoverySummary] {
         try await fetchDiscoveries(limit: limit, before: nil)
     }
+
+    func deleteDiscovery(_ summary: DiscoverySummary) async throws {
+        guard let userId = client.auth.currentUser?.id else {
+            supabaseDiscoveryLogger.error("Attempted to delete discovery \(summary.id, privacy: .public) without an authenticated Supabase user.")
+            throw DiscoveryFeedError.unauthorized
+        }
+
+        do {
+            _ = try await client.database
+                .from("discoveries")
+                .delete(returning: .minimal)
+                .eq("id", value: Int(summary.id))
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+        } catch {
+            supabaseDiscoveryLogger.error("Failed to delete discovery \(summary.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+
+        await assetCache.invalidateSignedURL(for: summary.id)
+
+        guard let storagePath = resolveStoragePath(for: summary) else {
+            return
+        }
+
+        do {
+            _ = try await client.storage
+                .from("discovery_images")
+                .remove(paths: [storagePath])
+        } catch {
+            supabaseDiscoveryLogger.warning("Deleted discovery \(summary.id, privacy: .public) but failed to remove image \(storagePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
 }
 
 private struct GetDiscoveriesParams: Encodable {
@@ -226,6 +259,7 @@ private extension SupabaseDiscoveryRepository {
             detailDescription: detailDescription,
             capturedAt: record.createdAt,
             imagePath: signedImageURL ?? record.imageURL?.trimmed.nonEmpty,
+            imageStoragePath: record.imageURL?.trimmed.nonEmpty,
             shareToken: record.shareToken,
             location: record.makeLocation()
         )
@@ -275,6 +309,32 @@ private extension SupabaseDiscoveryRepository {
             await assetCache.invalidateSignedURL(for: discoveryId)
             return nil
         }
+    }
+
+    private func resolveStoragePath(for summary: DiscoverySummary) -> String? {
+        if let directPath = summary.imageStoragePath?.nonEmpty {
+            return directPath
+        }
+        guard let imagePath = summary.imagePath else {
+            return nil
+        }
+        return resolveStoragePath(from: imagePath)
+    }
+
+    private func resolveStoragePath(from value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let range = trimmed.range(of: "/discovery_images/", options: .caseInsensitive) {
+            var path = String(trimmed[range.upperBound...])
+            if let queryIndex = path.firstIndex(of: "?") {
+                path = String(path[..<queryIndex])
+            }
+            path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return path.removingPercentEncoding?.nonEmpty ?? path.nonEmpty
+        }
+
+        return trimmed.nonEmpty
     }
 }
 

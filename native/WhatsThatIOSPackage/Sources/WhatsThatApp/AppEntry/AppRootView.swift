@@ -48,6 +48,7 @@ public struct AppRootView: View {
 
         return RootContentView(
             feedUseCase: container.discoveryFeedUseCase,
+            deletionUseCase: container.discoveryDeletionUseCase,
             authUseCase: container.authUseCase,
             onboardingUseCase: container.onboardingUseCase,
             flowResolver: container.flowResolver,

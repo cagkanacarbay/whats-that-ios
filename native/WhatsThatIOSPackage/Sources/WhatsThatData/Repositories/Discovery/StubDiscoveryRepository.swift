@@ -58,4 +58,8 @@ public struct StubDiscoveryRepository: DiscoveryRepository {
 
         return Array(filtered.prefix(limit))
     }
+
+    public func deleteDiscovery(_ summary: DiscoverySummary) async throws {
+        // No-op for stub repository.
+    }
 }

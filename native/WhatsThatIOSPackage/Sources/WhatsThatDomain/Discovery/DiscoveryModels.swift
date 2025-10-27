@@ -34,6 +34,7 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
     public let detailDescription: String?
     public let capturedAt: Date
     public let imagePath: String?
+    public let imageStoragePath: String?
     public let shareToken: UUID?
     public let location: DiscoveryLocation?
 
@@ -45,6 +46,7 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
         detailDescription: String? = nil,
         capturedAt: Date,
         imagePath: String? = nil,
+        imageStoragePath: String? = nil,
         shareToken: UUID? = nil,
         location: DiscoveryLocation? = nil
     ) {
@@ -55,6 +57,7 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
         self.detailDescription = detailDescription
         self.capturedAt = capturedAt
         self.imagePath = imagePath
+        self.imageStoragePath = imageStoragePath
         self.shareToken = shareToken
         self.location = location
     }
@@ -62,6 +65,7 @@ public struct DiscoverySummary: Identifiable, Equatable, Sendable {
 
 public protocol DiscoveryRepository: Sendable {
     func fetchDiscoveries(limit: Int, before discoveryId: Int64?) async throws -> [DiscoverySummary]
+    func deleteDiscovery(_ summary: DiscoverySummary) async throws
 }
 
 public enum DiscoveryFeedError: LocalizedError, Equatable {

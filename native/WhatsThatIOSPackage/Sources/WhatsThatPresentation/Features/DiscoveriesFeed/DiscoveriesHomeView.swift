@@ -14,6 +14,7 @@ private let discoveriesHomeLogger = Logger(
 
 struct DiscoveriesHomeView: View {
     private let feedUseCase: DiscoveryFeedUseCase
+    private let deletionUseCase: DiscoveryDeletionUseCase
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var pendingDiscoveryId: Int64?
     @Binding private var pendingCreatedSummary: DiscoverySummary?
@@ -30,6 +31,9 @@ struct DiscoveriesHomeView: View {
     @State private var headerHeight: CGFloat = 110
     @State private var safeAreaTopInset: CGFloat = 0
     @State private var refreshErrorMessage: String?
+    @State private var deletingDiscoveryId: Int64?
+    @State private var isDeletionInProgress = false
+    @State private var deletionErrorMessage: String?
 
     private var headerMetrics: DiscoveriesHeaderMetrics {
         DiscoveriesHeaderMetrics(
@@ -44,6 +48,7 @@ struct DiscoveriesHomeView: View {
 
     init(
         feedUseCase: DiscoveryFeedUseCase,
+        deletionUseCase: DiscoveryDeletionUseCase,
         voiceoverController: VoiceoverPlaybackController,
         pendingDiscoveryId: Binding<Int64?>,
         pendingCreatedSummary: Binding<DiscoverySummary?>,
@@ -51,6 +56,7 @@ struct DiscoveriesHomeView: View {
         onSettings: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
+        self.deletionUseCase = deletionUseCase
         self._voiceoverController = ObservedObject(initialValue: voiceoverController)
         self._pendingDiscoveryId = pendingDiscoveryId
         self._pendingCreatedSummary = pendingCreatedSummary
@@ -176,6 +182,9 @@ struct DiscoveriesHomeView: View {
                         colorScheme: colorScheme,
                         voiceoverController: voiceoverController,
                         onClose: { detailCoordinator.dismiss(reason: .backButton) },
+                        deletingDiscoveryId: deletingDiscoveryId,
+                        isDeletingDiscovery: isDeletionInProgress,
+                        onDelete: { handleDeleteRequest(for: $0) },
                         onShowOptions: nil
                     )
                     .ignoresSafeArea(edges: .top)
@@ -235,9 +244,31 @@ struct DiscoveriesHomeView: View {
                 }
             },
             message: {
-                Text("Please try again later.")
+                Text(refreshErrorMessage ?? "Please try again later.")
             }
         )
+        .overlay {
+            Color.clear
+                .alert(
+                    "Delete failed",
+                    isPresented: Binding(
+                        get: { deletionErrorMessage != nil },
+                        set: { isPresented in
+                            if !isPresented {
+                                deletionErrorMessage = nil
+                            }
+                        }
+                    ),
+                    actions: {
+                        Button("OK", role: .cancel) {
+                            deletionErrorMessage = nil
+                        }
+                    },
+                    message: {
+                        Text(deletionErrorMessage ?? "Please try again later.")
+                    }
+                )
+        }
     }
 
     private func handleDiscoverySelection(discovery: DiscoverySummary, imageURL: URL?, startFrame: CGRect) {
@@ -294,6 +325,31 @@ struct DiscoveriesHomeView: View {
 
     private func handleDetailDragEnded(_ value: DragGesture.Value) {
         detailCoordinator.endDrag(value)
+    }
+
+    private func handleDeleteRequest(for discovery: DiscoverySummary) {
+        guard !isDeletionInProgress else { return }
+        deletingDiscoveryId = discovery.id
+        isDeletionInProgress = true
+
+        Task {
+            do {
+                try await deletionUseCase.delete(discovery)
+                await MainActor.run {
+                    viewModel.remove(discovery)
+                    detailCoordinator.dismiss(reason: .backButton)
+                    deletingDiscoveryId = nil
+                    isDeletionInProgress = false
+                }
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? "We couldn't delete this discovery. Try again later."
+                await MainActor.run {
+                    deletionErrorMessage = message
+                    deletingDiscoveryId = nil
+                    isDeletionInProgress = false
+                }
+            }
+        }
     }
 
     private func updateSafeAreaBottomInsetIfNeeded(_ value: CGFloat) {

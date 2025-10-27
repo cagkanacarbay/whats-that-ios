@@ -12,6 +12,7 @@ public struct RootContentView: View {
     @State private var isSettingsPresented = false
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let feedUseCase: DiscoveryFeedUseCase
+    private let deletionUseCase: DiscoveryDeletionUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
@@ -19,6 +20,7 @@ public struct RootContentView: View {
 
     public init(
         feedUseCase: DiscoveryFeedUseCase,
+        deletionUseCase: DiscoveryDeletionUseCase,
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver = AppFlowResolver(),
@@ -28,6 +30,7 @@ public struct RootContentView: View {
         fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) }
     ) {
         self.feedUseCase = feedUseCase
+        self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
         self.makeVoiceoverController = makeVoiceoverController
         self.makeCreditsViewModel = makeCreditsViewModel
@@ -108,6 +111,7 @@ public struct RootContentView: View {
                     if let makeVoiceoverController {
                         MainTabView(
                             feedUseCase: feedUseCase,
+                            deletionUseCase: deletionUseCase,
                             cameraViewModel: makeCreationViewModel(.camera),
                             uploadViewModel: makeCreationViewModel(.upload),
                             voiceoverControllerFactory: makeVoiceoverController,

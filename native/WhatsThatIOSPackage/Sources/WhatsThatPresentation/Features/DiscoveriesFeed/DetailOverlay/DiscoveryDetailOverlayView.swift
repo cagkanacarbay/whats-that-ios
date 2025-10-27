@@ -156,11 +156,14 @@ struct DiscoveryDetailOverlayView: View {
                 let effectivePullDown: CGFloat = (snapshot.isClosing || !isChromeReady)
                     ? 0
                     : max(scrollOffset, 0) * (1 - collapseProgress)
-                let headerOffset: CGFloat = (snapshot.isClosing || snapshot.isInteracting)
-                    ? 0
-                    : min(scrollOffset, 0) * (1 - collapseProgress)
+                // Keep parallax header offset continuous even during close;
+                // it will naturally ease to 0 with collapseProgress.
+                let headerOffset: CGFloat = min(scrollOffset, 0) * (1 - collapseProgress)
                 let heroTopInset = safeAreaInsets.top * (1 - collapseProgress)
                 let heroHeaderHeight = imageHeightForView + heroTopInset
+                // Compute hero geometry in global coordinates for ScrollView overlay pinning
+                // Include headerOffset so parallax shifts are reflected.
+                let heroBottomGlobalY = containerFrameRaw.origin.y + geometry.offset.y + headerOffset + heroHeaderHeight
                 let fadeMultiplier = snapshot.isClosing ? max(0, 1 - collapseProgress) : 1
                 let heroOverlayOpacity: Double = overlayOpacities.hero * fadeMultiplier
                 let scrollOverlayOpacity: Double = overlayOpacities.scroll * fadeMultiplier
@@ -172,6 +175,8 @@ struct DiscoveryDetailOverlayView: View {
                     cardSize: CGSize(width: cardWidth, height: cardHeight),
                     heroHeight: heroHeaderHeight,
                     heroImageHeight: imageHeightForView,
+                    heroVisibleHeight: heroHeaderHeight,
+                    heroBottomGlobalY: heroBottomGlobalY,
                     headerOffset: headerOffset,
                     pullDownOffset: effectivePullDown,
                     cornerRadius: maskCornerRadius,
@@ -254,30 +259,23 @@ struct DiscoveryDetailOverlayView: View {
         isInteracting: Bool,
         progress: CGFloat
     ) -> (hero: Double, scroll: Double) {
-        // During close, remove overlays immediately.
+        // L. Keep overlay during close: fade out with collapse progress
         if isClosing {
-            return (hero: 0, scroll: 0)
+            let collapse = Double(Self.transformProgressStatic(progress))
+            let fading = max(0, 1 - collapse)
+            return (hero: 0, scroll: baseOpacity * fading)
         }
-        guard isChromeReady else {
-            return (hero: baseOpacity, scroll: 0)
-        }
+        // J. Show overlay from frame 0; don't gate by chrome-ready
+        // Interactions: prefer baseOpacity (header ramp), not detailOpacity
         if isInteracting {
-            return (hero: baseOpacity, scroll: detailOpacity)
+            return (hero: 0, scroll: baseOpacity)
         }
-        // Hold the hero overlay pinned to the image bottom until the
-        // hero expansion animation is essentially complete, then
-        // crossfade to the scroll-based overlay. This keeps the
-        // gradient attached to the image edge throughout the open.
-        let holdThreshold: CGFloat = 0.995
-        if progress <= holdThreshold {
-            return (hero: baseOpacity, scroll: 0)
-        }
-        // Smooth crossfade within the final fraction of the transition.
-        let t = max(0, min((progress - holdThreshold) / (1 - holdThreshold), 1))
-        let hero = baseOpacity * Double(1 - t)
-        let scroll = detailOpacity * Double(t)
-        return (hero: hero, scroll: scroll)
+        // During open, rely solely on scroll overlay opacity
+        return (hero: 0, scroll: baseOpacity)
     }
+
+    // Helper to reuse uniform close progress mapping without creating dependency cycles
+    private static func transformProgressStatic(_ progress: CGFloat) -> CGFloat { max(0, min(1, 1 - progress)) }
 
     private func resolvedCornerRadius(targetCornerRadius: CGFloat, scale: CGFloat) -> CGFloat {
         let safeScale = scale.isFinite ? max(scale, 0.0001) : 1

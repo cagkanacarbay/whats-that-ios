@@ -7,3 +7,6 @@ struct HeroScrollOffsetPreferenceKey: PreferenceKey {
         value = nextValue()
     }
 }
+
+// HeaderContainerBottomPreferenceKey was removed; overlay offset is now
+// computed analytically from overlay geometry, avoiding 1-frame lag.

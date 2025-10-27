@@ -10,11 +10,11 @@ struct DiscoveryHeaderOverlayView: View {
     /// Adjust how far up the gradient tint should carry. Higher values reveal more of the image.
     var gradientFalloff: CGFloat = 0.55
     var contentWidth: CGFloat? = nil
+    var onShare: (() -> Void)? = nil
+    var onShowMap: (() -> Void)? = nil
+    private let actionRowBottomInset: CGFloat = 120 // makes sure the map and share buttons are placed above the title
 
     var body: some View {
-        let titleAndDatePadding = BrandSpacing.large
-        let shortDescriptionPadding = BrandSpacing.medium
-
         ZStack(alignment: .bottom) {
             backgroundGradient
 
@@ -23,13 +23,11 @@ struct DiscoveryHeaderOverlayView: View {
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(palette.textPrimary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, titleAndDatePadding)
                     .frame(maxWidth: .infinity)
 
                 Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, titleAndDatePadding)
                     .frame(maxWidth: .infinity)
 
                 if let shortDescription = overlayShortDescription {
@@ -37,16 +35,25 @@ struct DiscoveryHeaderOverlayView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(palette.textSecondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, shortDescriptionPadding)
                         .frame(maxWidth: .infinity)
                         .lineLimit(maxDescriptionLines == 0 ? nil : maxDescriptionLines)
                 }
             }
-            .padding(.bottom, BrandSpacing.xLarge)
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.top, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.large)
             .frame(maxWidth: contentWidth ?? .infinity)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(width: contentWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .overlay(alignment: .bottom) {
+            if hasActionRow {
+                actionRow
+                    .padding(.horizontal, BrandSpacing.large)
+                    .padding(.bottom, actionRowBottomInset)
+            }
+        }
     }
 
     private var gradientStops: [Gradient.Stop] {
@@ -56,6 +63,34 @@ struct DiscoveryHeaderOverlayView: View {
             .init(color: palette.overlayMidtone.opacity(0.35), location: max(gradientFalloff - 0.12, 0.05)),
             .init(color: Color.clear, location: min(gradientFalloff + 0.2, 1.0))
         ]
+    }
+
+    @ViewBuilder
+    private var actionRow: some View {
+        HStack {
+            if let onShowMap {
+                DiscoveryOverlayButton(
+                    systemName: "mappin.and.ellipse",
+                    action: onShowMap,
+                    accessibilityLabel: "Open location in Maps"
+                )
+            }
+
+            Spacer()
+
+            if let onShare {
+                DiscoveryOverlayButton(
+                    systemName: "square.and.arrow.up",
+                    action: onShare,
+                    accessibilityLabel: "Share discovery"
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var hasActionRow: Bool {
+        onShare != nil || onShowMap != nil
     }
 
     private var backgroundGradient: some View {

@@ -19,8 +19,15 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     private var closeWorkItem: DispatchWorkItem?
     private let chromeRevealFraction: Double = 0.1
 
-    private let detailEdgeActivationWidth: CGFloat = 30
     private let detailDismissalThreshold: CGFloat = 150
+    private let detailVerticalDismissalThreshold: CGFloat = 180
+    private let detailHorizontalActivationTranslation: CGFloat = 14
+    private let detailVerticalActivationTranslation: CGFloat = 22
+    private let detailDismissDominantAxisSlack: CGFloat = 8
+    private let verticalDismissActivationMaximumOffset: CGFloat = 12
+    // Non-published copy of content distance used for gesture gating. This avoids
+    // publishing during view updates while still allowing immediate gating.
+    private var contentDistanceForGating: CGFloat = 0
 
     init(
         voiceoverController: VoiceoverPlaybackController,
@@ -60,6 +67,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         newSnapshot.isContentReady = false
         newSnapshot.isClosing = false
         newSnapshot.isInteracting = false
+        newSnapshot.contentScrollOffset = 0
         newSnapshot.activeDiscoveryId = discovery.id
         newSnapshot.accessibility.isVoiceoverActive = true
 
@@ -79,44 +87,49 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     func updateDrag(_ value: DragGesture.Value) {
         guard snapshot.context != nil, !snapshot.isClosing else { return }
 
+        let interactor = makeDismissInteractor()
+
         if !snapshot.isInteracting {
-            let interactor = makeDismissInteractor()
-            guard interactor.canBeginInteraction(
+            guard let direction = interactor.interactionDirection(
                 startLocation: value.startLocation,
                 translation: value.translation
-            ) else {
-                return
-            }
+            ) else { return }
             snapshot.isInteracting = true
             snapshot.phase = .interactiveDismiss
+            snapshot.activeDismissDirection = direction
         }
 
-        guard snapshot.isInteracting else { return }
+        guard snapshot.isInteracting, let direction = snapshot.activeDismissDirection else { return }
 
-        let interactor = makeDismissInteractor()
-        let metrics = interactor.metrics(for: value.translation)
+        let metrics = interactor.metrics(for: value.translation, direction: direction)
         snapshot.gestureTranslation = metrics.translation
         snapshot.gestureScale = metrics.scale
         snapshot.gestureRotation = metrics.rotation
         snapshot.gestureCornerRadius = metrics.cornerRadius
         snapshot.gestureShadowOpacity = metrics.shadowOpacity
 
-        let dismissalProgress = min(
-            max(metrics.translation.width / max(interactor.dismissalDistance, 1), 0),
-            1
-        )
-        snapshot.dismissProgress = dismissalProgress
+        snapshot.dismissProgress = metrics.progress
     }
 
     func endDrag(_ value: DragGesture.Value) {
         guard snapshot.isInteracting else { return }
+        guard let direction = snapshot.activeDismissDirection else {
+            snapshot.isInteracting = false
+            resetGestureState(animated: true)
+            if let sessionId = snapshot.context?.sessionId {
+                scheduleDetailSettled(for: sessionId)
+            }
+            return
+        }
         snapshot.isInteracting = false
 
         let interactor = makeDismissInteractor()
         let shouldDismiss = interactor.shouldDismiss(
             translation: value.translation,
-            predictedTranslation: value.predictedEndTranslation
+            predictedTranslation: value.predictedEndTranslation,
+            direction: direction
         )
+
 
         if shouldDismiss {
             snapshot.closeStartTranslation = snapshot.gestureTranslation
@@ -133,11 +146,22 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         }
     }
 
+    func updateContentScrollOffset(_ offset: CGFloat) {
+        guard snapshot.hasActiveOverlay else { return }
+        // Update non-published gating value synchronously for immediate use.
+        self.contentDistanceForGating = offset
+        // Mirror into snapshot asynchronously to avoid publishing during view updates.
+        DispatchQueue.main.async { [weak self] in
+            self?.snapshot.contentScrollOffset = offset
+        }
+    }
+
     func dismiss(reason: DismissReason = .backButton) {
         guard let context = snapshot.context else { return }
         guard !snapshot.isClosing else { return }
 
         snapshot.isInteracting = false
+        snapshot.activeDismissDirection = nil
         if reason == .backButton {
             snapshot.closeStartTranslation = .zero
             snapshot.closeStartScale = 1
@@ -273,6 +297,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             snapshot.gestureRotation = 0
             snapshot.gestureShadowOpacity = 0
             snapshot.gestureCornerRadius = 0
+            snapshot.activeDismissDirection = nil
             if resetDismissProgress {
                 snapshot.dismissProgress = 0
             }
@@ -288,14 +313,21 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     }
 
     private func makeDismissInteractor() -> DiscoveryDetailDismissInteractor {
-        DiscoveryDetailDismissInteractor(
-            edgeActivationWidth: detailEdgeActivationWidth,
-            dismissalDistance: computeDismissalDistance(),
-            dismissalThreshold: detailDismissalThreshold
+        let offset = self.contentDistanceForGating
+        let allowVertical = offset <= self.verticalDismissActivationMaximumOffset
+        return DiscoveryDetailDismissInteractor(
+            horizontalDismissalDistance: computeHorizontalDismissalDistance(),
+            verticalDismissalDistance: computeVerticalDismissalDistance(),
+            horizontalDismissalThreshold: detailDismissalThreshold,
+            verticalDismissalThreshold: detailVerticalDismissalThreshold,
+            horizontalActivationTranslation: detailHorizontalActivationTranslation,
+            verticalActivationTranslation: detailVerticalActivationTranslation,
+            dominantAxisSlack: detailDismissDominantAxisSlack,
+            allowVerticalDismiss: allowVertical
         )
     }
 
-    private func computeDismissalDistance() -> CGFloat {
+    private func computeHorizontalDismissalDistance() -> CGFloat {
         if let window = UIApplication.shared
             .connectedScenes
             .compactMap({ $0 as? UIWindowScene })
@@ -305,6 +337,18 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             return max(window.bounds.width, 1)
         }
         return max(UIScreen.main.bounds.width, 1)
+    }
+
+    private func computeVerticalDismissalDistance() -> CGFloat {
+        if let window = UIApplication.shared
+            .connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow })
+        {
+            return max(window.bounds.height, 1)
+        }
+        return max(UIScreen.main.bounds.height, 1)
     }
 
     private func cancelPendingWork() {

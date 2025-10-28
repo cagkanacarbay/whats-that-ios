@@ -16,7 +16,10 @@ struct DiscoveryDetailOverlayView: View {
     let isDeletingDiscovery: Bool
     let onDelete: ((DiscoverySummary) -> Void)?
     let onShowOptions: (() -> Void)?
+    let onScrollContentOffsetChanged: (CGFloat) -> Void
     @State private var scrollOffset: CGFloat = 0
+    @State private var isImageSheetPresented = false
+    @State private var fullscreenContext: DiscoveryDetailContext?
 
     init(
         snapshot: DiscoveryDetailOverlaySnapshot,
@@ -28,7 +31,8 @@ struct DiscoveryDetailOverlayView: View {
         deletingDiscoveryId: Int64?,
         isDeletingDiscovery: Bool,
         onDelete: ((DiscoverySummary) -> Void)?,
-        onShowOptions: (() -> Void)?
+        onShowOptions: (() -> Void)?,
+        onScrollContentOffsetChanged: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.snapshot = snapshot
         self.destinationFrame = destinationFrame
@@ -39,6 +43,7 @@ struct DiscoveryDetailOverlayView: View {
         self.isDeletingDiscovery = isDeletingDiscovery
         self.onDelete = onDelete
         self.onShowOptions = onShowOptions
+        self.onScrollContentOffsetChanged = onScrollContentOffsetChanged
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
     }
 
@@ -49,6 +54,14 @@ struct DiscoveryDetailOverlayView: View {
             } else {
                 EmptyView()
             }
+        }
+        .onChange(of: scrollOffset) { _, newValue in
+            // Fallback propagation from the binding itself, in case the inner
+            // content's callback path does not fire. Convert the content's
+            // negative-downwards offset to positive distance-from-top.
+            let distanceFromTop = max(-newValue, 0)
+            // Safe to call synchronously; coordinator defers any published changes.
+            onScrollContentOffsetChanged(distanceFromTop)
         }
     }
 
@@ -207,15 +220,19 @@ struct DiscoveryDetailOverlayView: View {
                     voiceoverController: voiceoverController,
                     overlayNamespace: overlayNamespace,
                     scrollOffset: $scrollOffset,
+                    onScrollViewContentOffsetChange: onScrollContentOffsetChanged,
                     onClose: onClose,
                     isDeleting: isDeletingDiscovery && deletingDiscoveryId == context.discovery.id,
                     onDelete: {
                         onDelete?(context.discovery)
                     },
-                    onShowOptions: onShowOptions
+                    onShowOptions: onShowOptions,
+                    onShowImage: { presentFullscreen(for: context) }
                 )
 
                 heroCard
+                    .allowsHitTesting(!isImageSheetPresented)
+                    .zIndex(5)
                     .shadow(
                         color: Color.black.opacity(combinedShadowOpacity),
                         radius: combinedShadowRadius,
@@ -242,13 +259,52 @@ struct DiscoveryDetailOverlayView: View {
                             .offset(x: finalOffsetX, y: finalOffsetY)
                     }
                     .animation(.easeInOut(duration: 0.24), value: isChromeReady)
+
             }
         }
         .onChange(of: snapshot.isClosing) { _, closing in
+            if closing {
+                dismissFullscreen()
+            }
             guard closing, scrollOffset != 0 else { return }
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.2)) {
                 scrollOffset = 0
             }
+        }
+        .onChange(of: snapshot.context?.id) { _, _ in
+            dismissFullscreen()
+        }
+        .sheet(isPresented: $isImageSheetPresented, onDismiss: {
+            fullscreenContext = nil
+        }) {
+            Group {
+                if let fullscreenContext {
+                    DiscoveryDetailImageFullscreenView(
+                        discoveryId: fullscreenContext.discovery.id,
+                        imageURL: fullscreenContext.imageURL,
+                        placeholderImage: fullscreenContext.placeholderImage,
+                        onClose: dismissFullscreen
+                    )
+                } else {
+                    Color.clear
+                }
+            }
+            .presentationDetents([.fraction(0.995)])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func presentFullscreen(for context: DiscoveryDetailContext) {
+        fullscreenContext = context
+        guard !isImageSheetPresented else { return }
+        isImageSheetPresented = true
+    }
+
+    private func dismissFullscreen() {
+        if isImageSheetPresented {
+            isImageSheetPresented = false
+        } else {
+            fullscreenContext = nil
         }
     }
 

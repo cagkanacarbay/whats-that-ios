@@ -21,6 +21,11 @@ struct DiscoveryDetailOverlaySnapshot {
         }
     }
 
+    enum DismissDirection: Equatable {
+        case horizontal
+        case vertical
+    }
+
     struct AccessibilityState {
         var isVoiceoverActive: Bool = false
     }
@@ -41,6 +46,8 @@ struct DiscoveryDetailOverlaySnapshot {
     var closeStartTranslation: CGSize = .zero
     var closeStartScale: CGFloat = 1
     var closeStartRotation: Double = 0
+    var activeDismissDirection: DismissDirection?
+    var contentScrollOffset: CGFloat = 0
     var activeDiscoveryId: Int64?
     var accessibility: AccessibilityState = .init()
 

@@ -36,6 +36,15 @@
 				Release.xcconfig,
 				Shared.xcconfig,
 				Tests.xcconfig,
+				AppInfo.plist,
+			);
+			target = 8B41F6442DEDD0D5001A66F9 /* WhatsThatIOS */;
+		};
+		8BD71C0B2DEE41E000CEDD93 /* Exceptions for "WhatsThatIOS" folder in "WhatsThatIOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				WhatsThatIOS.xctestplan,
 			);
 			target = 8B41F6442DEDD0D5001A66F9 /* WhatsThatIOS */;
 		};
@@ -45,6 +54,9 @@
 		8B41F6472DEDD0D5001A66F9 /* WhatsThatIOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = WhatsThatIOS;
+			exceptions = (
+				8BD71C0B2DEE41E000CEDD93 /* Exceptions for "WhatsThatIOS" folder in "WhatsThatIOS" target */,
+			);
 			sourceTree = "<group>";
 		};
 		8B41F65F2DEDD0D6001A66F9 /* WhatsThatIOSUITests */ = {
@@ -419,7 +431,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = WhatsThatIOS;
 			};
 			name = Debug;
@@ -433,7 +445,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = WhatsThatIOS;
 			};
 			name = Release;

@@ -1,4 +1,5 @@
 import SwiftUI
+
 import UIKit
 import WhatsThatDomain
 import WhatsThatShared
@@ -35,10 +36,12 @@ struct DiscoveryDetailView: View {
     let layout: LayoutConfiguration
     let safeAreaInsets: EdgeInsets
     let overlayNamespace: Namespace.ID
+    let onScrollViewContentOffsetChange: ((CGFloat) -> Void)?
     let onClose: () -> Void
     let isDeleting: Bool
     let onDelete: (() -> Void)?
     let onShowOptions: (() -> Void)?
+    let onShowImage: (() -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var scrollOffset: CGFloat
     @State private var isOptionsPresented = false
@@ -55,10 +58,12 @@ struct DiscoveryDetailView: View {
         voiceoverController: VoiceoverPlaybackController,
         overlayNamespace: Namespace.ID,
         scrollOffset: Binding<CGFloat>,
+        onScrollViewContentOffsetChange: ((CGFloat) -> Void)? = nil,
         onClose: @escaping () -> Void,
         isDeleting: Bool,
         onDelete: (() -> Void)?,
-        onShowOptions: (() -> Void)?
+        onShowOptions: (() -> Void)?,
+        onShowImage: (() -> Void)? = nil
     ) {
         self.discovery = discovery
         self.imageURL = imageURL
@@ -68,10 +73,12 @@ struct DiscoveryDetailView: View {
         self.layout = layout
         self.safeAreaInsets = safeAreaInsets
         self.overlayNamespace = overlayNamespace
+        self.onScrollViewContentOffsetChange = onScrollViewContentOffsetChange
         self.onClose = onClose
         self.isDeleting = isDeleting
         self.onDelete = onDelete
         self.onShowOptions = onShowOptions
+        self.onShowImage = onShowImage
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
     }
@@ -120,6 +127,8 @@ struct DiscoveryDetailView: View {
                 onClose: onClose,
                 onShowOptions: handleOptionsTapped,
                 isOptionsEnabled: !isDeleting,
+                onShowImage: onShowImage,
+                onScrollViewContentOffsetChange: onScrollViewContentOffsetChange,
                 scrollOffset: $scrollOffset,
                 onShare: { presentShareSheet() },
                 onShowMap: discovery.location != nil ? { openLocationIfAvailable() } : nil
@@ -145,6 +154,14 @@ struct DiscoveryDetailView: View {
                 isOptionsPresented = false
             }
         }
+    }
+}
+
+struct DiscoveryOverlayInteractiveRegionPreferenceKey: PreferenceKey {
+    static var defaultValue: [Anchor<CGRect>] = []
+
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
+        value.append(contentsOf: nextValue())
     }
 }
 
@@ -210,12 +227,16 @@ private struct DiscoveryDetailContentView: View {
     let onClose: (() -> Void)?
     let onShowOptions: (() -> Void)?
     let isOptionsEnabled: Bool
+    let onShowImage: (() -> Void)?
     let onShare: (() -> Void)?
     let onShowMap: (() -> Void)?
+    let onScrollViewContentOffsetChange: ((CGFloat) -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     // Player inset store is not required when using a bottom safeAreaInset.
     @Binding var scrollOffset: CGFloat
     @State private var baselineOffset: CGFloat?
+    // Scrolling/dismiss gating has no need for persistent local state
+    @State private var overlayInteractiveAnchors: [Anchor<CGRect>] = []
     // no external measurement needed
 
     init(
@@ -243,6 +264,8 @@ private struct DiscoveryDetailContentView: View {
         onClose: (() -> Void)? = nil,
         onShowOptions: (() -> Void)? = nil,
         isOptionsEnabled: Bool = true,
+        onShowImage: (() -> Void)? = nil,
+        onScrollViewContentOffsetChange: ((CGFloat) -> Void)? = nil,
         scrollOffset: Binding<CGFloat>,
         onShare: (() -> Void)? = nil,
         onShowMap: (() -> Void)? = nil
@@ -270,6 +293,8 @@ private struct DiscoveryDetailContentView: View {
         self.onClose = onClose
         self.onShowOptions = onShowOptions
         self.isOptionsEnabled = isOptionsEnabled
+        self.onShowImage = onShowImage
+        self.onScrollViewContentOffsetChange = onScrollViewContentOffsetChange
         self.onShare = onShare
         self.onShowMap = onShowMap
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
@@ -299,7 +324,7 @@ private struct DiscoveryDetailContentView: View {
                         value: proxy.frame(in: .named("hero-scroll")).minY
                     )
             }
-            .frame(height: 0)
+            .frame(height: 1)
 
             VStack(spacing: 0) {
                 ZStack(alignment: .bottom) {
@@ -330,6 +355,14 @@ private struct DiscoveryDetailContentView: View {
                     .transaction { $0.animation = nil }
                     .opacity(scrollOverlayOpacity)
                     .allowsHitTesting(isChromeReady)
+                    .onPreferenceChange(DiscoveryOverlayInteractiveRegionPreferenceKey.self) { anchors in
+                        overlayInteractiveAnchors = anchors
+                    }
+                    .overlay(alignment: .top) {
+                        if onShowImage != nil, isChromeReady, !isClosing {
+                            heroTapOverlay
+                        }
+                    }
                 }
 
                 if isChromeReady {
@@ -359,18 +392,31 @@ private struct DiscoveryDetailContentView: View {
                     .opacity(contentOpacity)
                 }
             }
+            // Attach UIKit offset observer inside the scroll content so the
+            // representable sits within the UIScrollView's view hierarchy.
+            .background(
+                ScrollViewContentOffsetObserver { offset in
+                    updateGatedDistanceFromTop(distance: offset)
+                }
+                .allowsHitTesting(false)
+            )
         }
         .id(discovery.id)
         .coordinateSpace(name: "hero-scroll")
         .frame(width: containerWidth)
         .contentMargins(.all, 0, for: .scrollContent)
         .conditionalScrollDisabled(isScrollDisabled)
+        // Track scroll position via geometry to compute a stable
+        // distance-from-top value for gesture gating.
         .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
             if baselineOffset == nil {
                 baselineOffset = value
             }
             let adjusted = value - (baselineOffset ?? 0)
             scrollOffset = adjusted
+            // Positive distance from top (0 at top, grows as you scroll down)
+            let distanceFromTop = max(-adjusted, 0)
+            updateGatedDistanceFromTop(distance: distanceFromTop)
         }
         .onAppear {
             voiceoverController.ensureMetadata(for: discovery)
@@ -410,5 +456,134 @@ private struct DiscoveryDetailContentView: View {
 private extension DiscoveryDetailContentView {
     var overlayGeometryId: String {
         "discovery-detail-overlay-\(discovery.id)"
+    }
+
+    @ViewBuilder
+    private var heroTapOverlay: some View {
+        GeometryReader { proxy in
+            let topPadding = min(topTapExclusionHeight, proxy.size.height)
+            let bottomPadding = min(bottomExclusionHeight, max(proxy.size.height - topPadding, 0))
+            let interactiveHeight = max(proxy.size.height - topPadding - bottomPadding, 0)
+            let interactiveRects = overlayInteractiveAnchors.map { proxy[$0] }
+            let tapExclusions = resolvedTapExclusions(
+                for: interactiveRects,
+                topPadding: topPadding,
+                interactiveHeight: interactiveHeight,
+                containerWidth: proxy.size.width
+            )
+
+            VStack(spacing: 0) {
+                Spacer()
+                    .frame(height: topPadding)
+                    .allowsHitTesting(false)
+
+                Color.clear
+                    .frame(height: interactiveHeight)
+                    .contentShape(HeroTapHitShape(exclusions: tapExclusions), eoFill: true)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { value in
+                                guard let onShowImage,
+                                      isTap(translation: value.translation),
+                                      !tapExclusions.contains(where: { $0.contains(value.startLocation) }) else { return }
+                                onShowImage()
+                            }
+                    )
+
+                Spacer()
+                    .frame(height: bottomPadding)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: heroVisibleHeight)
+        .allowsHitTesting(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("View image full screen")
+    }
+
+    private func isTap(translation: CGSize) -> Bool {
+        abs(translation.width) < 6 && abs(translation.height) < 6
+    }
+
+    private var topTapExclusionHeight: CGFloat {
+        var height = safeAreaTopInset + 12
+        if showTopControls {
+            height += 48 + BrandSpacing.small
+        }
+        if hasActionRow {
+            height += 48 + BrandSpacing.small
+        }
+        height += BrandSpacing.medium
+        return height
+    }
+
+    private var bottomExclusionHeight: CGFloat {
+        BrandSpacing.large
+    }
+
+    private var hasActionRow: Bool {
+        onShare != nil || onShowMap != nil
+    }
+
+    func updateGatedDistanceFromTop(distance: CGFloat) {
+        onScrollViewContentOffsetChange?(distance)
+    }
+
+    func resolvedTapExclusions(
+        for interactiveRects: [CGRect],
+        topPadding: CGFloat,
+        interactiveHeight: CGFloat,
+        containerWidth: CGFloat
+    ) -> [CGRect] {
+        guard interactiveHeight > 0 else { return [] }
+        let expansion: CGFloat = 12
+        let interactiveArea = CGRect(
+            x: 0,
+            y: topPadding,
+            width: containerWidth,
+            height: interactiveHeight
+        )
+
+        return interactiveRects.compactMap { rect in
+            let intersection = rect.intersection(interactiveArea)
+            guard intersection.width > 0, intersection.height > 0 else { return nil }
+
+            let localRect = CGRect(
+                x: intersection.origin.x,
+                y: intersection.origin.y - topPadding,
+                width: intersection.width,
+                height: intersection.height
+            )
+
+            let minX = max(localRect.minX - expansion, 0)
+            let maxX = min(localRect.maxX + expansion, containerWidth)
+            let minY = max(localRect.minY - expansion, 0)
+            let maxY = min(localRect.maxY + expansion, interactiveHeight)
+
+            let width = max(0, maxX - minX)
+            let height = max(0, maxY - minY)
+            guard width > 0, height > 0 else { return nil }
+
+            return CGRect(x: minX, y: minY, width: width, height: height)
+        }
+    }
+}
+
+private struct HeroTapHitShape: Shape {
+    var exclusions: [CGRect]
+
+    var animatableData: EmptyAnimatableData {
+        get { EmptyAnimatableData() }
+        set {}
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addRect(rect)
+        exclusions.forEach { exclusion in
+            path.addRect(exclusion)
+        }
+        return path
     }
 }

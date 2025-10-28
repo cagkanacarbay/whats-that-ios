@@ -185,7 +185,8 @@ struct DiscoveriesHomeView: View {
                         deletingDiscoveryId: deletingDiscoveryId,
                         isDeletingDiscovery: isDeletionInProgress,
                         onDelete: { handleDeleteRequest(for: $0) },
-                        onShowOptions: nil
+                        onShowOptions: nil,
+                        onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
                     )
                     .ignoresSafeArea(edges: .top)
                     .transition(.identity)

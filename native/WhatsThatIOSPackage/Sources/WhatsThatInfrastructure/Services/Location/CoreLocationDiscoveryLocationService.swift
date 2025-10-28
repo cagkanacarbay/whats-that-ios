@@ -1,9 +1,9 @@
 #if canImport(CoreLocation)
-import CoreLocation
+@preconcurrency import CoreLocation
 import Foundation
 import WhatsThatDomain
 
-public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLocationService {
+public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLocationService, @unchecked Sendable {
     private let locationManager: CLLocationManager
     private let geocoder: CLGeocoder
     private var lastLocation: CLLocation?
@@ -96,7 +96,7 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
 
     @MainActor
     private func requestAuthorizationIfNeeded() async {
-        switch CLLocationManager.authorizationStatus() {
+        switch locationManager.authorizationStatus {
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         case .restricted, .denied:

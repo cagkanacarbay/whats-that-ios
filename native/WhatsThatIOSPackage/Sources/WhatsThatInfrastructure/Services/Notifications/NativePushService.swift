@@ -1,9 +1,9 @@
 #if canImport(UserNotifications)
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 import WhatsThatDomain
 
-public final class NativePushService: DiscoveryPushService {
+public final class NativePushService: DiscoveryPushService, @unchecked Sendable {
     private let center: UNUserNotificationCenter
 
     public init(center: UNUserNotificationCenter = .current()) {

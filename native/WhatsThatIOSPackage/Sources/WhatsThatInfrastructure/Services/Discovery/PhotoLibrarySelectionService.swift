@@ -1,6 +1,6 @@
 #if canImport(UIKit) && canImport(PhotosUI)
 import Photos
-import PhotosUI
+@preconcurrency import PhotosUI
 import UIKit
 import UniformTypeIdentifiers
 import WhatsThatDomain
@@ -69,7 +69,11 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
             return
         }
 
-        result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
+        let itemProvider = result.itemProvider
+        let assetIdentifier = result.assetIdentifier
+        let suggestedName = result.itemProvider.suggestedName
+
+        itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
             DispatchQueue.main.async {
                 if let error {
                     continuation.resume(throwing: error)
@@ -84,7 +88,7 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
                 }
 
                 var location: DiscoveryLocation?
-                if let assetId = result.assetIdentifier {
+                if let assetId = assetIdentifier {
                     let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
                     if let asset = assets.firstObject, let assetLocation = asset.location {
                         location = DiscoveryLocation(
@@ -102,7 +106,7 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
                     let media = DiscoveryCapturedMedia(
                         data: data,
                         contentType: "image/jpeg",
-                        originalFilename: result.itemProvider.suggestedName,
+                        originalFilename: suggestedName,
                         pixelWidth: Int(image.size.width * image.scale),
                         pixelHeight: Int(image.size.height * image.scale),
                         createdAt: Date(),

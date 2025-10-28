@@ -54,21 +54,11 @@ public final class GoogleSignInService: @unchecked Sendable, GoogleSignInServici
         self.configuration = GIDConfiguration(clientID: clientID)
     }
 
+    @MainActor
     public func signIn(presenting viewController: UIViewController) async throws -> GoogleSignInAccount {
-        try await withCheckedThrowingContinuation { continuation in
-            Task { @MainActor in
-                GIDSignIn.sharedInstance.configuration = configuration
-                GIDSignIn.sharedInstance.signIn(withPresenting: viewController) { signInResult, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else if let signInResult {
-                        continuation.resume(returning: Self.makeAccount(from: signInResult.user))
-                    } else {
-                        continuation.resume(throwing: GoogleSignInServiceError.missingResult)
-                    }
-                }
-            }
-        }
+        GIDSignIn.sharedInstance.configuration = configuration
+        let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: viewController)
+        return Self.makeAccount(from: result.user)
     }
 
     public func restorePreviousSignIn() -> GoogleSignInAccount? {
@@ -78,25 +68,15 @@ public final class GoogleSignInService: @unchecked Sendable, GoogleSignInServici
         return Self.makeAccount(from: currentUser)
     }
 
+    @MainActor
     public func clearCredentials() async {
-        let shouldDisconnect = await MainActor.run { () -> Bool in
-            let signIn = GIDSignIn.sharedInstance
-            let hadPrevious = signIn.hasPreviousSignIn()
-            if signIn.currentUser != nil {
-                signIn.signOut()
-            }
-            return hadPrevious
+        let signIn = GIDSignIn.sharedInstance
+        let hadPrevious = signIn.hasPreviousSignIn()
+        if signIn.currentUser != nil {
+            signIn.signOut()
         }
-
-        guard shouldDisconnect else { return }
-
-        await withCheckedContinuation { continuation in
-            Task { @MainActor in
-                GIDSignIn.sharedInstance.disconnect { _ in
-                    continuation.resume(returning: ())
-                }
-            }
-        }
+        guard hadPrevious else { return }
+        try? await signIn.disconnect()
     }
 
     private static func makeAccount(from user: GIDGoogleUser) -> GoogleSignInAccount {

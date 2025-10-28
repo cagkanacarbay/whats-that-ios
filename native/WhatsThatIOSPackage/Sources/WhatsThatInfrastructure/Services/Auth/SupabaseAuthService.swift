@@ -20,21 +20,11 @@ private let supabaseAuthLogger = Logger(subsystem: "WhatsThatIOS", category: "Su
 public final actor SupabaseAuthService: AuthService {
     private let client: SupabaseClient
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
-    private let googleSignInService: GoogleSignInServicing?
+    private var googleSignInService: GoogleSignInServicing?
 #endif
 #if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
-    private let appleSignInService: SignInWithAppleServicing?
+    private var appleSignInService: SignInWithAppleServicing?
 #endif
-
-    public init(client: SupabaseClient) {
-        self.client = client
-#if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
-        self.googleSignInService = nil
-#endif
-#if USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
-        self.appleSignInService = nil
-#endif
-    }
 
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
     public init(
@@ -62,67 +52,15 @@ public final actor SupabaseAuthService: AuthService {
         self.client = client
         self.appleSignInService = appleSignInService
     }
+#else
+    public init(client: SupabaseClient) {
+        self.client = client
+    }
 #endif
 
-#if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
-    public convenience init(
-        configuration: AppConfiguration,
-        session: URLSession = .shared,
-        googleSignInService: GoogleSignInServicing? = nil,
-        appleSignInService: SignInWithAppleServicing? = nil
-    ) throws {
-        let client = try SupabaseClientFactory.makeClient(
-            configuration: configuration,
-            session: session
-        )
-        self.init(
-            client: client,
-            googleSignInService: googleSignInService,
-            appleSignInService: appleSignInService
-        )
-    }
-#elseif USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
-    public convenience init(
-        configuration: AppConfiguration,
-        session: URLSession = .shared,
-        googleSignInService: GoogleSignInServicing? = nil
-    ) throws {
-        let client = try SupabaseClientFactory.makeClient(
-            configuration: configuration,
-            session: session
-        )
-        self.init(
-            client: client,
-            googleSignInService: googleSignInService
-        )
-    }
-#elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
-    public convenience init(
-        configuration: AppConfiguration,
-        session: URLSession = .shared,
-        appleSignInService: SignInWithAppleServicing? = nil
-    ) throws {
-        let client = try SupabaseClientFactory.makeClient(
-            configuration: configuration,
-            session: session
-        )
-        self.init(
-            client: client,
-            appleSignInService: appleSignInService
-        )
-    }
-#else
-    public convenience init(
-        configuration: AppConfiguration,
-        session: URLSession = .shared
-    ) throws {
-        let client = try SupabaseClientFactory.makeClient(
-            configuration: configuration,
-            session: session
-        )
-        self.init(client: client)
-    }
-#endif
+    // Note: configuration-based factory initializers were removed to satisfy
+    // Swift 6 actor initializer rules. Use SupabaseClientFactory to build a client,
+    // then call one of the designated `init(client: ...)` variants above.
 
     public func currentSession() async throws -> AuthSession {
         if let session = client.auth.currentSession {

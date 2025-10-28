@@ -50,14 +50,14 @@ public actor CreditBalanceStore: Sendable {
         }
 
         let task = Task<Int, Error> {
-            let value = try await repository.fetchCreditBalance()
-            await self.set(value)
-            return value
+            try await repository.fetchCreditBalance()
         }
 
         inFlightTask = task
         defer { inFlightTask = nil }
-        return try await task.value
+        let value = try await task.value
+        _ = set(value)
+        return value
     }
 
     @discardableResult

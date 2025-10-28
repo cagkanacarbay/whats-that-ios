@@ -169,6 +169,12 @@ private actor TestAuthService: AuthService {
 
     func sendPasswordReset(email _: String) async throws {}
 
+    func bootstrapPasswordResetSession(from _: URL) async throws -> AuthenticatedUser {
+        throw AuthError.passwordResetLinkInvalid
+    }
+
+    func updatePassword(to _: String) async throws {}
+
     private func registerContinuation(
         id: UUID,
         continuation: AsyncStream<AuthSession>.Continuation

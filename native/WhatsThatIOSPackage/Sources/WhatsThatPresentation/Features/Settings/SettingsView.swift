@@ -1,4 +1,5 @@
 import SwiftUI
+import WhatsThatDomain
 import WhatsThatShared
 
 struct SettingsView: View {
@@ -9,9 +10,12 @@ struct SettingsView: View {
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
 
     init(
+        userEmail: String?,
+        canRequestPasswordReset: Bool,
         onResetOnboarding: @escaping () async -> Result<Void, Error>,
         onFetchCreditBalance: @escaping () async -> Result<Int, Error>,
         makeCreditsView: @escaping (@escaping (Int?) -> Void) -> AnyView,
+        onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
@@ -19,8 +23,11 @@ struct SettingsView: View {
         self.onClose = onClose
         _viewModel = StateObject(
             wrappedValue: SettingsViewModel(
+                userEmail: userEmail,
+                canRequestPasswordReset: canRequestPasswordReset,
                 onResetOnboarding: onResetOnboarding,
                 onFetchCreditBalance: onFetchCreditBalance,
+                onSendPasswordReset: onSendPasswordReset,
                 onSignOut: onSignOut,
                 onClose: onClose
             )
@@ -31,7 +38,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
-                appearanceSection
+                themeSection
                 onboardingSection
             }
             .task {
@@ -39,7 +46,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
                 }
             }
@@ -77,6 +84,14 @@ struct SettingsView: View {
                         message: Text(message),
                         dismissButton: .default(Text("OK"))
                     )
+                case .passwordResetSent(let email):
+                    return Alert(
+                        title: Text("Check your email"),
+                        message: Text("We've sent password reset instructions to \(email)."),
+                        dismissButton: .default(Text("OK")) {
+                            viewModel.dismissAlert()
+                        }
+                    )
                 }
             }
         }
@@ -113,12 +128,32 @@ struct SettingsView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.secondary)
                     }
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.secondary.opacity(0.6))
                 }
                 .padding(.vertical, 4)
+            }
+
+            if viewModel.canRequestPasswordReset {
+                Button {
+                    Task { await viewModel.performPasswordReset() }
+                } label: {
+                    HStack {
+                        if viewModel.isRequestingPasswordReset {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        }
+                        Text("Email me a reset link")
+                        Spacer()
+                    }
+                }
+                .disabled(viewModel.isRequestingPasswordReset)
+                .accessibilityIdentifier("settings.resetPassword")
+
+                if let email = viewModel.userEmail {
+                    Text("We'll send instructions to \(email).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 2)
+                }
             }
 
             Button(role: .destructive) {
@@ -137,16 +172,19 @@ struct SettingsView: View {
         }
     }
 
-    private var appearanceSection: some View {
-        Section(header: Text("Appearance")) {
-            Picker("Theme", selection: appearanceBinding) {
+    private var themeSection: some View {
+        Section(header: Text("Theme")) {
+            Picker(selection: appearanceBinding) {
                 ForEach(AppAppearance.allCases) { mode in
                     Label(mode.displayName, systemImage: mode.symbolName)
                         .tag(mode)
                 }
+            } label: {
+                EmptyView()
             }
             .pickerStyle(.inline)
             .accessibilityIdentifier("settings.appearancePicker")
+            .accessibilityLabel("Theme")
 
             Text(appearance.description)
                 .font(.footnote)

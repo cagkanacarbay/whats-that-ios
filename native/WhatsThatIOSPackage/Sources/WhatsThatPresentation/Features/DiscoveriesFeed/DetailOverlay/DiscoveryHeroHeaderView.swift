@@ -27,7 +27,6 @@ struct DiscoveryHeroHeaderView: View {
         )
         .frame(maxWidth: .infinity)
         .frame(width: width, height: effectiveHeight)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private var effectiveHeight: CGFloat {
@@ -69,7 +68,6 @@ private struct DiscoveryHeroHeaderImageView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .contentShape(Rectangle())
         .matchedGeometryIfNeeded(
             id: geometryId,

@@ -33,11 +33,22 @@ public extension AppConfiguration {
             preconditionFailure("Missing GOOGLE_REVERSED_CLIENT_ID in bundle. Configure URL types for Google Sign-In.")
         }
 
+        let passwordResetRedirectURL: URL?
+        if let redirectString = bundle.object(forInfoDictionaryKey: "SUPABASE_PASSWORD_RESET_REDIRECT_URL") as? String,
+           redirectString.isEmpty == false,
+           let redirectURL = URL(string: redirectString)
+        {
+            passwordResetRedirectURL = redirectURL
+        } else {
+            passwordResetRedirectURL = nil
+        }
+
         return AppConfiguration(
             supabaseURL: supabaseURL,
             supabaseAnonKey: supabaseAnonKey,
             googleClientID: googleClientID,
-            googleReversedClientID: googleReversedClientID
+            googleReversedClientID: googleReversedClientID,
+            passwordResetRedirectURL: passwordResetRedirectURL
         )
     }
 }

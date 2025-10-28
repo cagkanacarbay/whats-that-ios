@@ -42,10 +42,12 @@ public actor DiscoveryAssetCache: Sendable {
 
     private var entries: [Int64: Entry] = [:]
 
-    public init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
+    public init() {
+        // Create FileManager instance inside the actor to avoid passing a non-Sendable across isolation.
+        self.fileManager = FileManager.default
 
-        let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.cacheDirectoryURL = cachesDirectory.appendingPathComponent("DiscoveryAssets", isDirectory: true)
         self.metadataURL = cacheDirectoryURL.appendingPathComponent("metadata.json")
 
@@ -55,9 +57,54 @@ public actor DiscoveryAssetCache: Sendable {
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
 
+        // Inline setup to avoid calling actor-isolated methods from a nonisolated initializer context.
         do {
-            try makeDirectoriesIfNeeded()
-            try loadExistingMetadata()
+            if !fileManager.fileExists(atPath: cacheDirectoryURL.path) {
+                try fileManager.createDirectory(
+                    at: cacheDirectoryURL,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+            }
+
+            if fileManager.fileExists(atPath: metadataURL.path) {
+                let data = try Data(contentsOf: metadataURL)
+                let decoded = try decoder.decode([Int64: Entry].self, from: data)
+                entries = decoded
+            }
+        } catch {
+            discoveryAssetCacheLogger.error("Failed to initialise cache: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    public init(cachesDirectory: URL) {
+        // Create FileManager instance inside the actor to avoid passing a non-Sendable across isolation.
+        self.fileManager = FileManager.default
+
+        self.cacheDirectoryURL = cachesDirectory.appendingPathComponent("DiscoveryAssets", isDirectory: true)
+        self.metadataURL = cacheDirectoryURL.appendingPathComponent("metadata.json")
+
+        self.encoder = JSONEncoder()
+        self.encoder.dateEncodingStrategy = .iso8601
+
+        self.decoder = JSONDecoder()
+        self.decoder.dateDecodingStrategy = .iso8601
+
+        // Inline setup to avoid calling actor-isolated methods from a nonisolated initializer context.
+        do {
+            if !fileManager.fileExists(atPath: cacheDirectoryURL.path) {
+                try fileManager.createDirectory(
+                    at: cacheDirectoryURL,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+            }
+
+            if fileManager.fileExists(atPath: metadataURL.path) {
+                let data = try Data(contentsOf: metadataURL)
+                let decoded = try decoder.decode([Int64: Entry].self, from: data)
+                entries = decoded
+            }
         } catch {
             discoveryAssetCacheLogger.error("Failed to initialise cache: \(error.localizedDescription, privacy: .public)")
         }
@@ -105,9 +152,7 @@ public extension DiscoveryAssetCache {
         discoveryId: Int64,
         storagePath: String
     ) {
-        var entry = entries[discoveryId]
-
-        if var existing = entry {
+        if var existing = entries[discoveryId] {
             if existing.storagePath != storagePath {
                 removeImageFile(for: existing)
                 existing.imageFileName = nil

@@ -1,12 +1,66 @@
+
 import Foundation
+
+public enum AuthProvider: Equatable, Sendable {
+    case email
+    case google
+    case apple
+    case anonymous
+    case unknown
+
+    public init(rawValue: String?) {
+        guard let rawValue = rawValue?.lowercased() else {
+            self = .unknown
+            return
+        }
+
+        switch rawValue {
+        case "email":
+            self = .email
+        case "google":
+            self = .google
+        case "apple":
+            self = .apple
+        case "anonymous":
+            self = .anonymous
+        default:
+            self = .unknown
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .email:
+            return "email"
+        case .google:
+            return "google"
+        case .apple:
+            return "apple"
+        case .anonymous:
+            return "anonymous"
+        case .unknown:
+            return "unknown"
+        }
+    }
+
+    public var allowsPasswordReset: Bool {
+        self == .email
+    }
+}
 
 public struct AuthenticatedUser: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let email: String
+    public let provider: AuthProvider
 
-    public init(id: UUID, email: String) {
+    public init(id: UUID, email: String, provider: AuthProvider = .unknown) {
         self.id = id
         self.email = email
+        self.provider = provider
+    }
+
+    public var allowsPasswordReset: Bool {
+        provider.allowsPasswordReset
     }
 }
 
@@ -31,6 +85,10 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
     case emailAlreadyInUse
     case passwordTooWeak
     case passwordResetFailed
+    case passwordResetRateLimited
+    case passwordResetLinkInvalid
+    case passwordResetLinkExpired
+    case passwordUpdateFailed
     case cancelled
     case unknown
 
@@ -44,6 +102,14 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "Try a stronger password with at least 8 characters."
         case .passwordResetFailed:
             return "We couldn't send the reset instructions. Please try again in a few minutes."
+        case .passwordResetRateLimited:
+            return "For security reasons, you've made too many reset requests. Please wait a few minutes before trying again."
+        case .passwordResetLinkInvalid:
+            return "That reset link isn't valid anymore. Please request a fresh one."
+        case .passwordResetLinkExpired:
+            return "Your reset link has expired. Request a new one to continue."
+        case .passwordUpdateFailed:
+            return "We couldn't update your password. Please try again."
         case .cancelled:
             return "The sign-in flow was cancelled."
         case .unknown:
@@ -61,4 +127,6 @@ public protocol AuthService: Sendable {
     func signInWithApple() async throws -> AuthSession
     func signOut() async throws
     func sendPasswordReset(email: String) async throws
+    func bootstrapPasswordResetSession(from url: URL) async throws -> AuthenticatedUser
+    func updatePassword(to newPassword: String) async throws
 }

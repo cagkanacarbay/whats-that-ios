@@ -6,6 +6,7 @@ import WhatsThatShared
 public final class AppRootViewModel: ObservableObject {
     @Published public private(set) var flowState: AppFlowState = .loading
     @Published public private(set) var isPerformingAuthAction = false
+    @Published public private(set) var passwordResetUser: AuthenticatedUser?
 
     private let authUseCase: AuthUseCase
     private let onboardingUseCase: OnboardingUseCase
@@ -120,6 +121,7 @@ public final class AppRootViewModel: ObservableObject {
     public func signOut() async throws {
         try await authUseCase.signOut()
         await DiscoveryAssetCache.shared.clearAll()
+        passwordResetUser = nil
         updateFlow(session: .signedOut)
     }
 
@@ -137,6 +139,35 @@ public final class AppRootViewModel: ObservableObject {
         } catch {
             throw AuthError.passwordResetFailed
         }
+    }
+
+    public func preparePasswordReset(from url: URL) async -> AuthError? {
+        do {
+            let user = try await authUseCase.bootstrapPasswordResetSession(from: url)
+            passwordResetUser = user
+            latestSession = .authenticated(user)
+            updateFlow(session: latestSession)
+            return nil
+        } catch let error as AuthError {
+            return error
+        } catch {
+            return .passwordResetLinkInvalid
+        }
+    }
+
+    public func completePasswordReset(newPassword: String) async -> AuthError? {
+        do {
+            try await authUseCase.updatePassword(to: newPassword)
+        } catch let error as AuthError {
+            return error
+        } catch {
+            return .passwordUpdateFailed
+        }
+        return nil
+    }
+
+    public func cancelPasswordResetFlow() async {
+        try? await signOut()
     }
 
     // MARK: - Private

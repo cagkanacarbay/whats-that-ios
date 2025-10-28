@@ -3,12 +3,10 @@ import XCTest
 
 final class DiscoveryAssetCacheTests: XCTestCase {
     private var rootURL: URL!
-    private var fileManager: TestFileManager!
 
     override func setUpWithError() throws {
         rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        fileManager = TestFileManager(rootURL: rootURL)
     }
 
     override func tearDownWithError() throws {
@@ -16,11 +14,10 @@ final class DiscoveryAssetCacheTests: XCTestCase {
             try? FileManager.default.removeItem(at: rootURL)
         }
         rootURL = nil
-        fileManager = nil
     }
 
     func testSignedURLCacheStoresAndRetrieves() async throws {
-        let cache = DiscoveryAssetCache(fileManager: fileManager)
+        let cache = DiscoveryAssetCache(cachesDirectory: rootURL)
         let discoveryId: Int64 = 42
         let storagePath = "objects/foo.jpg"
         let signedURL = URL(string: "https://example.com/signed-url")!
@@ -42,7 +39,7 @@ final class DiscoveryAssetCacheTests: XCTestCase {
     }
 
     func testStoreImageDataPersistsToDisk() async throws {
-        let cache = DiscoveryAssetCache(fileManager: fileManager)
+        let cache = DiscoveryAssetCache(cachesDirectory: rootURL)
         let discoveryId: Int64 = 7
         let storagePath = "objects/bar.jpg"
         let signedURL = URL(string: "https://example.com/image")!
@@ -69,7 +66,7 @@ final class DiscoveryAssetCacheTests: XCTestCase {
     }
 
     func testPurgeExpiredEntriesRemovesCachedData() async throws {
-        let cache = DiscoveryAssetCache(fileManager: fileManager)
+        let cache = DiscoveryAssetCache(cachesDirectory: rootURL)
         let discoveryId: Int64 = 99
         let storagePath = "objects/baz.jpg"
         let signedURL = URL(string: "https://example.com/old")!
@@ -90,18 +87,5 @@ final class DiscoveryAssetCacheTests: XCTestCase {
         )
 
         XCTAssertNil(cached)
-    }
-}
-
-private final class TestFileManager: FileManager {
-    private let rootURL: URL
-
-    init(rootURL: URL) {
-        self.rootURL = rootURL
-        super.init()
-    }
-
-    override func urls(for directory: FileManager.SearchPathDirectory, in domainMask: FileManager.SearchPathDomainMask) -> [URL] {
-        [rootURL]
     }
 }

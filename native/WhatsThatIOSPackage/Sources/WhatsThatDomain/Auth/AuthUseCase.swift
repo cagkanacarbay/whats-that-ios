@@ -42,4 +42,13 @@ public actor AuthUseCase: Sendable {
     public func sendPasswordReset(email: String) async throws {
         try await service.sendPasswordReset(email: email)
     }
+
+    @discardableResult
+    public func bootstrapPasswordResetSession(from url: URL) async throws -> AuthenticatedUser {
+        try await service.bootstrapPasswordResetSession(from: url)
+    }
+
+    public func updatePassword(to newPassword: String) async throws {
+        try await service.updatePassword(to: newPassword)
+    }
 }

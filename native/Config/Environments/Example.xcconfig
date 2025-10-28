@@ -9,3 +9,4 @@ SUPABASE_URL = $(SUPABASE_URL_SCHEME)$(SUPABASE_URL_HOST_PATH)
 SUPABASE_ANON_KEY = replace-with-your-supabase-anon-key
 GOOGLE_CLIENT_ID = replace-with-your-google-client-id
 GOOGLE_REVERSED_CLIENT_ID = replace-with-your-google-reversed-client-id
+SUPABASE_PASSWORD_RESET_REDIRECT_URL = $(SUPABASE_URL_SCHEME)/whats-that.app/auth/reset

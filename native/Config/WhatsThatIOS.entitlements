@@ -6,5 +6,10 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:whats-that.app</string>
+		<string>applinks:whats-that.expo.dev</string>
+	</array>
 </dict>
 </plist>

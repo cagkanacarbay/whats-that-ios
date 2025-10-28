@@ -61,6 +61,10 @@ struct VoiceoverDetailButton: View {
         asset?.status == .missing
     }
 
+    private var isAssetError: Bool {
+        asset?.status == .error
+    }
+
     private var canPlay: Bool {
         // Only allow taps if not loading and narration is available/unknown
         !isLoading && !isUnavailable
@@ -96,6 +100,10 @@ struct VoiceoverDetailButton: View {
             default:
                 break
             }
+        }
+
+        if isAssetError {
+            return "Retry Audio"
         }
 
         if isUnavailable {

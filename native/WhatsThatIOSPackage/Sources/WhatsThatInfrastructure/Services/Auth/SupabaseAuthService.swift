@@ -19,6 +19,7 @@ private let supabaseAuthLogger = Logger(subsystem: "WhatsThatIOS", category: "Su
 
 public final actor SupabaseAuthService: AuthService {
     private let client: SupabaseClient
+    private let configuration: AppConfiguration
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     private var googleSignInService: GoogleSignInServicing?
 #endif
@@ -29,32 +30,42 @@ public final actor SupabaseAuthService: AuthService {
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
     public init(
         client: SupabaseClient,
+        configuration: AppConfiguration,
         googleSignInService: GoogleSignInServicing?,
         appleSignInService: SignInWithAppleServicing?
     ) {
         self.client = client
+        self.configuration = configuration
         self.googleSignInService = googleSignInService
         self.appleSignInService = appleSignInService
     }
 #elseif USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     public init(
         client: SupabaseClient,
+        configuration: AppConfiguration,
         googleSignInService: GoogleSignInServicing?
     ) {
         self.client = client
+        self.configuration = configuration
         self.googleSignInService = googleSignInService
     }
 #elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
     public init(
         client: SupabaseClient,
+        configuration: AppConfiguration,
         appleSignInService: SignInWithAppleServicing?
     ) {
         self.client = client
+        self.configuration = configuration
         self.appleSignInService = appleSignInService
     }
 #else
-    public init(client: SupabaseClient) {
+    public init(
+        client: SupabaseClient,
+        configuration: AppConfiguration
+    ) {
         self.client = client
+        self.configuration = configuration
     }
 #endif
 
@@ -190,10 +201,95 @@ public final actor SupabaseAuthService: AuthService {
         #endif
     }
 
+    public func bootstrapPasswordResetSession(from url: URL) async throws -> AuthenticatedUser {
+        var parameters = parseSupabaseParameters(from: url)
+        let accessToken = parameters["access_token"]
+        let refreshToken = parameters["refresh_token"]
+        let recoveryCode = parameters["code"] ?? parameters["token"]
+        var normalizedType = parameters["type"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        let hasRecoveryTokens = (accessToken?.isEmpty == false && refreshToken?.isEmpty == false)
+        let impliesRecovery = normalizedType == nil && (hasRecoveryTokens || recoveryCode?.isEmpty == false)
+
+        if normalizedType != "recovery", normalizedType != nil, !impliesRecovery {
+            supabaseAuthLogger.error("Password reset link missing recovery type.")
+            throw DomainAuthError.passwordResetLinkInvalid
+        }
+
+        if normalizedType == nil, impliesRecovery {
+            normalizedType = "recovery"
+            parameters["type"] = "recovery"
+        }
+
+        if
+            let accessToken = parameters["access_token"],
+            let refreshToken = parameters["refresh_token"],
+            accessToken.isEmpty == false,
+            refreshToken.isEmpty == false,
+            normalizedType == "recovery"
+        {
+            do {
+                let session = try await client.auth.setSession(
+                    accessToken: accessToken,
+                    refreshToken: refreshToken
+                )
+                supabaseAuthLogger.notice("Password reset session established for \(session.user.email ?? "<unknown>")")
+                return session.makeAuthenticatedUser()
+            } catch {
+                let mapped = mapPasswordResetBootstrapError(error)
+                supabaseAuthLogger.error("Failed to establish password reset session: \(error, privacy: .public)")
+                throw mapped
+            }
+        }
+
+        if
+            let code = parameters["code"] ?? parameters["token"],
+            code.isEmpty == false,
+            normalizedType == "recovery"
+        {
+            do {
+                let session = try await client.auth.exchangeCodeForSession(authCode: code)
+                supabaseAuthLogger.notice("Password reset session established via auth code for \(session.user.email ?? "<unknown>")")
+                return session.makeAuthenticatedUser()
+            } catch {
+                let mapped = mapPasswordResetBootstrapError(error)
+                supabaseAuthLogger.error("Password reset auth code exchange failed: \(error, privacy: .public)")
+                throw mapped
+            }
+        }
+
+        supabaseAuthLogger.error("Password reset link missing required tokens.")
+        throw DomainAuthError.passwordResetLinkInvalid
+    }
+
+    public func updatePassword(to newPassword: String) async throws {
+        do {
+            _ = try await client.auth.update(user: UserAttributes(password: newPassword))
+        } catch {
+            let mapped = mapPasswordUpdateError(error)
+            supabaseAuthLogger.error("Password update failed: \(error, privacy: .public)")
+            throw mapped
+        }
+    }
+
     public func sendPasswordReset(email: String) async throws {
         do {
-            try await client.auth.resetPasswordForEmail(email)
+            try await client.auth.resetPasswordForEmail(
+                email,
+                redirectTo: configuration.passwordResetRedirectURL
+            )
+        } catch let authError as Supabase.AuthError {
+            if case let .api(_, errorCode, _, response) = authError {
+                if errorCode == .overEmailSendRateLimit ||
+                    errorCode == .overRequestRateLimit ||
+                    response.statusCode == 429 {
+                    throw DomainAuthError.passwordResetRateLimited
+                }
+            }
+            supabaseAuthLogger.error("Supabase password reset request failed: \(authError, privacy: .public)")
+            throw DomainAuthError.passwordResetFailed
         } catch {
+            supabaseAuthLogger.error("Password reset request failed: \(error, privacy: .public)")
             throw DomainAuthError.passwordResetFailed
         }
     }
@@ -234,6 +330,86 @@ public final actor SupabaseAuthService: AuthService {
             return .emailAlreadyInUse
         }
         return .unknown
+    }
+
+    private func parseSupabaseParameters(from url: URL) -> [String: String] {
+        var parameters = Self.extractParameters(from: url)
+
+        if let nestedValue = parameters["supabase_url"] {
+            let decoded = nestedValue.removingPercentEncoding ?? nestedValue
+            if let nestedURL = URL(string: decoded) {
+                parameters.merge(Self.extractParameters(from: nestedURL)) { current, new in
+                    new.isEmpty ? current : new
+                }
+            }
+        }
+
+        return parameters
+    }
+
+    private static func extractParameters(from url: URL) -> [String: String] {
+        var parameters: [String: String] = [:]
+
+        if let fragment = url.fragment, fragment.isEmpty == false {
+            parameters.merge(parseQuery(fragment)) { $1 }
+        }
+
+        if let query = url.query, query.isEmpty == false {
+            parameters.merge(parseQuery(query)) { $1 }
+        }
+
+        return parameters
+    }
+
+    private static func parseQuery(_ query: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for component in query.split(separator: "&") {
+            let elements = component.split(separator: "=", maxSplits: 1).map(String.init)
+            guard elements.count == 2 else { continue }
+            let key = elements[0].removingPercentEncoding ?? elements[0]
+            let value = elements[1].removingPercentEncoding ?? elements[1]
+            result[key] = value
+        }
+        return result
+    }
+
+    private func mapPasswordResetBootstrapError(_ error: Error) -> DomainAuthError {
+        if let authError = error as? Supabase.AuthError {
+            switch authError {
+            case .sessionMissing:
+                return .passwordResetLinkExpired
+            case let .api(_, errorCode, _, _):
+                if errorCode == .otpExpired || errorCode == .invalidJWT {
+                    return .passwordResetLinkExpired
+                }
+            default:
+                break
+            }
+        }
+        return .passwordResetLinkInvalid
+    }
+
+    private func mapPasswordUpdateError(_ error: Error) -> DomainAuthError {
+        if let authError = error as? Supabase.AuthError {
+            switch authError {
+            case .sessionMissing:
+                return .passwordResetLinkExpired
+            case let .weakPassword(_, reasons):
+                supabaseAuthLogger.error("Password rejected as weak: \(reasons, privacy: .public)")
+                return .passwordTooWeak
+            case let .api(_, errorCode, _, _):
+                if errorCode == .weakPassword {
+                    return .passwordTooWeak
+                } else if errorCode == .reauthenticationNeeded || errorCode == .sessionNotFound {
+                    return .passwordResetLinkExpired
+                } else if errorCode == .samePassword {
+                    return .passwordUpdateFailed
+                }
+            default:
+                break
+            }
+        }
+        return .passwordUpdateFailed
     }
 
     #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
@@ -302,7 +478,8 @@ private extension Session {
     func makeAuthenticatedUser() -> AuthenticatedUser {
         AuthenticatedUser(
             id: user.id,
-            email: user.email ?? ""
+            email: user.email ?? "",
+            provider: AuthProvider(rawValue: user.appMetadata["provider"]?.stringValue)
         )
     }
 }

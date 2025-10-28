@@ -3,9 +3,11 @@ import WhatsThatDomain
 import WhatsThatShared
 import CoreLocation
 import UIKit
+import Combine
 
 public struct RootContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var passwordResetLinkCoordinator: PasswordResetLinkCoordinator
     @StateObject private var viewModel: AppRootViewModel
     @State private var authError: AuthError?
     @State private var authStartMode: AuthenticationFlowView.Mode = .signUp
@@ -18,6 +20,8 @@ public struct RootContentView: View {
     private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
+    @State private var processedPasswordResetTokens: Set<String> = []
+    @State private var processingPasswordResetToken: String?
 
     public init(
         feedUseCase: DiscoveryFeedUseCase,
@@ -137,6 +141,8 @@ public struct RootContentView: View {
             settingsSheetDetent = .fraction(0.8)
         }) {
             SettingsView(
+                userEmail: settingsUser?.email,
+                canRequestPasswordReset: settingsUser?.allowsPasswordReset ?? false,
                 onResetOnboarding: {
                     await viewModel.resetOnboarding()
                     return .success(())
@@ -154,6 +160,16 @@ public struct RootContentView: View {
                     }
                     return AnyView(CreditsView(viewModel: viewModel))
                 },
+                onSendPasswordReset: { email in
+                    do {
+                        try await viewModel.requestPasswordReset(email: email)
+                        return .success(())
+                    } catch let error as AuthError {
+                        return .failure(error)
+                    } catch {
+                        return .failure(.unknown)
+                    }
+                },
                 onSignOut: {
                     do {
                         try await viewModel.signOut()
@@ -168,6 +184,50 @@ public struct RootContentView: View {
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.passwordResetUser != nil },
+                set: { isPresented in
+                    if !isPresented, viewModel.passwordResetUser != nil {
+                        processedPasswordResetTokens.removeAll()
+                        Task { await viewModel.cancelPasswordResetFlow() }
+                    }
+                }
+            )
+        ) {
+            if let user = viewModel.passwordResetUser {
+                PasswordResetSheet(
+                    email: user.email,
+                    onSubmit: { newPassword in
+                        if let error = await viewModel.completePasswordReset(newPassword: newPassword) {
+                            return .failure(error)
+                        } else {
+                            return .success(())
+                        }
+                    },
+                    onComplete: {
+                        processedPasswordResetTokens.removeAll()
+                        Task {
+                            await viewModel.cancelPasswordResetFlow()
+                            await MainActor.run {
+                                authStartMode = .signIn
+                            }
+                        }
+                    },
+                    onCancel: {
+                        processedPasswordResetTokens.removeAll()
+                        Task {
+                            await viewModel.cancelPasswordResetFlow()
+                            await MainActor.run {
+                                authStartMode = .signIn
+                            }
+                        }
+                    }
+                )
+            } else {
+                ProgressView()
+            }
+        }
         .alert(
             authError?.errorDescription ?? "Something went wrong",
             isPresented: Binding(
@@ -181,6 +241,9 @@ public struct RootContentView: View {
         }
         .preferredColorScheme(appearance.colorScheme)
         .onAppear(perform: syncBrandTheme)
+        .onReceive(passwordResetLinkCoordinator.urlPublisher) { url in
+            handlePasswordResetURL(url)
+        }
         .onChange(of: viewModel.flowState) { previous, current in
             guard previous != current else { return }
             if case .authentication = current {
@@ -195,6 +258,13 @@ public struct RootContentView: View {
         .onChange(of: storedAppearance) { _, _ in
             syncBrandTheme()
         }
+    }
+
+    private var settingsUser: AuthenticatedUser? {
+        if case let .main(user) = viewModel.flowState {
+            return user
+        }
+        return nil
     }
 
     private var backgroundColor: Color {
@@ -222,6 +292,69 @@ public struct RootContentView: View {
             await MainActor.run { self.authError = .unknown }
             throw AuthError.unknown
         }
+    }
+
+    private func handlePasswordResetURL(_ url: URL) {
+        guard let targetURL = extractPasswordResetURL(from: url) else { return }
+        let tokenIdentifier = passwordResetTokenIdentifier(for: targetURL)
+        if processingPasswordResetToken == tokenIdentifier { return }
+        if processedPasswordResetTokens.contains(tokenIdentifier) { return }
+
+        processingPasswordResetToken = tokenIdentifier
+        Task {
+            let error = await viewModel.preparePasswordReset(from: targetURL)
+            await MainActor.run {
+                processingPasswordResetToken = nil
+                if let error {
+                    authError = error
+                } else {
+                    processedPasswordResetTokens.insert(tokenIdentifier)
+                }
+            }
+        }
+    }
+
+    private func isPasswordResetURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" else { return false }
+        let path = url.path.lowercased()
+        return path.hasPrefix("/auth/reset")
+    }
+
+    private func extractPasswordResetURL(from url: URL) -> URL? {
+        if isPasswordResetURL(url) {
+            return url
+        }
+
+        guard
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let rawValue = components.queryItems?.first(where: { $0.name == "supabase_url" })?.value
+        else {
+            return nil
+        }
+
+        if let decoded = rawValue.removingPercentEncoding,
+           let decodedURL = URL(string: decoded),
+           isPasswordResetURL(decodedURL) {
+            return decodedURL
+        }
+
+        if let url = URL(string: rawValue), isPasswordResetURL(url) {
+            return url
+        }
+
+        return nil
+    }
+
+    private func passwordResetTokenIdentifier(for url: URL) -> String {
+        if let fragment = url.fragment, fragment.contains("access_token=") {
+            return fragment
+        }
+
+        if let query = url.query, query.contains("access_token=") {
+            return query
+        }
+
+        return url.absoluteString
     }
 }
 
@@ -955,6 +1088,156 @@ private struct ForgotPasswordForm: View {
 
     private var primaryColor: Color {
         colorScheme == .dark ? BrandColors.Dark.primaryAction : BrandColors.Light.primaryAction
+    }
+}
+
+// MARK: - Password Reset Sheet
+
+private struct PasswordResetSheet: View {
+    let email: String
+    let onSubmit: (String) async -> Result<Void, AuthError>
+    let onComplete: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @State private var newPassword: String = ""
+    @State private var confirmPassword: String = ""
+    @State private var isLoading = false
+    @State private var didAttemptSubmit = false
+    @State private var errorMessage: String?
+    @State private var isComplete = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: BrandSpacing.large) {
+                VStack(spacing: BrandSpacing.small) {
+                    Text(isComplete ? "Password Updated" : "Reset Password")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(titleColor)
+
+                    Text(messageCopy)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(bodyColor)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, BrandSpacing.large)
+
+                if !isComplete {
+                    VStack(spacing: BrandSpacing.medium) {
+                        BrandFloatingField(
+                            title: "New Password",
+                            placeholder: "At least 8 characters",
+                            text: $newPassword,
+                            fieldType: .password(showToggle: true),
+                            errorText: passwordError
+                        )
+
+                        BrandFloatingField(
+                            title: "Confirm Password",
+                            placeholder: "Re-enter new password",
+                            text: $confirmPassword,
+                            fieldType: .password(showToggle: true),
+                            errorText: confirmPasswordError
+                        )
+                    }
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                }
+
+                if isComplete {
+                    BrandPrimaryButton(title: "Back to Sign In") {
+                        onComplete()
+                        dismiss()
+                    }
+                } else {
+                    BrandPrimaryButton(
+                        title: isLoading ? "Updating..." : "Update Password",
+                        isLoading: isLoading
+                    ) {
+                        submit()
+                    }
+                    .disabled(isLoading)
+
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(primaryColor)
+                    .fontWeight(.semibold)
+                }
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.large)
+        }
+    }
+
+    private var messageCopy: String {
+        if isComplete {
+            return "You're all set. Sign in with your new password to get back to exploring."
+        } else {
+            return "Enter a new password for \(email). Make sure it’s secure and something you haven’t used before."
+        }
+    }
+
+    private var passwordError: String? {
+        guard didAttemptSubmit else { return nil }
+        if newPassword.isEmpty {
+            return "Please enter a new password."
+        }
+        if newPassword.count < 8 {
+            return "Password must be at least 8 characters."
+        }
+        return nil
+    }
+
+    private var confirmPasswordError: String? {
+        guard didAttemptSubmit else { return nil }
+        if confirmPassword.isEmpty {
+            return "Please confirm your new password."
+        }
+        if confirmPassword != newPassword {
+            return "Passwords do not match."
+        }
+        return nil
+    }
+
+    private var titleColor: Color {
+        colorScheme == .dark ? Color.white : BrandColors.Light.accentText
+    }
+
+    private var bodyColor: Color {
+        colorScheme == .dark ? BrandColors.Dark.bodyText : BrandColors.Light.bodyText
+    }
+
+    private var primaryColor: Color {
+        colorScheme == .dark ? BrandColors.Dark.primaryAction : BrandColors.Light.primaryAction
+    }
+
+    private func submit() {
+        didAttemptSubmit = true
+        guard passwordError == nil, confirmPasswordError == nil else { return }
+
+        errorMessage = nil
+        isLoading = true
+        Task {
+            let result = await onSubmit(newPassword)
+            await MainActor.run {
+                isLoading = false
+                switch result {
+                case .success:
+                    isComplete = true
+                case .failure(let error):
+                    errorMessage = error.errorDescription ?? "We couldn't update your password. Please try again."
+                }
+            }
+        }
     }
 }
 

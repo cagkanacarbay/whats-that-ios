@@ -32,6 +32,8 @@
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SUPABASE_URL</key>
 	<string>$(SUPABASE_URL)</string>
+	<key>SUPABASE_PASSWORD_RESET_REDIRECT_URL</key>
+	<string>$(SUPABASE_PASSWORD_RESET_REDIRECT_URL)</string>
 	<key>GOOGLE_CLIENT_ID</key>
 	<string>$(GOOGLE_CLIENT_ID)</string>
 	<key>GOOGLE_REVERSED_CLIENT_ID</key>

@@ -137,7 +137,11 @@ struct DiscoveryDetailView: View {
         }
         .frame(width: layout.cardSize.width, height: layout.cardSize.height)
         .background(backgroundColor.opacity(layout.backgroundOpacity))
-            .clipShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
+            .compositingGroup()
+            .clipShape(
+                RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous),
+                style: FillStyle(eoFill: false, antialiased: true)
+            )
             .modifier(
                 ShareSheetModifier(
                     shareSheetPayload: $shareSheetPayload,
@@ -377,11 +381,14 @@ private struct DiscoveryDetailContentView: View {
 
                 if isChromeReady {
                     VStack(alignment: .leading, spacing: BrandSpacing.large) {
-                        VoiceoverDetailButton(
-                            discovery: discovery,
-                            controller: voiceoverController,
-                            palette: palette
-                        )
+                        // Only show voiceover when available or when a retry is possible
+                        if shouldShowVoiceoverButton {
+                            VoiceoverDetailButton(
+                                discovery: discovery,
+                                controller: voiceoverController,
+                                palette: palette
+                            )
+                        }
 
                         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
                             Text(discovery.title)
@@ -442,6 +449,35 @@ private struct DiscoveryDetailContentView: View {
     }
 
     private var additionalBottomPadding: CGFloat { 0 }
+
+    // Determine if the voiceover button should be visible.
+    // Show only when:
+    // - asset is available, or
+    // - an error occurred and a retry makes sense, or
+    // - playback previously failed for this discovery (retry)
+    private var shouldShowVoiceoverButton: Bool {
+        if isPlaybackFailedForThisDiscovery {
+            return true
+        }
+        guard let status = voiceoverController.assetStates[discovery.id]?.status else {
+            return false // Unknown/loading: hide
+        }
+        switch status {
+        case .available:
+            return true
+        case .error:
+            return true
+        case .missing:
+            return false
+        }
+    }
+
+    private var isPlaybackFailedForThisDiscovery: Bool {
+        if case let .failed(id, _) = voiceoverController.playbackState, id == discovery.id {
+            return true
+        }
+        return false
+    }
 
     @ViewBuilder
     private func detailDescriptionView(isReady: Bool) -> some View {

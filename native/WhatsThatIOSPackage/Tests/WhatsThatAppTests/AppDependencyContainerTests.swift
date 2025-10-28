@@ -54,6 +54,12 @@ private actor TestAuthService: AuthService {
     func signOut() async throws {}
 
     func sendPasswordReset(email _: String) async throws {}
+
+    func bootstrapPasswordResetSession(from _: URL) async throws -> AuthenticatedUser {
+        throw AuthError.passwordResetLinkInvalid
+    }
+
+    func updatePassword(to _: String) async throws {}
 }
 
 private actor TestOnboardingRepository: OnboardingRepository {

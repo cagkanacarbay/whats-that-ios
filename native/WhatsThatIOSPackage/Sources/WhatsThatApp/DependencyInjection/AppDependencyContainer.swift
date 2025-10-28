@@ -107,6 +107,7 @@ public extension AppDependencyContainer {
         let appleService = SignInWithAppleService()
         authService = SupabaseAuthService(
             client: client,
+            configuration: configuration,
             googleSignInService: googleService,
             appleSignInService: appleService
         )
@@ -116,16 +117,21 @@ public extension AppDependencyContainer {
         }
         authService = SupabaseAuthService(
             client: client,
+            configuration: configuration,
             googleSignInService: googleService
         )
         #elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
         let appleService = SignInWithAppleService()
         authService = SupabaseAuthService(
             client: client,
+            configuration: configuration,
             appleSignInService: appleService
         )
         #else
-        authService = SupabaseAuthService(client: client)
+        authService = SupabaseAuthService(
+            client: client,
+            configuration: configuration
+        )
         #endif
         let onboardingRepository = UserDefaultsOnboardingRepository()
 

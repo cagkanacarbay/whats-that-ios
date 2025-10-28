@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import WhatsThatDomain
 
 @MainActor
 final class SettingsViewModel: ObservableObject {
@@ -8,6 +9,7 @@ final class SettingsViewModel: ObservableObject {
         case confirmSignOut
         case finished
         case error(String)
+        case passwordResetSent(email: String)
 
         var id: String {
             switch self {
@@ -19,6 +21,8 @@ final class SettingsViewModel: ObservableObject {
                 return "finished"
             case .error(let message):
                 return "error_\(message)"
+            case .passwordResetSent(let email):
+                return "password-reset_\(email)"
             }
         }
     }
@@ -26,22 +30,32 @@ final class SettingsViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var isSigningOut = false
     @Published var isLoadingCredits = false
+    @Published var isRequestingPasswordReset = false
     @Published var creditBalance: Int?
     @Published var alertState: AlertState?
+    let canRequestPasswordReset: Bool
+    let userEmail: String?
 
     private let onResetOnboarding: () async -> Result<Void, Error>
     private let onFetchCreditBalance: () async -> Result<Int, Error>
+    private let onSendPasswordReset: (String) async -> Result<Void, AuthError>
     private let onSignOut: () async -> Result<Void, Error>
     private let onClose: () -> Void
 
     init(
+        userEmail: String?,
+        canRequestPasswordReset: Bool,
         onResetOnboarding: @escaping () async -> Result<Void, Error>,
         onFetchCreditBalance: @escaping () async -> Result<Int, Error>,
+        onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
+        self.userEmail = userEmail
+        self.canRequestPasswordReset = canRequestPasswordReset
         self.onResetOnboarding = onResetOnboarding
         self.onFetchCreditBalance = onFetchCreditBalance
+        self.onSendPasswordReset = onSendPasswordReset
         self.onSignOut = onSignOut
         self.onClose = onClose
     }
@@ -107,6 +121,34 @@ final class SettingsViewModel: ObservableObject {
             onClose()
         case .failure(let error):
             alertState = .error(error.localizedDescription)
+        }
+    }
+
+    func performPasswordReset() async {
+        guard canRequestPasswordReset else {
+            alertState = .error("Password reset isn't available for this account.")
+            return
+        }
+
+        guard !isRequestingPasswordReset else { return }
+
+        guard let email = userEmail, email.isEmpty == false else {
+            alertState = .error("We couldn't find your email address for this account.")
+            return
+        }
+
+        isRequestingPasswordReset = true
+        alertState = nil
+
+        let result = await onSendPasswordReset(email)
+
+        isRequestingPasswordReset = false
+        switch result {
+        case .success:
+            alertState = .passwordResetSent(email: email)
+        case .failure(let error):
+            let message = error.errorDescription ?? AuthError.passwordResetFailed.errorDescription ?? "Something went wrong."
+            alertState = .error(message)
         }
     }
 }

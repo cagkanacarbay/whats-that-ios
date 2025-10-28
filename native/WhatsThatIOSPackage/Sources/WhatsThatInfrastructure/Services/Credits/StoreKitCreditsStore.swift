@@ -78,11 +78,39 @@ public actor StoreKitCreditsStore: CreditsStore {
     public func purchase(productId: String) async throws -> CreditPurchaseResult {
         let product = try await loadProductIfNeeded(for: productId)
 
+        // Preflight: if the app has no local receipt, refresh it now so any
+        // Apple ID prompt (sandbox) happens before the purchase sheet.
+        if !hasCurrentReceipt() {
+            try? await AppStore.sync()
+        }
+
         let purchaseResult = try await product.purchase()
         switch purchaseResult {
         case let .success(verification):
             let transaction = try verify(verification)
-            try await validateTransaction(transaction, for: product, refreshReceipt: true)
+            do {
+                try await validateTransaction(transaction, for: product, refreshReceipt: false)
+            } catch let error as CreditsStoreError {
+                // If receipt is still missing or the server couldn't find the
+                // just-purchased transaction in the receipt, refresh once and
+                // retry validation. In sandbox, this may prompt for Apple ID.
+                let shouldRetry: Bool
+                switch error {
+                case .receiptUnavailable:
+                    shouldRetry = true
+                case .validationFailed(let message):
+                    let lower = message?.lowercased() ?? ""
+                    shouldRetry = lower.contains("transaction not found") || lower.contains("not found")
+                default:
+                    shouldRetry = false
+                }
+                if shouldRetry {
+                    try? await AppStore.sync()
+                    try await validateTransaction(transaction, for: product, refreshReceipt: false)
+                } else {
+                    throw error
+                }
+            }
             await transaction.finish()
             return CreditPurchaseResult(status: .success)
         case .pending:
@@ -200,6 +228,11 @@ private extension StoreKitCreditsStore {
         return data
     }
 
+    func hasCurrentReceipt() -> Bool {
+        if let data = currentReceiptData(), !data.isEmpty { return true }
+        return false
+    }
+
     func makeFunctionsURL(for pathComponent: String) throws -> URL? {
         guard let supabaseURL = configuration.supabaseURL else {
             throw CreditsStoreError.unsupportedResponse
@@ -223,6 +256,18 @@ private struct ValidateReceiptResponse: Decodable {
 }
 #if os(iOS)
 public extension StoreKitCreditsStore {
+    /// Clears local StoreKit cache and optionally deletes the on-disk App Store receipt.
+    /// This does not sign the user out of the App Store (system-level),
+    /// but simulates a fresh state for testing prompts and purchase flows.
+    func clearLocalStoreState(deleteReceipt: Bool = true) {
+        cachedProducts.removeAll()
+        if deleteReceipt,
+           let receiptURL = Bundle.main.appStoreReceiptURL,
+           FileManager.default.fileExists(atPath: receiptURL.path) {
+            _ = try? FileManager.default.removeItem(at: receiptURL)
+        }
+    }
+
     /// Starts a background listener for StoreKit transaction updates.
     /// Ensures out-of-band purchases are validated and finished.
     /// Optionally refreshes the credit balance upon successful validation.
@@ -233,7 +278,28 @@ public extension StoreKitCreditsStore {
                 do {
                     let transaction: Transaction = try self.verify(update)
                     let product = try await self.loadProductIfNeeded(for: transaction.productID)
-                    try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
+                    do {
+                        try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
+                    } catch let error as CreditsStoreError {
+                        // Retry once if the server couldn't find the new
+                        // transaction in the existing receipt.
+                        let shouldRetry: Bool
+                        switch error {
+                        case .receiptUnavailable:
+                            shouldRetry = true
+                        case .validationFailed(let message):
+                            let lower = message?.lowercased() ?? ""
+                            shouldRetry = lower.contains("transaction not found") || lower.contains("not found")
+                        default:
+                            shouldRetry = false
+                        }
+                        if shouldRetry {
+                            try? await AppStore.sync()
+                            try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
+                        } else {
+                            throw error
+                        }
+                    }
                     await transaction.finish()
                     if let balanceStore {
                         _ = try? await balanceStore.refresh(force: true)

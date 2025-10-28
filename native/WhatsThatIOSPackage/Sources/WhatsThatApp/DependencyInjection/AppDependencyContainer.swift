@@ -234,5 +234,17 @@ public extension AppDependencyContainer {
             return .failure(error)
         }
     }
+
+    /// Clears local App Store state used by this app for testing purposes.
+    /// - Removes the on-disk App Store receipt (if present)
+    /// - Clears cached StoreKit products
+    /// - Clears cached credit balance
+    func clearAppStoreLocalState() async -> Result<Void, Error> {
+        if let store = creditsStore as? StoreKitCreditsStore {
+            await store.clearLocalStoreState(deleteReceipt: true)
+        }
+        _ = await creditBalanceStore.set(nil)
+        return .success(())
+    }
 }
 #endif

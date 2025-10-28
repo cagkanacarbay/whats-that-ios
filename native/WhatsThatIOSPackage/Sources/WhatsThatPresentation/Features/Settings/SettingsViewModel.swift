@@ -8,6 +8,7 @@ final class SettingsViewModel: ObservableObject {
         case confirmReset
         case confirmSignOut
         case finished
+        case appStoreCleared
         case error(String)
         case passwordResetSent(email: String)
 
@@ -19,6 +20,8 @@ final class SettingsViewModel: ObservableObject {
                 return "confirm-sign-out"
             case .finished:
                 return "finished"
+            case .appStoreCleared:
+                return "appstore-cleared"
             case .error(let message):
                 return "error_\(message)"
             case .passwordResetSent(let email):
@@ -30,6 +33,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var isSigningOut = false
     @Published var isLoadingCredits = false
+    @Published var isClearingAppStore = false
     @Published var isRequestingPasswordReset = false
     @Published var creditBalance: Int?
     @Published var alertState: AlertState?
@@ -40,6 +44,7 @@ final class SettingsViewModel: ObservableObject {
     private let onFetchCreditBalance: () async -> Result<Int, Error>
     private let onSendPasswordReset: (String) async -> Result<Void, AuthError>
     private let onSignOut: () async -> Result<Void, Error>
+    private let onClearAppStoreAccount: () async -> Result<Void, Error>
     private let onClose: () -> Void
 
     init(
@@ -49,6 +54,7 @@ final class SettingsViewModel: ObservableObject {
         onFetchCreditBalance: @escaping () async -> Result<Int, Error>,
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
+        onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
         self.userEmail = userEmail
@@ -57,6 +63,7 @@ final class SettingsViewModel: ObservableObject {
         self.onFetchCreditBalance = onFetchCreditBalance
         self.onSendPasswordReset = onSendPasswordReset
         self.onSignOut = onSignOut
+        self.onClearAppStoreAccount = onClearAppStoreAccount
         self.onClose = onClose
     }
 
@@ -149,6 +156,22 @@ final class SettingsViewModel: ObservableObject {
         case .failure(let error):
             let message = error.errorDescription ?? AuthError.passwordResetFailed.errorDescription ?? "Something went wrong."
             alertState = .error(message)
+        }
+    }
+
+    func clearAppStoreAccount() async {
+        guard !isClearingAppStore else { return }
+        isClearingAppStore = true
+        alertState = nil
+
+        let result = await onClearAppStoreAccount()
+
+        isClearingAppStore = false
+        switch result {
+        case .success:
+            alertState = .appStoreCleared
+        case .failure(let error):
+            alertState = .error(error.localizedDescription)
         }
     }
 }

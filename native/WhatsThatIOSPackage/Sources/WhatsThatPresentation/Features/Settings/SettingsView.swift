@@ -17,6 +17,7 @@ struct SettingsView: View {
         makeCreditsView: @escaping (@escaping (Int?) -> Void) -> AnyView,
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
+        onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
         self.makeCreditsView = makeCreditsView
@@ -29,6 +30,7 @@ struct SettingsView: View {
                 onFetchCreditBalance: onFetchCreditBalance,
                 onSendPasswordReset: onSendPasswordReset,
                 onSignOut: onSignOut,
+                onClearAppStoreAccount: onClearAppStoreAccount,
                 onClose: onClose
             )
         )
@@ -77,6 +79,14 @@ struct SettingsView: View {
                         message: Text("Onboarding has been reset."),
                         dismissButton: .default(Text("OK")) {
                             onClose()
+                        }
+                    )
+                case .appStoreCleared:
+                    return Alert(
+                        title: Text("Cache cleared"),
+                        message: Text("Local App Store receipt and purchase cache cleared for this app."),
+                        dismissButton: .default(Text("OK")) {
+                            viewModel.dismissAlert()
                         }
                     )
                 case .error(let message):
@@ -200,6 +210,25 @@ struct SettingsView: View {
 
     private var onboardingSection: some View {
         Section(header: Text("Cache & Onboarding")) {
+            Button {
+                Task { await viewModel.clearAppStoreAccount() }
+            } label: {
+                HStack {
+                    if viewModel.isClearingAppStore {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    }
+                    Text("Clear App Store account cache")
+                }
+            }
+            .disabled(viewModel.isClearingAppStore)
+            .accessibilityIdentifier("settings.clearAppStoreAccount")
+
+            Text("Removes the local App Store receipt and cached purchase info used by this app. Useful to see when iOS prompts for Apple ID during purchases. Does not sign you out of the App Store.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 2)
+
             Button(role: .destructive) {
                 viewModel.presentResetConfirmation()
             } label: {
@@ -250,4 +279,3 @@ struct SettingsView: View {
         Task { await viewModel.performSignOut() }
     }
 }
-

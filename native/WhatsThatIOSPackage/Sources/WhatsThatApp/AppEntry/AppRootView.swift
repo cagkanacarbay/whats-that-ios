@@ -38,10 +38,16 @@ public struct AppRootView: View {
         let balanceFetcher: () async -> Result<Int, Error> = {
             await container.fetchCreditBalance()
         }
+        let clearAppStoreLocal: () async -> Result<Void, Error> = {
+            await container.clearAppStoreLocalState()
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
         let balanceFetcher: () async -> Result<Int, Error> = {
+            .failure(AuthError.unknown)
+        }
+        let clearAppStoreLocal: () async -> Result<Void, Error> = {
             .failure(AuthError.unknown)
         }
         #endif
@@ -55,7 +61,8 @@ public struct AppRootView: View {
             makeCreationViewModel: makeViewModel,
             makeVoiceoverController: voiceoverFactory,
             makeCreditsViewModel: creditsFactory,
-            fetchCreditBalance: balanceFetcher
+            fetchCreditBalance: balanceFetcher,
+            clearAppStoreLocal: clearAppStoreLocal
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

@@ -20,6 +20,7 @@ public struct RootContentView: View {
     private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
+    private let clearAppStoreLocal: () async -> Result<Void, Error>
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -32,7 +33,8 @@ public struct RootContentView: View {
         makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel,
         makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
-        fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) }
+        fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) },
+        clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) }
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -40,6 +42,7 @@ public struct RootContentView: View {
         self.makeVoiceoverController = makeVoiceoverController
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
+        self.clearAppStoreLocal = clearAppStoreLocal
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -209,6 +212,9 @@ public struct RootContentView: View {
                     } catch {
                         return .failure(error)
                     }
+                },
+                onClearAppStoreAccount: {
+                    await clearAppStoreLocal()
                 },
                 onClose: {
                     isSettingsPresented = false

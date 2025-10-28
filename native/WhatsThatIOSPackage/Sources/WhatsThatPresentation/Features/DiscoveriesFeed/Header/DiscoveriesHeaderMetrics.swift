@@ -5,21 +5,19 @@ struct DiscoveriesHeaderMetrics {
     let headerSpacerHeight: CGFloat
     let headerTopPadding: CGFloat
     let headerStackSpacing: CGFloat
-    let headerDividerBottomPadding: CGFloat
     let gridTopPadding: CGFloat
     let collapseDistance: CGFloat
 
     init(headerHeight: CGFloat, safeAreaTopInset: CGFloat) {
         let headerContentHeight = max(headerHeight - safeAreaTopInset, 0)
-        let headerDesiredSpacing = BrandSpacing.small
-        headerSpacerHeight = max(headerContentHeight - headerDesiredSpacing, 0)
+        // Slightly tighter header spacing overall
+        headerSpacerHeight = max(headerContentHeight - BrandSpacing.small, 0)
         headerTopPadding = BrandSpacing.small * 0.5
-        headerStackSpacing = headerTopPadding
-        headerDividerBottomPadding = BrandSpacing.small * 0.25
+        headerStackSpacing = BrandSpacing.small * 0.25
 
-        let approximateTitleToNotch = safeAreaTopInset + headerTopPadding
-        let desiredGap = approximateTitleToNotch * 0.35
-        gridTopPadding = max(desiredGap, BrandSpacing.small * 0.75)
+        // Bring the grid closer to the header for a tighter feel
+        // Halved from previous value (~16pt → ~8pt)
+        gridTopPadding = BrandSpacing.small
 
         collapseDistance = max(headerContentHeight, 1)
     }

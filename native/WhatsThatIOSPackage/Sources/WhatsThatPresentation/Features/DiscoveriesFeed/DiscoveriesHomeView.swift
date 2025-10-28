@@ -158,8 +158,10 @@ struct DiscoveriesHomeView: View {
                     }
                 }
 
+                let headerOpacityStretched = headerOpacityFollowingFirstRow(availableWidth: contentWidth)
+
                 DiscoveriesHeaderView(
-                    opacity: headerOpacity,
+                    opacity: headerOpacityStretched,
                     metrics: metrics,
                     backgroundColor: backgroundColor,
                     onSignOut: onSignOut,
@@ -428,6 +430,21 @@ struct DiscoveriesHomeView: View {
 
     private var headerOpacity: Double {
         headerMetrics.headerOpacity(for: scrollOffset)
+    }
+
+    // Computes header opacity that starts fading after half of the first row
+    // and completes once the first row is fully out of view.
+    private func headerOpacityFollowingFirstRow(availableWidth: CGFloat) -> Double {
+        let cardWidth = max((availableWidth - gridSpacing) / 2, 120)
+        let cardHeight = cardWidth * 1.2
+        let start = cardHeight * 0.5 // start fading after half row
+        let end = cardHeight          // complete after full row
+
+        // Distance scrolled past the point where the first row touches the top
+        let displacement = max(0, -scrollOffset)
+        let progress = (displacement - start) / max(end - start, 1)
+        let clamped = min(max(progress, 0), 1)
+        return 1 - Double(clamped)
     }
 }
 

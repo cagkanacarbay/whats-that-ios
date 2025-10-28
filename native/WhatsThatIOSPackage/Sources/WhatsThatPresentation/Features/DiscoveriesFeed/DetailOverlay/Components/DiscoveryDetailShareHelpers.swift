@@ -23,21 +23,27 @@ protocol DiscoveryDetailShareHandling {
 struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
     func makeSharePayload(for context: DiscoveryDetailShareContext) async -> DiscoveryDetailSharePayload? {
         let title = normalized(context.discovery.title) ?? "Discovery"
-        let headline = "Check out this \"\(title)\" I discovered on \"What's That?\""
+        let headline = "I discovered \"\(title)\" with \"What's That?\""
+        let description = shareDescription(for: context.discovery)
+        let linkURL = shareLinkURL(for: context.discovery)
 
         var components: [String] = [headline]
-        if let link = shareLinkURL(for: context.discovery)?.absoluteString {
+        if let description {
+            components.append(description)
+        }
+        if let link = linkURL?.absoluteString {
             components.append(link)
         }
 
         let message = components.joined(separator: "\n\n")
-        let shareImage = await resolvedShareImage(for: context)
+        let baseShareImage = await resolvedShareImage(for: context)
+        let shareImage = baseShareImage.flatMap(applyBrandMarkIfAvailable) ?? baseShareImage
 
         var items: [Any] = [
             DiscoveryShareMetadataItem(
                 message: message,
                 title: title,
-                link: shareLinkURL(for: context.discovery),
+                link: linkURL,
                 image: shareImage
             )
         ]
@@ -49,10 +55,6 @@ struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
         } else if let path = context.discovery.imagePath,
                    let remoteURL = URL(string: path) {
             items.append(remoteURL)
-        }
-
-        if let link = shareLinkURL(for: context.discovery) {
-            items.append(link)
         }
 
         return DiscoveryDetailSharePayload(items: items)
@@ -115,6 +117,58 @@ struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    private func shareDescription(for discovery: DiscoverySummary) -> String? {
+        if let short = normalized(discovery.shortDescription) {
+            return short
+        }
+        return normalized(discovery.highlight)
+    }
+
+    private func applyBrandMarkIfAvailable(to image: UIImage) -> UIImage? {
+        guard let logo = brandLogoImage() else { return nil }
+        let rendererFormat = UIGraphicsImageRendererFormat()
+        rendererFormat.scale = image.scale
+        rendererFormat.opaque = false
+        rendererFormat.preferredRange = .standard
+
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: rendererFormat)
+        let maxLogoWidth = image.size.width * 0.28
+        let maxLogoHeight = image.size.height * 0.20
+        let widthScale = maxLogoWidth / max(logo.size.width, 1)
+        let heightScale = maxLogoHeight / max(logo.size.height, 1)
+        let scaleFactor = min(min(widthScale, heightScale), 1) * 0.75
+        let targetSize = CGSize(
+            width: logo.size.width * scaleFactor,
+            height: logo.size.height * scaleFactor
+        )
+        guard targetSize.width > 0, targetSize.height > 0 else { return image }
+
+        let edgeInset = max(image.size.width, image.size.height) * 0.01
+
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+            let origin = CGPoint(
+                x: edgeInset,
+                y: image.size.height - targetSize.height - edgeInset
+            )
+            logo.draw(
+                in: CGRect(origin: origin, size: targetSize),
+                blendMode: .normal,
+                alpha: 0.9
+            )
+        }
+    }
+
+    private func brandLogoImage() -> UIImage? {
+        if let cached = Self.cachedBrandLogo { return cached }
+        let logo = UIImage(named: "BrandLogo")
+            ?? UIImage(named: "BrandLogo", in: Bundle.main, compatibleWith: nil)
+        Self.cachedBrandLogo = logo
+        return logo
+    }
+
+    private static var cachedBrandLogo: UIImage?
 
     private func locationQueryLabel(for location: DiscoveryLocation, discovery: DiscoverySummary) -> String? {
         normalized(

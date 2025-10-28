@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WhatsThatShared
 
 struct DiscoveriesHeaderView: View {
@@ -22,10 +23,10 @@ struct DiscoveriesHeaderView: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.top, metrics.headerTopPadding)
 
-            Divider()
-                .background(dividerColor)
-                .padding(.horizontal, BrandSpacing.large)
-                .padding(.bottom, metrics.headerDividerBottomPadding)
+            // Replaces the hard divider with a soft shadow/gradient
+            // that subtly separates the header from the grid.
+            Color.clear
+                .frame(height: 1)
         }
         .background(
             LinearGradient(
@@ -38,6 +39,16 @@ struct DiscoveriesHeaderView: View {
                 endPoint: .bottom
             )
         )
+        .overlay(alignment: .bottom) {
+            // Always-on hairline shadow that spans full width (no side gaps)
+            LinearGradient(
+                colors: [hairlineColor, Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: hairlineThickness)
+            .allowsHitTesting(false)
+        }
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -73,23 +84,46 @@ struct DiscoveriesHeaderView: View {
     }
 
     private var menuIcon: some View {
-        Image(systemName: "gearshape.fill")
-            .font(.system(size: 22, weight: .semibold))
+        let palette = BrandTheme.palette(for: colorScheme)
+
+        return Image(systemName: "gearshape.fill")
+            .font(.system(size: 18, weight: .semibold))
+            .symbolRenderingMode(.monochrome)
             .foregroundStyle(headerTitleColor)
-            .padding(10)
-            .background(headerIconBackground)
-            .clipShape(Circle())
+            .frame(width: 34, height: 34)
+            .background(.thinMaterial, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(headerIconBorderColor(palette: palette), lineWidth: 0.75)
+            )
+            .shadow(color: headerIconShadowColor, radius: 2, y: 1)
+            .padding(4) // ensures a ~44pt hit target
     }
 
     private var headerTitleColor: Color {
         colorScheme == .dark ? Color.white : BrandColors.Light.accentText
     }
 
-    private var headerIconBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : BrandColors.Light.border
+    private func headerIconBorderColor(palette: BrandTheme.Palette) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.18) : palette.border.opacity(0.6)
     }
 
-    private var dividerColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.1) : BrandColors.Light.border
+    private var headerIconShadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08)
+    }
+
+    private var shadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.6) : Color.black.opacity(0.12)
+    }
+
+    private var hairlineColor: Color {
+        // Slightly stronger contrast per request
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.10)
+    }
+
+    private var hairlineThickness: CGFloat {
+        let scale = UIScreen.main.scale
+        // 2 device pixels for a slightly stronger separation
+        return scale > 0 ? (2 / scale) : 2
     }
 }

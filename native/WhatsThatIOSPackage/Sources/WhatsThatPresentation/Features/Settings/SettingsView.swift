@@ -37,8 +37,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                accountSection
+                creditsSection
                 themeSection
+                accountSection
                 onboardingSection
             }
             .task {
@@ -99,39 +100,6 @@ struct SettingsView: View {
 
     private var accountSection: some View {
         Section(header: Text("Account")) {
-            NavigationLink {
-                makeCreditsView { newBalance in
-                    viewModel.updateCreditBalance(newBalance)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 28, height: 28)
-                        .foregroundStyle(Color.accentColor)
-
-                    Text("Credits")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color.primary)
-
-                    Spacer()
-
-                    if viewModel.isLoadingCredits {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                    } else if let balance = viewModel.creditBalance {
-                        Text("\(balance)")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.secondary)
-                    } else {
-                        Text("—")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
             if viewModel.canRequestPasswordReset {
                 Button {
                     Task { await viewModel.performPasswordReset() }
@@ -169,6 +137,43 @@ struct SettingsView: View {
             }
             .disabled(viewModel.isSigningOut)
             .accessibilityIdentifier("settings.signOut")
+        }
+    }
+
+    private var creditsSection: some View {
+        Section(header: Text("Credits")) {
+            NavigationLink {
+                makeCreditsView { newBalance in
+                    viewModel.updateCreditBalance(newBalance)
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.accentColor)
+
+                    Text("Credits")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.primary)
+
+                    Spacer()
+
+                    if viewModel.isLoadingCredits {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    } else if let balance = viewModel.creditBalance {
+                        Text("\(balance)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -245,3 +250,4 @@ struct SettingsView: View {
         Task { await viewModel.performSignOut() }
     }
 }
+

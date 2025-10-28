@@ -133,6 +133,38 @@ public struct RootContentView: View {
                             .font(.headline)
                     }
             }
+            if let user = viewModel.passwordResetUser {
+                PasswordResetView(
+                    email: user.email,
+                    onSubmit: { newPassword in
+                        if let error = await viewModel.completePasswordReset(newPassword: newPassword) {
+                            return .failure(error)
+                        } else {
+                            return .success(())
+                        }
+                    },
+                    onComplete: {
+                        processedPasswordResetTokens.removeAll()
+                        Task {
+                            await viewModel.cancelPasswordResetFlow()
+                            await MainActor.run {
+                                authStartMode = .signIn
+                            }
+                        }
+                    },
+                    onCancel: {
+                        processedPasswordResetTokens.removeAll()
+                        Task {
+                            await viewModel.cancelPasswordResetFlow()
+                            await MainActor.run {
+                                authStartMode = .signIn
+                            }
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
             .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         }
@@ -183,50 +215,6 @@ public struct RootContentView: View {
                 }
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { viewModel.passwordResetUser != nil },
-                set: { isPresented in
-                    if !isPresented, viewModel.passwordResetUser != nil {
-                        processedPasswordResetTokens.removeAll()
-                        Task { await viewModel.cancelPasswordResetFlow() }
-                    }
-                }
-            )
-        ) {
-            if let user = viewModel.passwordResetUser {
-                PasswordResetSheet(
-                    email: user.email,
-                    onSubmit: { newPassword in
-                        if let error = await viewModel.completePasswordReset(newPassword: newPassword) {
-                            return .failure(error)
-                        } else {
-                            return .success(())
-                        }
-                    },
-                    onComplete: {
-                        processedPasswordResetTokens.removeAll()
-                        Task {
-                            await viewModel.cancelPasswordResetFlow()
-                            await MainActor.run {
-                                authStartMode = .signIn
-                            }
-                        }
-                    },
-                    onCancel: {
-                        processedPasswordResetTokens.removeAll()
-                        Task {
-                            await viewModel.cancelPasswordResetFlow()
-                            await MainActor.run {
-                                authStartMode = .signIn
-                            }
-                        }
-                    }
-                )
-            } else {
-                ProgressView()
-            }
         }
         .alert(
             authError?.errorDescription ?? "Something went wrong",
@@ -302,6 +290,11 @@ public struct RootContentView: View {
 
         processingPasswordResetToken = tokenIdentifier
         Task {
+            await MainActor.run {
+                if isSettingsPresented {
+                    isSettingsPresented = false
+                }
+            }
             let error = await viewModel.preparePasswordReset(from: targetURL)
             await MainActor.run {
                 processingPasswordResetToken = nil
@@ -1093,14 +1086,13 @@ private struct ForgotPasswordForm: View {
 
 // MARK: - Password Reset Sheet
 
-private struct PasswordResetSheet: View {
+private struct PasswordResetView: View {
     let email: String
     let onSubmit: (String) async -> Result<Void, AuthError>
     let onComplete: () -> Void
     let onCancel: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dismiss) private var dismiss
     @State private var newPassword: String = ""
     @State private var confirmPassword: String = ""
     @State private var isLoading = false
@@ -1109,72 +1101,83 @@ private struct PasswordResetSheet: View {
     @State private var isComplete = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: BrandSpacing.large) {
-                VStack(spacing: BrandSpacing.small) {
-                    Text(isComplete ? "Password Updated" : "Reset Password")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(titleColor)
+        ZStack {
+            backgroundColor
+                .ignoresSafeArea()
 
-                    Text(messageCopy)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(bodyColor)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, BrandSpacing.large)
+            VStack { // Center content vertically
+                Spacer(minLength: 0)
 
-                if !isComplete {
-                    VStack(spacing: BrandSpacing.medium) {
-                        BrandFloatingField(
-                            title: "New Password",
-                            placeholder: "At least 8 characters",
-                            text: $newPassword,
-                            fieldType: .password(showToggle: true),
-                            errorText: passwordError
-                        )
+                VStack(spacing: BrandSpacing.large) {
+                    VStack(spacing: BrandSpacing.small) {
+                        Image("BrandLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 110, height: 110)
 
-                        BrandFloatingField(
-                            title: "Confirm Password",
-                            placeholder: "Re-enter new password",
-                            text: $confirmPassword,
-                            fieldType: .password(showToggle: true),
-                            errorText: confirmPasswordError
-                        )
+                        Text(isComplete ? "Password Updated" : "Reset Password")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(titleColor)
+
+                        Text(messageCopy)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(bodyColor)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    if !isComplete {
+                        VStack(spacing: BrandSpacing.medium) {
+                            BrandFloatingField(
+                                title: "New Password",
+                                placeholder: "At least 8 characters",
+                                text: $newPassword,
+                                fieldType: .password(showToggle: true),
+                                errorText: passwordError
+                            )
+
+                            BrandFloatingField(
+                                title: "Confirm Password",
+                                placeholder: "Re-enter new password",
+                                text: $confirmPassword,
+                                fieldType: .password(showToggle: true),
+                                errorText: confirmPasswordError
+                            )
+                        }
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                    }
+
+                    if isComplete {
+                        BrandPrimaryButton(title: "Back to Sign In") {
+                            onComplete()
+                        }
+                    } else {
+                        BrandPrimaryButton(
+                            title: isLoading ? "Updating..." : "Update Password",
+                            isLoading: isLoading
+                        ) {
+                            submit()
+                        }
+                        .disabled(isLoading)
+
+                        Button("Cancel") {
+                            onCancel()
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(primaryColor)
+                        .fontWeight(.semibold)
                     }
                 }
+                .frame(maxWidth: 520)
+                .padding(.horizontal, BrandSpacing.large)
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.red.opacity(0.9))
-                        .multilineTextAlignment(.center)
-                }
-
-                if isComplete {
-                    BrandPrimaryButton(title: "Back to Sign In") {
-                        onComplete()
-                        dismiss()
-                    }
-                } else {
-                    BrandPrimaryButton(
-                        title: isLoading ? "Updating..." : "Update Password",
-                        isLoading: isLoading
-                    ) {
-                        submit()
-                    }
-                    .disabled(isLoading)
-
-                    Button("Cancel") {
-                        onCancel()
-                        dismiss()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(primaryColor)
-                    .fontWeight(.semibold)
-                }
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.bottom, BrandSpacing.large)
         }
     }
 
@@ -1182,7 +1185,7 @@ private struct PasswordResetSheet: View {
         if isComplete {
             return "You're all set. Sign in with your new password to get back to exploring."
         } else {
-            return "Enter a new password for \(email). Make sure it’s secure and something you haven’t used before."
+            return "Enter a new password for \(email)."
         }
     }
 
@@ -1218,6 +1221,12 @@ private struct PasswordResetSheet: View {
 
     private var primaryColor: Color {
         colorScheme == .dark ? BrandColors.Dark.primaryAction : BrandColors.Light.primaryAction
+    }
+
+    private var backgroundColor: Color {
+        // Match the authentication screens' light-mode background so
+        // BrandFloatingField labels blend without a visible box.
+        colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
     }
 
     private func submit() {

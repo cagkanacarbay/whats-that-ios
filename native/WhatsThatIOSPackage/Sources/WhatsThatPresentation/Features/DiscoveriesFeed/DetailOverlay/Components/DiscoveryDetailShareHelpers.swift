@@ -129,7 +129,9 @@ struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
         guard let logo = brandLogoImage() else { return nil }
         let rendererFormat = UIGraphicsImageRendererFormat()
         rendererFormat.scale = image.scale
-        rendererFormat.opaque = false
+        // The final composited share image is fully opaque (base photo + brand mark),
+        // so render without an alpha channel to avoid ImageIO warnings and reduce size.
+        rendererFormat.opaque = true
         rendererFormat.preferredRange = .standard
 
         let renderer = UIGraphicsImageRenderer(size: image.size, format: rendererFormat)

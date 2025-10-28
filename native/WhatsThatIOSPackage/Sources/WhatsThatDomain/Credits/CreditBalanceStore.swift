@@ -17,11 +17,11 @@ public actor CreditBalanceStore: Sendable {
 
     public init(
         repository: DiscoveryCreditsRepository,
-        defaults: UserDefaults = .standard,
+        suiteName: String? = nil,
         ttl: TimeInterval = 90
     ) {
         self.repository = repository
-        self.defaults = defaults
+        self.defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         self.ttl = ttl
     }
 
@@ -114,4 +114,3 @@ public actor CreditBalanceStore: Sendable {
         }
     }
 }
-

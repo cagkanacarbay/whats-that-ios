@@ -70,7 +70,7 @@ struct ShimmerTextView: View {
         .onAppear {
             triggerShimmerIfNeeded(for: text)
         }
-        .onChange(of: text) { newValue in
+        .onChange(of: text) { _, newValue in
             triggerShimmerIfNeeded(for: newValue)
         }
         .onDisappear {

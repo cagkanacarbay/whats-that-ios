@@ -33,14 +33,18 @@ struct VoiceoverPlayerHost: View {
                     }
                 )
                 .onPreferenceChange(VoiceoverPlayerHeightPreferenceKey.self) { value in
-                    insetStore.update(height: value)
+                    Task { @MainActor in
+                        insetStore.update(height: value)
+                    }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .onChange(of: isVisible) { _, visible in
             if !visible {
-                insetStore.update(height: 0)
+                Task { @MainActor in
+                    insetStore.update(height: 0)
+                }
             }
         }
         .accessibilityElement(children: .combine)

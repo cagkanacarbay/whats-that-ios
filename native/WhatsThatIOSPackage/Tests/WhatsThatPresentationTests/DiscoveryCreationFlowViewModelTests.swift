@@ -27,9 +27,10 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         let selectionService = StubSelectionService(media: capturedMedia)
         let historyRepository = StubHistoryRepository()
         let creditsRepository = StubCreditsRepository(balance: 5)
+        let testSuite = UUID().uuidString
         let creditBalanceStore = CreditBalanceStore(
             repository: creditsRepository,
-            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            suiteName: testSuite,
             ttl: 0
         )
         let analysisClient = StubAnalysisClient(
@@ -101,9 +102,10 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
     func testUploadCancellationReturnsToIdleState() async {
         let historyRepository = StubHistoryRepository()
         let creditsRepository = StubCreditsRepository(balance: 5)
+        let testSuite1 = UUID().uuidString
         let creditBalanceStore = CreditBalanceStore(
             repository: creditsRepository,
-            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            suiteName: testSuite1,
             ttl: 0
         )
 
@@ -140,9 +142,10 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         )
         let historyRepository = StubHistoryRepository()
         let creditsRepository = StubCreditsRepository(balance: 2)
+        let testSuite2 = UUID().uuidString
         let creditBalanceStore = CreditBalanceStore(
             repository: creditsRepository,
-            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            suiteName: testSuite2,
             ttl: 0
         )
 

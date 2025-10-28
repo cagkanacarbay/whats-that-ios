@@ -150,7 +150,7 @@ public struct DiscoveryCachedImage<Content: View>: View {
                 loader.updateRemoteURL(remoteURL)
                 loader.loadIfNeeded()
             }
-            .onChange(of: remoteURL) { newValue in
+            .onChange(of: remoteURL) { _, newValue in
                 loader.updateRemoteURL(newValue)
                 loader.loadIfNeeded()
             }

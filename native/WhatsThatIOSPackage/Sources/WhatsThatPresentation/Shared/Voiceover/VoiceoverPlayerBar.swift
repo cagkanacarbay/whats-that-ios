@@ -36,10 +36,14 @@ struct VoiceoverPlayerBar: View {
             }
         )
         .onPreferenceChange(VoiceoverPlayerHeightPreferenceKey.self) { value in
-            insetStore.update(height: value)
+            Task { @MainActor in
+                insetStore.update(height: value)
+            }
         }
         .onDisappear {
-            insetStore.update(height: 0)
+            Task { @MainActor in
+                insetStore.update(height: 0)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Audio player")

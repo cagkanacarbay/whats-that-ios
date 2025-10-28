@@ -69,20 +69,12 @@ public final class VoiceoverPlaybackController: ObservableObject {
         let observation = playerItemStatusObservation
         let observer = endPlaybackObserver
 
-        let cleanup = {
-            if let token {
-                player.removeTimeObserver(token)
-            }
-            observation?.invalidate()
-            if let observer {
-                NotificationCenter.default.removeObserver(observer)
-            }
+        if let token {
+            player.removeTimeObserver(token)
         }
-
-        if Thread.isMainThread {
-            cleanup()
-        } else {
-            DispatchQueue.main.async(execute: cleanup)
+        observation?.invalidate()
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 }
@@ -243,7 +235,7 @@ private extension VoiceoverPlaybackController {
             switch item.status {
             case .readyToPlay:
                 Task { @MainActor in
-                    self.handleReadyToPlay(item: item, discovery: discovery)
+                    await self.handleReadyToPlay(item: item, discovery: discovery)
                 }
             case .failed:
                 Task { @MainActor in
@@ -274,8 +266,9 @@ private extension VoiceoverPlaybackController {
         player.play()
     }
 
-    func handleReadyToPlay(item: AVPlayerItem, discovery: DiscoverySummary) {
-        duration = item.asset.duration.secondsValue
+    func handleReadyToPlay(item: AVPlayerItem, discovery: DiscoverySummary) async {
+        let loadedDuration = try? await item.asset.load(.duration)
+        duration = loadedDuration?.secondsValue
         playbackState = .playing(discoveryId: discovery.id)
         position = item.currentTime().seconds
     }
@@ -313,7 +306,10 @@ private extension VoiceoverPlaybackController {
             Task { @MainActor in
                 self.position = time.seconds
                 if self.duration == nil {
-                    if let currentDuration = self.player.currentItem?.duration.secondsValue, currentDuration > 0 {
+                    if let asset = self.player.currentItem?.asset,
+                       let cmTime = try? await asset.load(.duration),
+                       let currentDuration = cmTime.secondsValue,
+                       currentDuration > 0 {
                         self.duration = currentDuration
                     }
                 }
@@ -368,4 +364,3 @@ private extension CMTime {
             )
         }
     }
-

@@ -137,7 +137,7 @@ public extension SupabaseDiscoveryRepository {
         }
 
         do {
-            _ = try await client.database
+            _ = try await client
                 .from("discoveries")
                 .delete(returning: .minimal)
                 .eq("id", value: Int(summary.id))

@@ -162,18 +162,18 @@ struct DiscoveryStreamingStageView: View {
                 .onChange(of: state.displayMarkdown) {
                     updateDisplayedMarkdown()
                 }
-                .onChange(of: currentMessageIndex) { newIndex in
+                .onChange(of: currentMessageIndex) { _, newIndex in
                     let currentOpacityFormatted = String(format: "%.2f", currentMessageOpacity)
                     let previousOpacityFormatted = String(format: "%.2f", previousMessageOpacity)
                     debugLog(
                         "loaderMessageIndex -> \(newIndex) message=\"\(currentLoadingMessage)\" prev=\"\(previousMessage ?? "nil")\" currentOpacity=\(currentOpacityFormatted) previousOpacity=\(previousOpacityFormatted)"
                     )
                 }
-                .onChange(of: currentMessageOpacity) { newValue in
+                .onChange(of: currentMessageOpacity) { _, newValue in
                     let formatted = String(format: "%.2f", newValue)
                     debugLog("currentMessageOpacity changed -> \(formatted) message=\"\(currentLoadingMessage)\"")
                 }
-                .onChange(of: previousMessageOpacity) { newValue in
+                .onChange(of: previousMessageOpacity) { _, newValue in
                     let formatted = String(format: "%.2f", newValue)
                     debugLog("previousMessageOpacity changed -> \(formatted) previous=\"\(previousMessage ?? "nil")\"")
                 }

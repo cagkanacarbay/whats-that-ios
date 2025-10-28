@@ -198,6 +198,13 @@ public extension AppDependencyContainer {
 
 #if os(iOS)
 public extension AppDependencyContainer {
+    /// Begin listening for StoreKit transaction updates at app launch.
+    /// Ensures pending purchases are validated and credit balance refreshed.
+    func startStoreKitTransactionListener() async {
+        if let store = creditsStore as? StoreKitCreditsStore {
+            _ = await store.startListeningForTransactionUpdates(balanceStore: creditBalanceStore)
+        }
+    }
     @MainActor
     func makeDiscoveryCreationViewModel(
         for type: DiscoveryCreationFlowType

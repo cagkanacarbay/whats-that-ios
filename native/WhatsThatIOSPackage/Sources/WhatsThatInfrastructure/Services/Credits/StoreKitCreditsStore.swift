@@ -82,7 +82,7 @@ public actor StoreKitCreditsStore: CreditsStore {
         switch purchaseResult {
         case let .success(verification):
             let transaction = try verify(verification)
-            try await validateTransaction(transaction, for: product)
+            try await validateTransaction(transaction, for: product, refreshReceipt: true)
             await transaction.finish()
             return CreditPurchaseResult(status: .success)
         case .pending:
@@ -122,12 +122,18 @@ private extension StoreKitCreditsStore {
         }
     }
 
-    func validateTransaction(_ transaction: Transaction, for product: Product) async throws {
+    func validateTransaction(
+        _ transaction: Transaction,
+        for product: Product,
+        refreshReceipt: Bool = true
+    ) async throws {
         guard let accessToken = client.auth.currentSession?.accessToken else {
             throw CreditsStoreError.userNotAuthenticated
         }
 
-        let receiptData = try await fetchReceiptData()
+        // Use existing receipt when available; only refresh on-demand during
+        // an explicit purchase flow to avoid unexpected sign-in prompts.
+        let receiptData = try await fetchReceiptData(refreshIfMissing: refreshReceipt)
         guard let url = try makeFunctionsURL(for: "validate-receipt") else {
             throw CreditsStoreError.unsupportedResponse
         }
@@ -141,7 +147,10 @@ private extension StoreKitCreditsStore {
             "platform": "ios",
             "receiptData": receiptData.base64EncodedString(),
             "productId": product.id,
-            "storeTransactionId": transaction.id
+            // Send both the StoreKit transaction id and the original id as strings
+            // to match common server expectations for Apple receipt fields.
+            "storeTransactionId": String(transaction.id),
+            "originalTransactionId": String(transaction.originalID)
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -165,15 +174,16 @@ private extension StoreKitCreditsStore {
         }
     }
 
-    func fetchReceiptData() async throws -> Data {
+    func fetchReceiptData(refreshIfMissing: Bool) async throws -> Data {
         if let data = currentReceiptData(), !data.isEmpty {
             return data
         }
 
-        try await AppStore.sync()
-
-        if let data = currentReceiptData(), !data.isEmpty {
-            return data
+        if refreshIfMissing {
+            try await AppStore.sync()
+            if let data = currentReceiptData(), !data.isEmpty {
+                return data
+            }
         }
 
         throw CreditsStoreError.receiptUnavailable
@@ -211,4 +221,30 @@ private struct ValidateReceiptResponse: Decodable {
     let success: Bool
     let message: String?
 }
+#if os(iOS)
+public extension StoreKitCreditsStore {
+    /// Starts a background listener for StoreKit transaction updates.
+    /// Ensures out-of-band purchases are validated and finished.
+    /// Optionally refreshes the credit balance upon successful validation.
+    @discardableResult
+    func startListeningForTransactionUpdates(balanceStore: CreditBalanceStore? = nil) -> Task<Void, Never> {
+        Task {
+            for await update in Transaction.updates {
+                do {
+                    let transaction: Transaction = try self.verify(update)
+                    let product = try await self.loadProductIfNeeded(for: transaction.productID)
+                    try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
+                    await transaction.finish()
+                    if let balanceStore {
+                        _ = try? await balanceStore.refresh(force: true)
+                    }
+                } catch {
+                    // Intentionally swallow errors here; user will have an
+                    // opportunity to retry purchases from the Credits screen.
+                }
+            }
+        }
+    }
+}
+#endif
 #endif

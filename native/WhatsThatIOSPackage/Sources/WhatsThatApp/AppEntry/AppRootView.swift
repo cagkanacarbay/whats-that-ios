@@ -57,5 +57,9 @@ public struct AppRootView: View {
             makeCreditsViewModel: creditsFactory,
             fetchCreditBalance: balanceFetcher
         )
+        .task {
+            // Listen for StoreKit transaction updates to avoid missing successful purchases.
+            await container.startStoreKitTransactionListener()
+        }
     }
 }

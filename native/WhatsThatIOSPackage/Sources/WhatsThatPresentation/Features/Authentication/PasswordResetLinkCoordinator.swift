@@ -15,3 +15,4 @@ public final class PasswordResetLinkCoordinator: ObservableObject {
         subject.send(url)
     }
 }
+

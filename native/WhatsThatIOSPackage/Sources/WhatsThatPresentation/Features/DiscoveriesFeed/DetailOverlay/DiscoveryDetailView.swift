@@ -46,6 +46,7 @@ struct DiscoveryDetailView: View {
     @Binding private var scrollOffset: CGFloat
     @State private var isOptionsPresented = false
     @State private var shareSheetPayload: DiscoveryDetailSharePayload?
+    @State private var shareSheetDetent: PresentationDetent = .medium
 
     init(
         discovery: DiscoverySummary,
@@ -136,10 +137,13 @@ struct DiscoveryDetailView: View {
         }
         .frame(width: layout.cardSize.width, height: layout.cardSize.height)
         .background(backgroundColor.opacity(layout.backgroundOpacity))
-        .clipShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
-        .sheet(item: $shareSheetPayload) { payload in
-            DiscoveryShareSheet(activityItems: payload.items)
-        }
+            .clipShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
+            .modifier(
+                ShareSheetModifier(
+                    shareSheetPayload: $shareSheetPayload,
+                    shareSheetDetent: $shareSheetDetent
+                )
+            )
         .overlay {
             if isOptionsPresented {
                 DiscoveryDetailOptionsSheet(
@@ -152,6 +156,11 @@ struct DiscoveryDetailView: View {
         .onChange(of: isDeleting) { _, newValue in
             if newValue {
                 isOptionsPresented = false
+            }
+        }
+        .onChange(of: shareSheetPayload?.id) { _, id in
+            if id == nil {
+                shareSheetDetent = .medium
             }
         }
     }
@@ -193,6 +202,7 @@ private extension DiscoveryDetailView {
 
             guard let payload = await handler.makeSharePayload(for: context) else { return }
             await MainActor.run {
+                shareSheetDetent = .medium
                 shareSheetPayload = payload
             }
         }
@@ -585,5 +595,23 @@ private struct HeroTapHitShape: Shape {
             path.addRect(exclusion)
         }
         return path
+    }
+}
+
+// MARK: - Targeted type boundary for share sheet
+
+private struct ShareSheetModifier: ViewModifier {
+    @Binding var shareSheetPayload: DiscoveryDetailSharePayload?
+    @Binding var shareSheetDetent: PresentationDetent
+
+    // Explicitly-typed detents to avoid inference churn
+    private var detents: Set<PresentationDetent> { [.medium, .large] }
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $shareSheetPayload) { payload in
+            DiscoveryShareSheet(activityItems: payload.items)
+                .presentationDetents(detents, selection: $shareSheetDetent)
+                .presentationDragIndicator(.visible)
+        }
     }
 }

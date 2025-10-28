@@ -123,11 +123,12 @@ struct DiscoveryDetailDismissInteractor {
         let clampedRotationProgress = min(normalizedProgress, 0.5) / 0.5
         let rotation = -5 * Double(clampedRotationProgress)
 
+        let cornerTarget = DiscoveryDetailLayout.cardCornerRadius
         let borderRadius: CGFloat
         if normalizedProgress <= 0.1 {
-            borderRadius = (normalizedProgress / 0.1) * 12
+            borderRadius = (normalizedProgress / 0.1) * cornerTarget
         } else {
-            borderRadius = 12
+            borderRadius = cornerTarget
         }
 
         let clampedShadowProgress = min(normalizedProgress, 0.3) / 0.3
@@ -152,11 +153,12 @@ struct DiscoveryDetailDismissInteractor {
         let scaleReduction = 0.28 * clampedScaleProgress
         let scale = max(0.7, 1 - scaleReduction)
 
+        let cornerTarget = DiscoveryDetailLayout.cardCornerRadius
         let borderRadius: CGFloat
         if normalizedProgress <= 0.1 {
-            borderRadius = (normalizedProgress / 0.1) * 12
+            borderRadius = (normalizedProgress / 0.1) * cornerTarget
         } else {
-            borderRadius = 12
+            borderRadius = cornerTarget
         }
 
         let clampedShadowProgress = min(normalizedProgress, 0.4) / 0.4

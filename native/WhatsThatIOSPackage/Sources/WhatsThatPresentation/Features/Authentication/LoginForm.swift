@@ -9,14 +9,36 @@ struct LoginForm: View {
     let onSwitchToSignUp: () -> Void
     let onGoogle: (@escaping (Result<Void, AuthError>) -> Void) -> Void
     let onApple: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    let onFieldFocusChanged: (_ field: LoginField?) -> Void
+
+    init(
+        isPerformingAction: Bool,
+        onSubmit: @escaping (String, String, @escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onForgotPassword: @escaping () -> Void,
+        onSwitchToSignUp: @escaping () -> Void,
+        onGoogle: @escaping (@escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onApple: @escaping (@escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onFieldFocusChanged: @escaping (_ field: LoginField?) -> Void = { _ in }
+    ) {
+        self.isPerformingAction = isPerformingAction
+        self.onSubmit = onSubmit
+        self.onForgotPassword = onForgotPassword
+        self.onSwitchToSignUp = onSwitchToSignUp
+        self.onGoogle = onGoogle
+        self.onApple = onApple
+        self.onFieldFocusChanged = onFieldFocusChanged
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var email: String = ""
     @State private var password: String = ""
-    @State private var errorMessage: String?
     @State private var showingLoading = false
     @State private var didAttemptSubmit = false
-    @State private var hasEditedPassword = false
+    // Focus handling to show validation only after leaving a field
+    @FocusState private var emailFocused: Bool
+    @FocusState private var passwordFocused: Bool
+    @State private var emailDidBlur: Bool = false
+    @State private var passwordDidBlur: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.large) {
@@ -25,10 +47,6 @@ struct LoginForm: View {
                     .font(.system(size: 28, weight: .bold))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .foregroundStyle(titleColor)
-                Text("Log in to pick up where you left off.")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(bodyColor)
-                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             VStack(spacing: BrandSpacing.medium) {
@@ -36,19 +54,27 @@ struct LoginForm: View {
                     title: "Email Address",
                     placeholder: "name@email.com",
                     text: $email,
-                    fieldType: .plain,
-                    errorText: errorForEmail
+                    fieldType: .email,
+                    errorText: errorForEmail,
+                    focus: $emailFocused
                 )
+                .id(LoginField.email.anchorID)
+                .onChange(of: emailFocused) { _, newValue in
+                    if newValue == false { emailDidBlur = true }
+                    if newValue == true { onFieldFocusChanged(.email) }
+                }
                 BrandFloatingField(
                     title: "Password",
                     placeholder: "••••••••",
                     text: $password,
                     fieldType: .password(showToggle: true),
-                    errorText: errorForPassword
+                    errorText: errorForPassword,
+                    focus: $passwordFocused
                 )
-                .onChange(of: password) { _, _ in
-                    guard !hasEditedPassword else { return }
-                    hasEditedPassword = true
+                .id(LoginField.password.anchorID)
+                .onChange(of: passwordFocused) { _, newValue in
+                    if newValue == false { passwordDidBlur = true }
+                    if newValue == true { onFieldFocusChanged(.password) }
                 }
             }
 
@@ -58,7 +84,7 @@ struct LoginForm: View {
             ) {
                 submit()
             }
-            .disabled(isPerformingAction || showingLoading)
+            .disabled(isPerformingAction || showingLoading || !isFormValid)
 
             Button("Forgot password?") {
                 onForgotPassword()
@@ -90,22 +116,12 @@ struct LoginForm: View {
                 .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity, alignment: .center)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.red.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
         }
     }
 
     private var errorForEmail: String? {
-        guard !email.isEmpty else { return nil }
-        let regex = try? NSRegularExpression(pattern: "[^\\s@]+@[^\\s@]+\\.[^\\s@]+")
-        let range = NSRange(location: 0, length: email.utf16.count)
-        let isValid = regex?.firstMatch(in: email, options: [], range: range) != nil
-        return isValid ? nil : "Please enter a valid email address"
+        guard shouldShowEmailError else { return nil }
+        return EmailValidator.isValid(email) ? nil : "Please enter a valid email address"
     }
 
     private var errorForPassword: String? {
@@ -113,7 +129,7 @@ struct LoginForm: View {
     }
 
     private var shouldShowPasswordError: Bool {
-        (hasEditedPassword || didAttemptSubmit) && password.isEmpty
+        ((passwordDidBlur) || didAttemptSubmit) && password.isEmpty
     }
 
     private var titleColor: Color {
@@ -131,21 +147,14 @@ struct LoginForm: View {
     private func submit() {
         didAttemptSubmit = true
 
-        guard errorForEmail == nil, errorForPassword == nil, !email.isEmpty, !password.isEmpty else {
-            errorMessage = "Please fill in both fields to continue."
+        guard EmailValidator.isValid(email), !password.isEmpty else {
             return
         }
 
-        errorMessage = nil
         showingLoading = true
         onSubmit(email.lowercased(), password) { result in
             showingLoading = false
-            switch result {
-            case .success:
-                errorMessage = nil
-            case .failure(let error):
-                errorMessage = error.errorDescription
-            }
+            // Errors are handled by higher-level pop-ups; no inline form error
         }
     }
 
@@ -155,10 +164,31 @@ struct LoginForm: View {
         showingLoading = true
         handler { result in
             showingLoading = false
-            if case .failure(let error) = result {
-                errorMessage = error.errorDescription
-            }
+            // Errors (including cancellations) are surfaced via pop-ups elsewhere
         }
+    }
+
+    private var shouldShowEmailError: Bool {
+        ((emailDidBlur) || didAttemptSubmit) && !EmailValidator.isValid(email)
+    }
+
+    // No per‑keystroke validation for UX performance. Full validation happens
+    // on blur (for error copy) and on submit.
+
+    private var isFormValid: Bool {
+        // Avoid heavy validation while typing; allow submit when non-empty.
+        !email.isEmpty && !password.isEmpty
     }
 }
 
+enum LoginField {
+    case email
+    case password
+
+    var anchorID: String {
+        switch self {
+        case .email: return "auth-login-email"
+        case .password: return "auth-login-password"
+        }
+    }
+}

@@ -41,6 +41,13 @@ public struct CreditPurchaseResult: Equatable, Sendable {
 public protocol CreditsStore: Sendable {
     func loadProducts() async throws -> [CreditProduct]
     func purchase(productId: String) async throws -> CreditPurchaseResult
+    /// Called when the user opens the credits UI. Default no-op.
+    /// Implementations may perform an optional receipt sync here.
+    func syncReceiptsOnCreditsOpen() async
+}
+
+public extension CreditsStore {
+    func syncReceiptsOnCreditsOpen() async {}
 }
 
 public struct CreditPackDefinition: Identifiable, Equatable, Sendable {

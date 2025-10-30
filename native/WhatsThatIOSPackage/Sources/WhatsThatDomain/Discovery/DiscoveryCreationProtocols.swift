@@ -16,7 +16,20 @@ public protocol DiscoveryLocationService: Sendable {
     func startTrackingIfNeeded() async
     func stopTracking()
     func currentLocation() async -> DiscoveryLocation?
+    /// Returns app-level location permission status.
+    func isPermissionGranted() async -> Bool
+    /// Optionally request a fresh location fix, avoiding immediate last-known returns when true.
+    func currentLocation(requireFresh: Bool) async -> DiscoveryLocation?
     func attachLocationMetadata(from media: DiscoveryCapturedMedia) async -> DiscoveryLocation?
+    func prepareNearbyPlaces(for location: DiscoveryLocation?) async -> NearbyPlacesSelection?
+    func registerMediaLocation(_ location: DiscoveryLocation) async
+}
+
+public extension DiscoveryLocationService {
+    func isPermissionGranted() async -> Bool { false }
+    func currentLocation(requireFresh: Bool) async -> DiscoveryLocation? {
+        await currentLocation()
+    }
 }
 
 public protocol DiscoveryCreditsRepository: Sendable {
@@ -36,17 +49,23 @@ public struct DiscoveryAnalysisPayload: Sendable, Equatable {
     public let location: DiscoveryLocation?
     public let customContext: String?
     public let pushToken: String?
+    public let nearbyPlaces: [NearbyPlace]?
+    public let nearbyPlacesContext: NearbyPlacesContext?
 
     public init(
         base64Image: String,
         location: DiscoveryLocation? = nil,
         customContext: String? = nil,
-        pushToken: String? = nil
+        pushToken: String? = nil,
+        nearbyPlaces: [NearbyPlace]? = nil,
+        nearbyPlacesContext: NearbyPlacesContext? = nil
     ) {
         self.base64Image = base64Image
         self.location = location
         self.customContext = customContext
         self.pushToken = pushToken
+        self.nearbyPlaces = nearbyPlaces
+        self.nearbyPlacesContext = nearbyPlacesContext
     }
 }
 

@@ -3,7 +3,8 @@ import SwiftUI
 struct DiscoveryConfirmationLocationBadge: View {
     enum Content {
         case resolved(action: () -> Void)
-        case missing
+        case missing(action: () -> Void)
+        case resolving
         case permissions(action: () -> Void)
     }
 
@@ -24,13 +25,25 @@ struct DiscoveryConfirmationLocationBadge: View {
                 )
             )
             .accessibilityLabel("Open discovery location in Maps")
-        case .missing:
-            HStack(spacing: 8) {
-                Image(systemName: "mappin")
-                    .font(.system(size: 16, weight: .semibold))
-                Text("No location")
-                    .font(.system(size: 14, weight: .semibold))
+        case let .missing(action):
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Image(systemName: "mappin")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("No location")
+                        .font(.system(size: 14, weight: .semibold))
+                }
             }
+            .buttonStyle(
+                DiscoveryCreationOverlayButtonStyle(
+                    palette: palette,
+                    shape: .capsule
+                )
+            )
+        case .resolving:
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(palette.overlayButtonForeground)
             .foregroundStyle(palette.overlayButtonForeground.opacity(0.9))
             .padding(.horizontal, DiscoveryCreationViewConstants.overlayCapsuleHorizontalPadding)
             .padding(.vertical, DiscoveryCreationViewConstants.overlayCapsuleVerticalPadding)
@@ -54,7 +67,7 @@ struct DiscoveryConfirmationLocationBadge: View {
                 HStack(spacing: 8) {
                     Image(systemName: "location.slash")
                         .font(.system(size: 16, weight: .semibold))
-                    Text("No Location Permissions")
+                    Text("Location Disabled")
                         .font(.system(size: 14, weight: .semibold))
                 }
             }

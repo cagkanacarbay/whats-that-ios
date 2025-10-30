@@ -13,10 +13,11 @@ struct DiscoveryConfirmationActionsView: View {
     let onRetake: () -> Void
     let onContinue: () -> Void
     let onOutOfCredits: () -> Void
+    let onCreditsTap: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button(action: {}) {
+            Button(action: { onCreditsTap?() }) {
                 Text(creditDisplayText)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(creditTint)
@@ -26,7 +27,7 @@ struct DiscoveryConfirmationActionsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(creditBalance == nil)
+            // Allow opening Credits even if balance is loading/unknown.
 
             HStack(spacing: BrandSpacing.small) {
                 Button(action: onRetake) {

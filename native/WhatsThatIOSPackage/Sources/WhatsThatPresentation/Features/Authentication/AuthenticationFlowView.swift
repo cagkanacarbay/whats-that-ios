@@ -23,6 +23,7 @@ struct AuthenticationFlowView: View {
 
     @State private var mode: Mode
     @State private var globalError: String?
+    @State private var focusedAnchor: String?
 
     init(
         isPerformingAction: Bool,
@@ -43,49 +44,71 @@ struct AuthenticationFlowView: View {
     }
 
     var body: some View {
-        VStack(spacing: BrandSpacing.large) {
-            Image("BrandLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 130, height: 130)
-                .padding(.top, BrandSpacing.large)
+        GeometryReader { geo in
+            let viewportHeight = geo.size.height
+            ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: BrandSpacing.large) {
+                        Image("BrandLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 130, height: 130)
+                            .id("auth-top")
 
-            switch mode {
-            case .signIn:
-                LoginForm(
-                    isPerformingAction: isPerformingAction,
-                    onSubmit: handleSignIn,
-                    onForgotPassword: { mode = .forgotPassword },
-                    onSwitchToSignUp: { mode = .signUp },
-                    onGoogle: handleGoogle,
-                    onApple: handleApple
-                )
-            case .signUp:
-                SignUpForm(
-                    isPerformingAction: isPerformingAction,
-                    onSubmit: handleSignUp,
-                    onSwitchToSignIn: { mode = .signIn },
-                    onGoogle: handleGoogle,
-                    onApple: handleApple
-                )
-            case .forgotPassword:
-                ForgotPasswordForm(
-                    onSubmit: handleForgotPassword,
-                    onDismiss: { mode = .signIn }
-                )
+                    switch mode {
+                    case .signIn:
+                        LoginForm(
+                            isPerformingAction: isPerformingAction,
+                            onSubmit: handleSignIn,
+                            onForgotPassword: { mode = .forgotPassword },
+                            onSwitchToSignUp: { mode = .signUp },
+                            onGoogle: handleGoogle,
+                            onApple: handleApple,
+                            onFieldFocusChanged: { field in
+                                // Record focus for accessibility/analytics; scrolling handled globally on keyboard show
+                                focusedAnchor = field?.anchorID
+                            }
+                        )
+                    case .signUp:
+                        SignUpForm(
+                            isPerformingAction: isPerformingAction,
+                            onSubmit: handleSignUp,
+                            onSwitchToSignIn: { mode = .signIn },
+                            onGoogle: handleGoogle,
+                            onApple: handleApple,
+                            onFieldFocusChanged: { field in
+                                focusedAnchor = field?.anchorID
+                            }
+                        )
+                    case .forgotPassword:
+                        ForgotPasswordForm(
+                            onSubmit: handleForgotPassword,
+                            onDismiss: { mode = .signIn },
+                            onFieldFocusChanged: { field in
+                                focusedAnchor = field?.anchorID
+                            }
+                        )
+                    }
+
+                    if let globalError {
+                        Text(globalError)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.red.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                    }
+                    }
+                    // No manual content height tracking; rely on SwiftUI's
+                    // automatic scroll view keyboard adjustments.
+                    .frame(maxWidth: 500)
+                    .padding(.horizontal, BrandSpacing.large)
+                    .padding(.bottom, BrandSpacing.large)
+                    // Center vertically when content is shorter than viewport.
+                    .frame(minHeight: viewportHeight, alignment: .center)
+                }
             }
-
-            if let globalError {
-                Text(globalError)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.red.opacity(0.85))
-                    .multilineTextAlignment(.center)
-            }
-
-            Spacer()
+            // Keep default scroll behavior and keyboard handling; no custom
+            // insets or programmatic scroll.
         }
-        .frame(maxWidth: 500)
-    }
+
 
     private func handleSignIn(email: String, password: String, completion: @escaping (Result<Void, AuthError>) -> Void) {
         Task {
@@ -147,3 +170,5 @@ struct AuthenticationFlowView: View {
     }
 }
 
+// Avoid custom content height tracking and keyboard insets; these can fight
+// with UIKit's keyboard container and produce unsatisfiable constraint logs.

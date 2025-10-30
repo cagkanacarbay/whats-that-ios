@@ -6,9 +6,13 @@ struct RootContentPaddingModifier: ViewModifier {
     let flowState: AppFlowState
 
     func body(content: Content) -> some View {
-        if case .main = flowState {
+        switch flowState {
+        case .main:
             content
-        } else {
+        case .authentication:
+            // Auth screens manage their own internal padding to avoid edge clipping.
+            content
+        default:
             content
                 .padding(.horizontal, BrandSpacing.large)
                 .padding(.top, BrandSpacing.large)

@@ -4,6 +4,37 @@ import WhatsThatDomain
 import WhatsThatShared
 
 struct DiscoveryCreationFlowView: View {
+    private enum ActiveAlert: Identifiable {
+        case flowError(IdentifiedError)
+        case locationPermissions
+        case outOfCredits
+
+        var id: String {
+            switch self {
+            case let .flowError(identifiedError):
+                return identifiedError.id.uuidString
+            case .locationPermissions:
+                return "locationPermissions"
+            case .outOfCredits:
+                return "outOfCredits"
+            }
+        }
+    }
+
+    private enum ActiveSheet: Identifiable {
+        case credits
+        case missingUploadLocation
+
+        var id: String {
+            switch self {
+            case .credits:
+                return "credits"
+            case .missingUploadLocation:
+                return "missingUploadLocation"
+            }
+        }
+    }
+
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
     let placeholderEmoji: String
     let ctaTitle: String
@@ -11,9 +42,10 @@ struct DiscoveryCreationFlowView: View {
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isCreditsPresented = false
     @State private var presentedCreditsViewModel: CreditsViewModel?
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
+    @State private var activeAlert: ActiveAlert?
+    @State private var activeSheet: ActiveSheet?
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
@@ -39,27 +71,54 @@ struct DiscoveryCreationFlowView: View {
             .background(palette.background.ignoresSafeArea())
             .alert(
                 item: Binding(
-                    get: { viewModel.error.map(IdentifiedError.init) },
-                    set: { _ in viewModel.clearError() }
-                )
-            ) { identifiedError in
-                alert(for: identifiedError.error)
-            }
-            .sheet(isPresented: $isCreditsPresented, onDismiss: {
-                presentedCreditsViewModel = nil
-                creditsSheetDetent = .fraction(0.8)
-            }) {
-                NavigationStack {
-                    if let creditsViewModel = ensureCreditsViewModel() {
-                        CreditsView(viewModel: creditsViewModel)
-                    } else {
-                        Text("Credits unavailable")
-                            .font(.headline)
-                            .padding()
+                    get: { activeAlert },
+                    set: { newValue in
+                        if let newValue {
+                            activeAlert = newValue
+                        } else {
+                            let dismissedAlert = activeAlert
+                            activeAlert = nil
+                            if case .flowError = dismissedAlert {
+                                viewModel.clearError()
+                            }
+                        }
                     }
+                )
+            ) { alert(for: $0) }
+            .onChange(of: viewModel.error) { _, error in
+                if let error {
+                    activeAlert = .flowError(IdentifiedError(error: error))
+                } else if case .flowError = activeAlert {
+                    activeAlert = nil
                 }
-                .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
-                .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $activeSheet, onDismiss: {
+                if presentedCreditsViewModel != nil {
+                    presentedCreditsViewModel = nil
+                    creditsSheetDetent = .fraction(0.8)
+                }
+            }) { sheet in
+                switch sheet {
+                case .credits:
+                    NavigationStack {
+                        if let creditsViewModel = ensureCreditsViewModel() {
+                            CreditsView(viewModel: creditsViewModel)
+                        } else {
+                            Text("Credits unavailable")
+                                .font(.headline)
+                                .padding()
+                        }
+                    }
+                    .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
+                    .presentationDragIndicator(.visible)
+                case .missingUploadLocation:
+                    MissingUploadLocationSheet(
+                        onOpenPhotos: { openPhotosApp() },
+                        onOpenSettings: { openSettingsApp() }
+                    )
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                }
             }
     }
 
@@ -103,7 +162,10 @@ struct DiscoveryCreationFlowView: View {
                 onRetake: { viewModel.retake() },
                 onContinue: { viewModel.beginAnalysis() },
                 onCancel: { viewModel.cancelFlow() },
-                onRequestCredits: makeCreditsHandler
+                onRequestCredits: makeCreditsHandler,
+                onShowLocationPermissions: { showLocationPermissionsAlert() },
+                onShowMissingUploadLocation: { presentMissingUploadLocationSheet() },
+                onShowOutOfCredits: { showOutOfCreditsAlert() }
             )
         case .analyzing:
             streamingStage
@@ -131,7 +193,7 @@ struct DiscoveryCreationFlowView: View {
     private func presentCreditsSheet() {
         guard ensureCreditsViewModel() != nil else { return }
         creditsSheetDetent = .fraction(0.8)
-        isCreditsPresented = true
+        activeSheet = .credits
     }
 
     @MainActor
@@ -152,7 +214,39 @@ struct DiscoveryCreationFlowView: View {
         return creditsViewModel
     }
 
-    private func alert(for error: DiscoveryCreationFlowViewModel.FlowError) -> Alert {
+    private func showLocationPermissionsAlert() {
+        activeAlert = .locationPermissions
+    }
+
+    private func presentMissingUploadLocationSheet() {
+        activeSheet = .missingUploadLocation
+    }
+
+    private func showOutOfCreditsAlert() {
+        activeAlert = .outOfCredits
+    }
+
+    private func alert(for activeAlert: ActiveAlert) -> Alert {
+        switch activeAlert {
+        case let .flowError(identifiedError):
+            return alert(forFlowError: identifiedError.error)
+        case .locationPermissions:
+            return Alert(
+                title: Text("Grant Location Permissions"),
+                message: Text("We use location to improve the results generated by AI. Allow location access for What's That so we can deliver better results."),
+                primaryButton: .default(Text("Settings"), action: openAppSettings),
+                secondaryButton: .cancel()
+            )
+        case .outOfCredits:
+            return Alert(
+                title: Text("Out of credits"),
+                message: Text("Each discovery costs 1 credit. Purchase more to continue."),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func alert(forFlowError error: DiscoveryCreationFlowViewModel.FlowError) -> Alert {
         switch error {
         case .permissionDenied:
             return Alert(
@@ -173,5 +267,195 @@ struct DiscoveryCreationFlowView: View {
     private func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+
+    private func openPhotosApp() {
+        let candidates = ["photos-redirect://", "photos://"]
+        for candidate in candidates {
+            guard let url = URL(string: candidate) else { continue }
+            if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                return
+            }
+        }
+    }
+
+    private func openSettingsApp() {
+        let prefSchemes = ["App-Prefs:", "prefs:"]
+
+        for scheme in prefSchemes {
+            if let url = URL(string: scheme), UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                return
+            }
+        }
+
+        guard let fallbackURL = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(fallbackURL, options: [:], completionHandler: nil)
+    }
+}
+
+private struct MissingUploadLocationSheet: View {
+    let onOpenPhotos: () -> Void
+    let onOpenSettings: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let steps = [
+        "Open the Photos app.",
+        "Select this image.",
+        "Tap the Info button at the bottom of the screen.",
+        "Tap Add Location."
+    ]
+
+    private let cameraLocationSteps = [
+        "Open the Settings app.",
+        "Tap Privacy & Security.",
+        "Choose Location Services and ensure it is enabled.",
+        "Scroll to Camera and set Allow Location Access to While Using the App."
+    ]
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: BrandSpacing.large) {
+                    VStack(alignment: .leading, spacing: BrandSpacing.small) {
+                        Text("No Location Data in This Image")
+                            .font(.title2.weight(.semibold))
+                        Text("We use location to improve the results generated by AI.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: BrandSpacing.small) {
+                        Text("Add a Location to This Image")
+                            .font(.headline)
+                        Text("To add a location to this image, follow these steps:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                                Text("\(index + 1). \(step)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(palette.textPrimary)
+                            }
+                        }
+                        .padding(.top, 6)
+
+                        actionButton(
+                            title: "Open Photos",
+                            systemImage: "photo.on.rectangle",
+                            style: .prominent,
+                            action: onOpenPhotos
+                        )
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: BrandSpacing.small) {
+                        Text("Keep Location for Future Photos")
+                            .font(.headline)
+                        Text("Turn on location access for the Camera app so new photos automatically include location details.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(cameraLocationSteps.enumerated()), id: \.offset) { index, step in
+                                Text("\(index + 1). \(step)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(palette.textPrimary)
+                            }
+                        }
+                        .padding(.top, 6)
+
+                        actionButton(
+                            title: "Open Settings",
+                            systemImage: "gearshape",
+                            style: .tinted,
+                            action: onOpenSettings
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, BrandSpacing.large)
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.bottom, BrandSpacing.xLarge)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private enum ButtonStyleKind {
+        case prominent
+        case tinted
+    }
+
+    @ViewBuilder
+    private func actionButton(
+        title: String,
+        systemImage: String,
+        style: ButtonStyleKind,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+        .background(buttonBackground(for: style))
+        .foregroundStyle(buttonForeground(for: style))
+        .overlay(buttonBorder(for: style))
+        .clipShape(Capsule(style: .continuous))
+        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 6)
+    }
+
+    @ViewBuilder
+    private func buttonBackground(for style: ButtonStyleKind) -> some View {
+        switch style {
+        case .prominent:
+            Capsule(style: .continuous)
+                .fill(palette.primaryAction)
+        case .tinted:
+            Capsule(style: .continuous)
+                .fill(palette.primaryAction.opacity(0.12))
+        }
+    }
+
+    private func buttonForeground(for style: ButtonStyleKind) -> Color {
+        switch style {
+        case .prominent:
+            return Color.white
+        case .tinted:
+            return palette.primaryAction
+        }
+    }
+
+    @ViewBuilder
+    private func buttonBorder(for style: ButtonStyleKind) -> some View {
+        switch style {
+        case .prominent:
+            Capsule(style: .continuous)
+                .stroke(palette.primaryAction.opacity(0.6), lineWidth: 0.5)
+        case .tinted:
+            Capsule(style: .continuous)
+                .stroke(palette.primaryAction.opacity(0.4), lineWidth: 1)
+        }
     }
 }

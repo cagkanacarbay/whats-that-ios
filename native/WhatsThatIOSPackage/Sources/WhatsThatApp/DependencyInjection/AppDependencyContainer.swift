@@ -154,7 +154,15 @@ public extension AppDependencyContainer {
         )
         let imageEncoder = DefaultDiscoveryImageEncoder()
         let pushService = NativePushService()
-        let locationService = CoreLocationDiscoveryLocationService()
+        let nearbyPlacesFetcher = SupabaseNearbyPlacesFetcher(
+            client: client,
+            configuration: configuration,
+            urlSession: session
+        )
+        let locationService = CoreLocationDiscoveryLocationService(
+            configuration: .default,
+            nearbyPlacesFetcher: nearbyPlacesFetcher
+        )
 
         let discoveryCreationProvider = DiscoveryCreationDependencyProvider(
             maxImageDimension: 2048,

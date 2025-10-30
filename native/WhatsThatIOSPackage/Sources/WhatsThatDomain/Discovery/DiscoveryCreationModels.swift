@@ -64,7 +64,10 @@ public struct DiscoveryConfirmationState: Equatable, Sendable {
     public var location: DiscoveryLocation?
     public var locationDescription: String?
     public var isLocationPermissionGranted: Bool
+    public var isResolvingLocation: Bool
     public var customContext: String?
+    public var nearbyPlaces: [NearbyPlace]?
+    public var nearbyPlacesContext: NearbyPlacesContext?
 
     public init(
         media: DiscoveryCapturedMedia,
@@ -73,7 +76,10 @@ public struct DiscoveryConfirmationState: Equatable, Sendable {
         location: DiscoveryLocation? = nil,
         locationDescription: String? = nil,
         isLocationPermissionGranted: Bool,
-        customContext: String? = nil
+        isResolvingLocation: Bool = false,
+        customContext: String? = nil,
+        nearbyPlaces: [NearbyPlace]? = nil,
+        nearbyPlacesContext: NearbyPlacesContext? = nil
     ) {
         self.media = media
         self.displayImageData = displayImageData
@@ -81,7 +87,10 @@ public struct DiscoveryConfirmationState: Equatable, Sendable {
         self.location = location
         self.locationDescription = locationDescription
         self.isLocationPermissionGranted = isLocationPermissionGranted
+        self.isResolvingLocation = isResolvingLocation
         self.customContext = customContext
+        self.nearbyPlaces = nearbyPlaces
+        self.nearbyPlacesContext = nearbyPlacesContext
     }
 }
 

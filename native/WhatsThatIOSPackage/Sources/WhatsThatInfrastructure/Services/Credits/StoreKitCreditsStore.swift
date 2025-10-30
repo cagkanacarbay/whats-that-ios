@@ -50,6 +50,13 @@ public actor StoreKitCreditsStore: CreditsStore {
         self.urlSession = urlSession
     }
 
+    public func syncReceiptsOnCreditsOpen() async {
+        // Always attempt a receipt sync when the user opens the Credits screen,
+        // regardless of current receipt presence. This ensures the prompt
+        // (if needed) happens here rather than during background flows.
+        try? await AppStore.sync()
+    }
+
     public func loadProducts() async throws -> [CreditProduct] {
         let products = try await Product.products(for: productIdentifiers)
         cachedProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
@@ -280,25 +287,11 @@ public extension StoreKitCreditsStore {
                     let product = try await self.loadProductIfNeeded(for: transaction.productID)
                     do {
                         try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
-                    } catch let error as CreditsStoreError {
-                        // Retry once if the server couldn't find the new
-                        // transaction in the existing receipt.
-                        let shouldRetry: Bool
-                        switch error {
-                        case .receiptUnavailable:
-                            shouldRetry = true
-                        case .validationFailed(let message):
-                            let lower = message?.lowercased() ?? ""
-                            shouldRetry = lower.contains("transaction not found") || lower.contains("not found")
-                        default:
-                            shouldRetry = false
-                        }
-                        if shouldRetry {
-                            try? await AppStore.sync()
-                            try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
-                        } else {
-                            throw error
-                        }
+                    } catch {
+                        // Do not call AppStore.sync() here to avoid prompting
+                        // for Apple ID at app launch. The user can trigger a
+                        // receipt sync from the Credits screen as needed.
+                        throw error
                     }
                     await transaction.finish()
                     if let balanceStore {

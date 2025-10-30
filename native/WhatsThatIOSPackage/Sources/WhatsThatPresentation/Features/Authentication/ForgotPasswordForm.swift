@@ -5,6 +5,17 @@ import WhatsThatShared
 struct ForgotPasswordForm: View {
     let onSubmit: (String, @escaping (AuthenticationFlowView.PasswordResetResult) -> Void) -> Void
     let onDismiss: () -> Void
+    let onFieldFocusChanged: (_ field: ForgotPasswordField?) -> Void
+
+    init(
+        onSubmit: @escaping (String, @escaping (AuthenticationFlowView.PasswordResetResult) -> Void) -> Void,
+        onDismiss: @escaping () -> Void,
+        onFieldFocusChanged: @escaping (_ field: ForgotPasswordField?) -> Void = { _ in }
+    ) {
+        self.onSubmit = onSubmit
+        self.onDismiss = onDismiss
+        self.onFieldFocusChanged = onFieldFocusChanged
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var email: String = ""
@@ -12,6 +23,7 @@ struct ForgotPasswordForm: View {
     @State private var infoMessage: String?
     @State private var error: String?
     @State private var didAttemptSubmit = false
+    @FocusState private var emailFocused: Bool
 
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
@@ -31,8 +43,13 @@ struct ForgotPasswordForm: View {
                     placeholder: "name@email.com",
                     text: $email,
                     fieldType: .email,
-                    errorText: emailError
+                    errorText: emailError,
+                    focus: $emailFocused
                 )
+                .id(ForgotPasswordField.email.anchorID)
+                .onChange(of: emailFocused) { _, newValue in
+                    if newValue == true { onFieldFocusChanged(.email) }
+                }
             }
 
             if infoMessage == nil {
@@ -79,10 +96,7 @@ struct ForgotPasswordForm: View {
 
     private var emailValidationError: String? {
         guard !email.isEmpty else { return "Please enter a valid email address" }
-        let regex = try? NSRegularExpression(pattern: "[^\\s@]+@[^\\s@]+\\.[^\\s@]+")
-        let range = NSRange(location: 0, length: email.utf16.count)
-        let isValid = regex?.firstMatch(in: email, options: [], range: range) != nil
-        return isValid ? nil : "Please enter a valid email address"
+        return EmailValidator.isValid(email) ? nil : "Please enter a valid email address"
     }
 
     private var shouldShowEmailError: Bool {
@@ -102,3 +116,10 @@ struct ForgotPasswordForm: View {
     }
 }
 
+enum ForgotPasswordField {
+    case email
+
+    var anchorID: String {
+        switch self { case .email: return "auth-forgot-email" }
+    }
+}

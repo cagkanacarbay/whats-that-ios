@@ -223,7 +223,7 @@ public struct RootContentView: View {
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
         .alert(
-            authError?.errorDescription ?? "Something went wrong",
+            alertTitle,
             isPresented: Binding(
                 get: { authError != nil },
                 set: { isPresented in
@@ -232,6 +232,8 @@ public struct RootContentView: View {
             )
         ) {
             Button("OK", role: .cancel) {}
+        } message: {
+            Text(alertMessage)
         }
         .preferredColorScheme(appearance.colorScheme)
         .onAppear(perform: syncBrandTheme)
@@ -261,6 +263,60 @@ public struct RootContentView: View {
         return nil
     }
 
+    // MARK: - Alert Copy
+
+    private var alertTitle: String {
+        guard let authError else { return "Something went wrong" }
+        switch authError {
+        case .invalidCredentials:
+            return "Invalid credentials"
+        case .emailAlreadyInUse:
+            return "Email already in use"
+        case .passwordTooWeak:
+            return "Weak password"
+        case .passwordResetFailed:
+            return "Whoops"
+        case .passwordResetRateLimited:
+            return "Too many attempts"
+        case .passwordResetLinkInvalid:
+            return "Invalid link"
+        case .passwordResetLinkExpired:
+            return "Link expired"
+        case .passwordUpdateFailed:
+            return "Update failed"
+        case .cancelled:
+            return "Sign in cancelled"
+        case .unknown:
+            return "Something went wrong"
+        }
+    }
+
+    private var alertMessage: String {
+        guard let authError else { return "Please try again." }
+        switch authError {
+        case .invalidCredentials:
+            return "We couldn't sign you in. Check your email and password are correct."
+        case .emailAlreadyInUse:
+            return "An account with this email already exists. Try signing in instead."
+        case .passwordTooWeak:
+            return "Your password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a symbol."
+        case .passwordResetFailed:
+            return "There was an issue resetting your password. Please try again in a few minutes."
+        case .passwordResetRateLimited:
+            return "For security reasons, we have rate-limited your request. Please try again in a few minutes."
+        case .passwordResetLinkInvalid:
+            return "That reset link isn't valid anymore. Please request a fresh one."
+        case .passwordResetLinkExpired:
+            return "Your reset link has expired. Request a new one to continue."
+        case .passwordUpdateFailed:
+            return "We couldn't update your password. Please try again."
+        case .cancelled:
+            return "This sign in was cancelled."
+        case .unknown:
+            return "Please try again."
+        }
+    }
+
     private var backgroundColor: Color {
         colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
     }
@@ -280,7 +336,10 @@ public struct RootContentView: View {
         do {
             try await operation()
         } catch let authError as AuthError {
-            await MainActor.run { self.authError = authError }
+            // Do not show alerts for user-cancelled sign-ins
+            if authError != .cancelled {
+                await MainActor.run { self.authError = authError }
+            }
             throw authError
         } catch {
             await MainActor.run { self.authError = .unknown }

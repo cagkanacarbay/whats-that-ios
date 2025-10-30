@@ -29,6 +29,7 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         pattern: #"\"text\"\s*:\s*\"((?:\\.|[^"\\])*)\""#,
         options: []
     )
+    private let jsonEncoder: JSONEncoder
     #if DEBUG
     private let isDebugLoggingEnabled = true
     #else
@@ -43,6 +44,9 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         self.client = client
         self.configuration = configuration
         self.urlSession = urlSession
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.jsonEncoder = encoder
     }
 
     public func startAnalysis(
@@ -127,15 +131,43 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             "base64Image": payload.base64Image
         ]
 
-        if let location = payload.location {
-            body["location"] = [
-                "latitude": location.latitude,
-                "longitude": location.longitude,
-                "country": location.country as Any,
-                "locality": location.locality as Any,
-                "streetName": location.streetName as Any,
-                "closestPlace": location.closestPlace as Any
-            ]
+        // Align payload shape with ask-ai-v7 expectations (as used by RN client):
+        // location -> { location: { coords: { latitude, longitude } }, nearbyPlaces: [...] }
+        if payload.location != nil || (payload.nearbyPlaces?.isEmpty == false) || payload.nearbyPlacesContext != nil {
+            var locationContainer: [String: Any] = [:]
+            var nearbyPayload: Any?
+            var nearbyContextPayload: Any?
+
+            if let location = payload.location {
+                let coords: [String: Any] = [
+                    "latitude": location.latitude,
+                    "longitude": location.longitude
+                ]
+                locationContainer["location"] = [
+                    "coords": coords
+                ]
+            }
+
+            if let nearbyPlaces = payload.nearbyPlaces, !nearbyPlaces.isEmpty {
+                if let encoded = try? encodeToJSONObject(nearbyPlaces) {
+                    locationContainer["nearbyPlaces"] = encoded
+                    nearbyPayload = encoded
+                }
+            }
+
+            if let nearbyPlacesContext = payload.nearbyPlacesContext {
+                if let encoded = try? encodeToJSONObject(nearbyPlacesContext) {
+                    locationContainer["nearbyPlacesContext"] = encoded
+                    nearbyContextPayload = encoded
+                }
+            }
+
+            if locationContainer.isEmpty == false {
+                body["location"] = locationContainer
+                if let nearbyPayload {
+                    logNearbyPlacesPayload(places: nearbyPayload, context: nearbyContextPayload)
+                }
+            }
         }
 
         if let customContext = payload.customContext {
@@ -145,6 +177,10 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         if let pushToken = payload.pushToken {
             body["pushToken"] = pushToken
         }
+
+        // Note: ask-ai-v7 reads nearby places only from within the nested `location`
+        // object. We intentionally omit top-level nearbyPlaces/nearbyPlacesContext to
+        // avoid duplication and match server expectations.
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
@@ -157,6 +193,23 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             .host?
             .replacingOccurrences(of: ".supabase.co", with: ".functions.supabase.co")
         return components?.url ?? supabaseURL
+    }
+
+    private func encodeToJSONObject<T: Encodable>(_ value: T) throws -> Any {
+        let data = try jsonEncoder.encode(value)
+        return try JSONSerialization.jsonObject(with: data, options: [])
+    }
+
+    private func logNearbyPlacesPayload(places: Any, context: Any?) {
+        guard isDebugLoggingEnabled else { return }
+        var payload: [String: Any] = ["nearbyPlaces": places]
+        if let context {
+            payload["nearbyPlacesContext"] = context
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
+           let jsonString = String(data: data, encoding: .utf8) {
+            debugLog("nearbyPlacesPayload", jsonString)
+        }
     }
 
     private func parseAvailableEvents(

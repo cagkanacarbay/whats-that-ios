@@ -8,20 +8,6 @@ import MapKit
 import UIKit
 
 struct DiscoveryConfirmationView: View {
-    private enum ActiveAlert: Identifiable {
-        case outOfCredits
-        case locationPermissions
-
-        var id: String {
-            switch self {
-            case .outOfCredits:
-                return "outOfCredits"
-            case .locationPermissions:
-                return "locationPermissions"
-            }
-        }
-    }
-
     let state: DiscoveryConfirmationState
     let creditBalance: Int?
     let flowType: DiscoveryCreationFlowType
@@ -29,9 +15,11 @@ struct DiscoveryConfirmationView: View {
     let onContinue: () -> Void
     let onCancel: () -> Void
     let onRequestCredits: (() -> Void)?
+    let onShowLocationPermissions: () -> Void
+    let onShowMissingUploadLocation: () -> Void
+    let onShowOutOfCredits: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var activeAlert: ActiveAlert?
     @State private var bottomOverlayHeight: CGFloat = 0
 
     private var palette: DiscoveryCreationPalette {
@@ -93,27 +81,35 @@ struct DiscoveryConfirmationView: View {
         flowType == .upload ? "arrow.triangle.2.circlepath" : "arrow.counterclockwise"
     }
 
-    private var hasResolvedLocation: Bool {
-        state.location != nil
+    private var hasResolvedLocation: Bool { state.location != nil }
+
+    private var shouldShowLocationPermissions: Bool { flowType == .camera && !state.isLocationPermissionGranted }
+
+    private var shouldShowMissingLocation: Bool { flowType == .upload && state.location == nil }
+
+    private var shouldShowResolvingLocation: Bool {
+        flowType == .camera && state.isLocationPermissionGranted && state.location == nil && state.isResolvingLocation
     }
 
-    private var shouldShowLocationPermissions: Bool {
-        flowType == .camera && !state.isLocationPermissionGranted
-    }
-
-    private var shouldShowMissingLocation: Bool {
-        flowType == .upload && state.location == nil
+    private var shouldHideWhileMissingCameraLocation: Bool {
+        flowType == .camera && state.isLocationPermissionGranted && state.location == nil && !state.isResolvingLocation
     }
 
     private var locationBadgeContent: DiscoveryConfirmationLocationBadge.Content? {
         if shouldShowLocationPermissions {
-            return .permissions { activeAlert = .locationPermissions }
+            return .permissions { showLocationPermissionsAlert() }
         }
         if hasResolvedLocation {
             return .resolved { openCurrentLocation() }
         }
+        if shouldShowResolvingLocation {
+            return .resolving
+        }
         if shouldShowMissingLocation {
-            return .missing
+            return .missing { showMissingUploadLocationAlert() }
+        }
+        if shouldHideWhileMissingCameraLocation {
+            return nil
         }
         return nil
     }
@@ -162,6 +158,7 @@ struct DiscoveryConfirmationView: View {
             .overlay(alignment: .topTrailing) {
                 if let badgeContent = locationBadgeContent {
                     DiscoveryConfirmationLocationBadge(content: badgeContent, palette: palette)
+                        .zIndex(2)
                         .padding(.trailing, BrandSpacing.large)
                         .padding(.top, overlayTopPadding)
                 }
@@ -192,7 +189,12 @@ struct DiscoveryConfirmationView: View {
                     palette: palette,
                     onRetake: onRetake,
                     onContinue: onContinue,
-                    onOutOfCredits: handleOutOfCredits
+                    onOutOfCredits: handleOutOfCredits,
+                    onCreditsTap: {
+                        if let onRequestCredits {
+                            onRequestCredits()
+                        }
+                    }
                 )
                 .padding(.top, previewBottomSpacing)
                 .padding(.horizontal, BrandSpacing.large)
@@ -201,7 +203,6 @@ struct DiscoveryConfirmationView: View {
             }
         }
         .onPreferenceChange(BottomOverlayHeightPreferenceKey.self) { bottomOverlayHeight = $0 }
-        .alert(item: $activeAlert) { alert(for: $0) }
     }
 
     @ViewBuilder
@@ -238,35 +239,26 @@ struct DiscoveryConfirmationView: View {
         .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
     }
 
-    private func alert(for alert: ActiveAlert) -> Alert {
-        switch alert {
-        case .outOfCredits:
-            return Alert(
-                title: Text("Out of credits"),
-                message: Text("Each discovery costs 1 credit. Purchase more to continue."),
-                dismissButton: .default(Text("OK"))
-            )
-        case .locationPermissions:
-            return Alert(
-                title: Text("Grant Location Permissions"),
-                message: Text("Enable location access in Settings to improve analysis accuracy."),
-                primaryButton: .default(Text("Open Settings"), action: openSettings),
-                secondaryButton: .cancel()
-            )
-        }
-    }
-
     private func handleOutOfCredits() {
         if let onRequestCredits {
             onRequestCredits()
         } else {
-            activeAlert = .outOfCredits
+            onShowOutOfCredits()
         }
     }
 
-    private func openSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    private func showLocationPermissionsAlert() {
+        #if DEBUG
+        print("[ConfirmationView] Showing location permissions alert")
+        #endif
+        onShowLocationPermissions()
+    }
+
+    private func showMissingUploadLocationAlert() {
+        #if DEBUG
+        print("[ConfirmationView] Showing missing upload location alert")
+        #endif
+        onShowMissingUploadLocation()
     }
 
     private func openCurrentLocation() {

@@ -7,6 +7,7 @@ struct BrandPrimaryButton: View {
     var action: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
@@ -23,19 +24,52 @@ struct BrandPrimaryButton: View {
                     }
                 }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.white)
-        .background(primaryBackground)
+        .buttonStyle(BrandNoFadeButtonStyle())
+        // Disabled uses a ghosted version of the primary green in light mode,
+        // and reverts to the original darker ghost in dark mode.
+        .foregroundStyle(currentForeground)
+        .background(currentBackground)
         .cornerRadius(BrandCornerRadius.medium)
         .overlay {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium)
-                .stroke(primaryBackground, lineWidth: 1)
+                .stroke(currentBorder, lineWidth: 1)
         }
         .opacity(isLoading ? 0.7 : 1)
     }
 
     private var primaryBackground: Color {
         colorScheme == .dark ? BrandColors.Dark.primaryAction : BrandColors.Light.primaryAction
+    }
+
+    // Current colors derived from state per the requested behavior
+    private var currentBackground: Color {
+        if isEnabled { return primaryBackground }
+        // Light mode: make ghost a bit less greyed out (higher opacity)
+        if colorScheme == .light { return BrandColors.Light.primaryAction.opacity(0.65) }
+        // Dark mode: exactly as before (very subtle ghost)
+        return BrandColors.Dark.primaryAction.opacity(0.2)
+    }
+
+    private var currentForeground: Color {
+        if isEnabled { return .white }
+        // Light mode: white text for clear contrast; Dark mode: revert to subtle white
+        return colorScheme == .light ? Color.white : Color.white.opacity(0.6)
+    }
+
+    private var currentBorder: Color {
+        if isEnabled { return primaryBackground }
+        // Reuse original border ghosting across themes
+        return primaryBackground.opacity(0.25)
+    }
+}
+
+// Custom button style that does NOT reduce opacity when disabled.
+// Keeps label fully opaque so disabled text color remains crisp.
+struct BrandNoFadeButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // Optionally add a subtle pressed effect only
+            .opacity(configuration.isPressed ? 0.95 : 1.0)
     }
 }
 
@@ -116,10 +150,13 @@ struct BrandSocialButton: View {
                     .fontWeight(.medium)
                 Spacer()
             }
+            .frame(maxWidth: .infinity) // Ensure full-width tappable content
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
+            .contentShape(Rectangle()) // Make the entire visual area clickable
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .foregroundStyle(colorScheme == .dark ? Color.white : BrandColors.Light.accentText)
         .background(socialBackground)
         .cornerRadius(BrandCornerRadius.medium)
@@ -152,6 +189,8 @@ struct BrandFloatingField: View {
     @Binding var text: String
     var fieldType: FieldType = .plain
     var errorText: String?
+    // Optional focus binding so parents can control focus and show validation on blur
+    var focus: FocusState<Bool>.Binding? = nil
 
     @State private var isSecure: Bool = true
     @Environment(\.colorScheme) private var colorScheme
@@ -171,8 +210,8 @@ struct BrandFloatingField: View {
                     .background((colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background).cornerRadius(BrandCornerRadius.medium))
                     .frame(height: 52)
 
-                Text(title.uppercased())
-                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(labelColor)
                     .padding(.horizontal, 10)
                     .background(colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background)
@@ -197,6 +236,10 @@ struct BrandFloatingField: View {
                 isSecure = true
             }
         }
+        // Keep targeted animation opt-outs for validation and typing without
+        // suppressing parent layout animations (e.g., keyboard-driven moves)
+        .animation(nil, value: errorText)
+        .animation(nil, value: text)
     }
 
     private var labelColor: Color {
@@ -210,10 +253,12 @@ struct BrandFloatingField: View {
             HStack {
                 if isSecure {
                     SecureField(placeholder, text: $text)
+                        .applyFocus(focus)
                 } else {
                     TextField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
+                        .applyFocus(focus)
                 }
 
                 if showToggle {
@@ -232,8 +277,21 @@ struct BrandFloatingField: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .keyboardType(.emailAddress)
+                .applyFocus(focus)
         case .plain:
             TextField(placeholder, text: $text)
+                .applyFocus(focus)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func applyFocus(_ binding: FocusState<Bool>.Binding?) -> some View {
+        if let binding {
+            self.focused(binding)
+        } else {
+            self
         }
     }
 }

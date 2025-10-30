@@ -187,9 +187,13 @@ public struct CreditsView: View {
         HStack(spacing: 12) {
             Image(systemName: toastIcon(for: toast.style))
                 .font(.system(size: 18, weight: .semibold))
-            Text(toast.message)
-                .font(.system(size: 15, weight: .semibold))
-                .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(toast.title)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(toast.message)
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .multilineTextAlignment(.leading)
         }
         .foregroundStyle(Color.white)
         .padding(.vertical, 14)

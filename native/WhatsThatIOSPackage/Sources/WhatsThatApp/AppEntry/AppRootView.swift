@@ -6,6 +6,10 @@ import WhatsThatShared
 
 public struct AppRootView: View {
     private let container: AppDependencyContainer
+    #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var locationPermissionCache = LocationPermissionCache.shared
+    #endif
 
     public init(
         configuration: AppConfiguration = .fromBundle(),
@@ -67,6 +71,18 @@ public struct AppRootView: View {
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.
             await container.startStoreKitTransactionListener()
+            #if os(iOS)
+            // Seed permission cache on launch
+            LocationPermissionCache.shared.refreshFromSystem()
+            #endif
         }
+        #if os(iOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Refresh permission snapshot when app becomes active
+                LocationPermissionCache.shared.refreshFromSystem()
+            }
+        }
+        #endif
     }
 }

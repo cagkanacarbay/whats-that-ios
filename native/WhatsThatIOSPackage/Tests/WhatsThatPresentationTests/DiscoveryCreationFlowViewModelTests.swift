@@ -315,6 +315,7 @@ private final class CancellingCaptureService: DiscoveryCaptureService {
 
 private final class StubLocationService: DiscoveryLocationService {
     private let resolvedLocation: DiscoveryLocation?
+    var nearbySelection: NearbyPlacesSelection?
 
     init(location: DiscoveryLocation?) {
         self.resolvedLocation = location
@@ -331,4 +332,10 @@ private final class StubLocationService: DiscoveryLocationService {
     func attachLocationMetadata(from media: DiscoveryCapturedMedia) async -> DiscoveryLocation? {
         resolvedLocation ?? media.location
     }
+
+    func prepareNearbyPlaces(for location: DiscoveryLocation?) async -> NearbyPlacesSelection? {
+        nearbySelection
+    }
+
+    func registerMediaLocation(_ location: DiscoveryLocation) async {}
 }

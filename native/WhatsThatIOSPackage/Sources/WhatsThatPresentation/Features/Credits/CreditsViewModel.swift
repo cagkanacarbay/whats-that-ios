@@ -33,6 +33,7 @@ public final class CreditsViewModel: ObservableObject {
         }
 
         public let id = UUID()
+        public let title: String
         public let message: String
         public let style: Style
     }
@@ -85,6 +86,10 @@ public final class CreditsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
+            // Perform an optional receipt sync when the user opens Credits.
+            // This avoids prompting at app launch and ensures receipts are fresh.
+            await store.syncReceiptsOnCreditsOpen()
+
             // Pre-populate with cached balance while we refresh.
             if let cached = await balanceStore.getCached() {
                 updateBalance(cached)
@@ -147,19 +152,21 @@ public final class CreditsViewModel: ObservableObject {
             switch result.status {
             case .success:
                 toastMessage = ToastMessage(
-                    message: result.message ?? "Purchase successful! Check out your new credits.",
+                    title: "Purchase complete",
+                    message: "\(pack.creditAmount) credits added.",
                     style: .success
                 )
                 let newValue = try await balanceStore.refresh(force: true)
                 updateBalance(newValue)
             case .pending:
                 toastMessage = ToastMessage(
-                    message: result.message ?? "This purchase is pending. We’ll update your balance as soon as it clears.",
+                    title: "Purchase pending",
+                    message: result.message ?? "We’ll update your balance once it clears.",
                     style: .info
                 )
             case .cancelled:
                 if let message = result.message, !message.isEmpty {
-                    toastMessage = ToastMessage(message: message, style: .info)
+                    toastMessage = ToastMessage(title: "Purchase cancelled", message: message, style: .info)
                 }
             }
         } catch {

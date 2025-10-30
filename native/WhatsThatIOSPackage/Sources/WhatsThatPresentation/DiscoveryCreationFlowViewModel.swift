@@ -181,6 +181,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 flowState = .error(message: FlowError.permissionDenied.errorDescription ?? "Permission denied")
                 return
             }
+            // Begin location updates as soon as camera flow starts to minimize time to first fix.
+            debugLog("Camera permission granted; starting location tracking")
+            await locationService.startTrackingIfNeeded()
+            // Also proactively request a fresh location fix now (fire-and-forget),
+            // so that by the time we reach confirmation we likely have a recent fix.
+            Task { [weak self] in
+                guard let self else { return }
+                self.debugLog("Prefetching fresh location at camera start")
+                _ = await self.locationService.currentLocation(requireFresh: true)
+            }
             flowState = retake ? .capturingRetake : .capturingInitial
             do {
                 let media = try await captureService.capturePhoto()
@@ -221,39 +231,84 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     }
 
     private func prepareConfirmation(with media: DiscoveryCapturedMedia) async {
+        // Determine permission once (from cached snapshot if available) to avoid showing wrong badge state.
+        let permissionNow: Bool
+        if let cached = LocationPermissionCache.shared.current {
+            permissionNow = cached
+            debugLog("Using cached location permission: \(permissionNow)")
+        } else {
+            let granted = await locationService.isPermissionGranted()
+            permissionNow = granted
+            debugLog("Queried location permission: \(permissionNow)")
+        }
+        // Seed initial state based on flow type: uploads use EXIF immediately; camera resolves current fix.
+        let initialLocation: DiscoveryLocation? = (flowType == .upload) ? media.location : nil
+        let initialResolving: Bool = (flowType == .camera) && permissionNow && (initialLocation == nil)
         let initialConfirmationState = DiscoveryConfirmationState(
             media: media,
             displayImageData: media.data,
             creditBalance: nil,
-            location: nil,
-            locationDescription: nil,
-            isLocationPermissionGranted: false,
-            customContext: nil
+            location: initialLocation,
+            locationDescription: Self.makeLocationDescription(from: initialLocation),
+            isLocationPermissionGranted: permissionNow,
+            isResolvingLocation: initialResolving,
+            customContext: nil,
+            nearbyPlaces: nil,
+            nearbyPlacesContext: nil
         )
 
         confirmationState = initialConfirmationState
         flowState = .confirming(initialConfirmationState)
         currentMedia = media
 
-        await locationService.startTrackingIfNeeded()
+        // Ensure tracking is on for camera; uploads do not need live location.
+        // Tracking is started at the beginning of the camera flow, so avoid starting again here.
+        // (Keeps a single start point and prevents redundant calls.)
+        // if flowType == .camera { await locationService.startTrackingIfNeeded() }
 
         // Load cached credits immediately and refresh in background.
         if let cached = await creditBalanceStore.getCached() {
             creditBalance = cached
         }
 
-        async let locationTask = locationService.currentLocation()
+        // Fire location resolution in background so the confirm UI isn't blocked.
+        if flowType == .camera {
+            Task { [weak self] in
+                guard let self else { return }
+                // Prefer a fresh fix; fall back to last-known if needed.
+                self.debugLog("Resolving camera location: requesting fresh fix")
+                var resolved: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
+                if resolved == nil {
+                    self.debugLog("Fresh fix unavailable; falling back to last-known location")
+                    resolved = await self.locationService.currentLocation()
+                }
+                guard let resolved else { return }
+                let description = Self.makeLocationDescription(from: resolved)
+                await MainActor.run {
+                    self.confirmationState = self.confirmationState.map { current in
+                        DiscoveryConfirmationState(
+                            media: current.media,
+                            displayImageData: current.displayImageData,
+                            creditBalance: current.creditBalance,
+                            location: resolved,
+                            locationDescription: description,
+                            isLocationPermissionGranted: current.isLocationPermissionGranted,
+                            isResolvingLocation: false,
+                            customContext: current.customContext,
+                            nearbyPlaces: current.nearbyPlaces,
+                            nearbyPlacesContext: current.nearbyPlacesContext
+                        )
+                    }
+                    self.debugLog("Resolved location set; disabling resolving badge")
+                    if case .confirming = self.flowState, let state = self.confirmationState {
+                        self.flowState = .confirming(state)
+                    }
+                }
+            }
+        }
+
         async let historyTask = historyRepository.fetchRecentDiscoveries(limit: configuration.recentHistoryLimit)
         async let pushTask = pushService.requestPushAuthorizationIfNeeded()
-
-        var location: DiscoveryLocation? = nil
-        var locationDescription: String? = nil
-        var permissionGranted = false
-
-        let locationValue = await locationTask
-        location = media.location ?? locationValue
-        permissionGranted = locationValue != nil
-        locationDescription = DiscoveryCreationFlowViewModel.makeLocationDescription(from: location)
 
         // Refresh credits if stale; if it fails, keep the cached value.
         do {
@@ -278,15 +333,19 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             pushToken = nil
         }
 
+        // Preserve the previously computed location permission value.
         confirmationState = confirmationState.map { current in
             DiscoveryConfirmationState(
                 media: current.media,
                 displayImageData: current.displayImageData,
                 creditBalance: creditBalance,
-                location: location,
-                locationDescription: locationDescription,
-                isLocationPermissionGranted: permissionGranted,
-                customContext: current.customContext
+                location: current.location,
+                locationDescription: current.locationDescription,
+                isLocationPermissionGranted: current.isLocationPermissionGranted,
+                isResolvingLocation: current.isResolvingLocation,
+                customContext: current.customContext,
+                nearbyPlaces: current.nearbyPlaces,
+                nearbyPlacesContext: current.nearbyPlacesContext
             )
         }
         // Only re-emit confirming if we are still in the confirmation step.
@@ -311,7 +370,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 base64Image: try await imageEncoder.makeBase64Payload(from: media, maxDimension: configuration.maxImageDimension),
                 location: confirmation.location,
                 customContext: confirmation.customContext,
-                pushToken: pushToken
+                pushToken: pushToken,
+                nearbyPlaces: confirmation.nearbyPlaces,
+                nearbyPlacesContext: confirmation.nearbyPlacesContext
             )
 
             let sessionId = UUID()

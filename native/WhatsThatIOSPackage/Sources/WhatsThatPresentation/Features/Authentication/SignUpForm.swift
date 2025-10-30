@@ -8,18 +8,41 @@ struct SignUpForm: View {
     let onSwitchToSignIn: () -> Void
     let onGoogle: (@escaping (Result<Void, AuthError>) -> Void) -> Void
     let onApple: (@escaping (Result<Void, AuthError>) -> Void) -> Void
+    let onFieldFocusChanged: (_ field: SignUpField?) -> Void
+
+    init(
+        isPerformingAction: Bool,
+        onSubmit: @escaping (String, String, @escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onSwitchToSignIn: @escaping () -> Void,
+        onGoogle: @escaping (@escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onApple: @escaping (@escaping (Result<Void, AuthError>) -> Void) -> Void,
+        onFieldFocusChanged: @escaping (_ field: SignUpField?) -> Void = { _ in }
+    ) {
+        self.isPerformingAction = isPerformingAction
+        self.onSubmit = onSubmit
+        self.onSwitchToSignIn = onSwitchToSignIn
+        self.onGoogle = onGoogle
+        self.onApple = onApple
+        self.onFieldFocusChanged = onFieldFocusChanged
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var confirmPassword: String = ""
     @State private var agreedToTerms: Bool = false
-    @State private var errorMessage: String?
     @State private var isLoading: Bool = false
     @State private var didAttemptSubmit: Bool = false
+    // Focus handling to show validation only after leaving a field
+    @FocusState private var emailFocused: Bool
+    @FocusState private var passwordFocused: Bool
+    @FocusState private var confirmPasswordFocused: Bool
+    @State private var emailDidBlur: Bool = false
+    @State private var passwordDidBlur: Bool = false
+    @State private var confirmPasswordDidBlur: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: BrandSpacing.large) {
+        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
             Text("Create your account")
                 .font(.system(size: 28, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -30,30 +53,50 @@ struct SignUpForm: View {
                     title: "Email Address",
                     placeholder: "name@email.com",
                     text: $email,
-                    fieldType: .plain,
-                    errorText: emailError
+                    fieldType: .email,
+                    errorText: emailError,
+                    focus: $emailFocused
                 )
+                .id(SignUpField.email.anchorID)
+                .onChange(of: emailFocused) { _, newValue in
+                    if newValue == false { emailDidBlur = true }
+                    if newValue == true { onFieldFocusChanged(.email) }
+                }
                 BrandFloatingField(
                     title: "Password",
                     placeholder: "••••••••",
                     text: $password,
                     fieldType: .password(showToggle: true),
-                    errorText: passwordError
+                    errorText: passwordError,
+                    focus: $passwordFocused
                 )
+                .id(SignUpField.password.anchorID)
+                .onChange(of: passwordFocused) { _, newValue in
+                    if newValue == false { passwordDidBlur = true }
+                    if newValue == true { onFieldFocusChanged(.password) }
+                }
                 BrandFloatingField(
                     title: "Confirm Password",
                     placeholder: "••••••••",
                     text: $confirmPassword,
                     fieldType: .password(showToggle: true),
-                    errorText: confirmPasswordError
+                    errorText: confirmPasswordError,
+                    focus: $confirmPasswordFocused
                 )
+                .id(SignUpField.confirm.anchorID)
+                .onChange(of: confirmPasswordFocused) { _, newValue in
+                    if newValue == false { confirmPasswordDidBlur = true }
+                    if newValue == true { onFieldFocusChanged(.confirm) }
+                }
                 Toggle(isOn: $agreedToTerms) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("I agree to the Terms and Conditions and Privacy Policy")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(bodyColor)
+                            .underline(shouldShowTermsError, color: Color.red.opacity(0.85))
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
+                            .animation(nil, value: shouldShowTermsError)
                     }
                 }
                 .toggleStyle(SwitchToggleStyle(tint: primaryColor))
@@ -61,50 +104,52 @@ struct SignUpForm: View {
                     Text("You must agree before continuing.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.red.opacity(0.85))
+                        .animation(nil, value: shouldShowTermsError)
                 }
             }
 
-            BrandPrimaryButton(
-                title: isLoading || isPerformingAction ? "Signing up..." : "Sign up",
-                isLoading: isLoading || isPerformingAction
-            ) {
-                submit()
-            }
-            .disabled(isPerformingAction || isLoading)
-
-            DividerWithLabel(label: "or")
-
-            VStack(spacing: BrandSpacing.small) {
-                Text("By continuing with Google or Apple, you agree to our Terms and Privacy Policy.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(bodyColor.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
-                    handleSocialAuth(using: onGoogle)
+            // Compact vertical spacing around CTA + social auth (half-size gaps)
+            VStack(spacing: BrandSpacing.medium) {
+                BrandPrimaryButton(
+                    title: isLoading || isPerformingAction ? "Signing up..." : "Sign up",
+                    isLoading: isLoading || isPerformingAction
+                ) {
+                    submit()
                 }
-                BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
-                    handleSocialAuth(using: onApple)
+                .disabled(isPerformingAction || isLoading || !isFormValid)
+                .padding(.top, -BrandSpacing.small)
+
+                DividerWithLabel(label: "or")
+
+                VStack(spacing: BrandSpacing.small) {
+                    Text("By continuing with Google or Apple, you agree to our Terms and Privacy Policy.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(bodyColor.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                    BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
+                        handleSocialAuth(using: onGoogle)
+                    }
+                    BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
+                        handleSocialAuth(using: onApple)
+                    }
                 }
+                // Set divider-to-text gap to half of the button-to-divider spacing (medium → half = small)
+                .padding(.top, -BrandSpacing.small)
+
+                // Slightly smaller gap to the account switch row
+                HStack(spacing: 4) {
+                    Text("Already have an account?")
+                        .foregroundStyle(bodyColor)
+                    Button("Log in") {
+                        onSwitchToSignIn()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(primaryColor)
+                    .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            HStack(spacing: 4) {
-                Text("Already have an account?")
-                    .foregroundStyle(bodyColor)
-                Button("Log in") {
-                    onSwitchToSignIn()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(primaryColor)
-                .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.red.opacity(0.9))
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
         }
     }
 
@@ -121,20 +166,22 @@ struct SignUpForm: View {
     }
 
     private var emailError: String? {
-        guard !email.isEmpty else { return nil }
-        let regex = try? NSRegularExpression(pattern: "[^\\s@]+@[^\\s@]+\\.[^\\s@]+")
-        let range = NSRange(location: 0, length: email.utf16.count)
-        let isValid = regex?.firstMatch(in: email, options: [], range: range) != nil
-        return isValid ? nil : "Please enter a valid email address"
+        guard shouldShowEmailError else { return nil }
+        return EmailValidator.isValid(email) ? nil : "Please enter a valid email address"
     }
 
     private var passwordError: String? {
-        guard !password.isEmpty else { return nil }
-        return password.count >= 8 ? nil : "Password must be at least 8 characters"
+        guard shouldShowPasswordError else { return nil }
+        let result = PasswordValidator.validate(password)
+        if result.missing.contains(.length) {
+            return "Password must be at least 8 characters"
+        }
+        // If length is OK but other requirements missing, show detailed guidance
+        return PasswordValidator.missingRequirementsMessage(for: password)
     }
 
     private var confirmPasswordError: String? {
-        guard !confirmPassword.isEmpty else { return nil }
+        guard shouldShowConfirmPasswordError else { return nil }
         return confirmPassword == password ? nil : "Passwords do not match"
     }
 
@@ -145,21 +192,14 @@ struct SignUpForm: View {
     private func submit() {
         didAttemptSubmit = true
 
-        guard emailError == nil, passwordError == nil, confirmPasswordError == nil, agreedToTerms else {
-            errorMessage = "Please resolve the highlighted fields."
+        // Perform full validation only on submit; avoid doing it per‑keystroke.
+        guard EmailValidator.isValid(email), PasswordValidator.validate(password).isStrong, confirmPassword == password, agreedToTerms else {
             return
         }
-
-        errorMessage = nil
         isLoading = true
         onSubmit(email.lowercased(), password) { result in
             isLoading = false
-            switch result {
-            case .success:
-                errorMessage = nil
-            case .failure(let error):
-                errorMessage = error.errorDescription
-            }
+            // Errors handled via pop-ups; no inline form error
         }
     }
 
@@ -169,10 +209,41 @@ struct SignUpForm: View {
         isLoading = true
         handler { result in
             isLoading = false
-            if case .failure(let error) = result {
-                errorMessage = error.errorDescription
-            }
+            // Errors (including cancellations) are surfaced via pop-ups elsewhere
         }
+    }
+
+    private var shouldShowEmailError: Bool {
+        ((emailDidBlur) || didAttemptSubmit) && !EmailValidator.isValid(email)
+    }
+
+    private var shouldShowPasswordError: Bool {
+        // Show error after blur or submit when password isn't strong (covers
+        // both shorter-than-8 and weak-but-longer-than-8 cases)
+        (passwordDidBlur || didAttemptSubmit) && !PasswordValidator.validate(password).isStrong
+    }
+
+    private var shouldShowConfirmPasswordError: Bool {
+        ((confirmPasswordDidBlur) || didAttemptSubmit) && confirmPassword != password
+    }
+
+    private var isFormValid: Bool {
+        // Avoid heavy validation while typing; only require fields to be non‑empty
+        // and terms toggled for enabling the button. Full checks happen on submit.
+        !email.isEmpty && !password.isEmpty && !confirmPassword.isEmpty && agreedToTerms
     }
 }
 
+enum SignUpField {
+    case email
+    case password
+    case confirm
+
+    var anchorID: String {
+        switch self {
+        case .email: return "auth-signup-email"
+        case .password: return "auth-signup-password"
+        case .confirm: return "auth-signup-confirm"
+        }
+    }
+}

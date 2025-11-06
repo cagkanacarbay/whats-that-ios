@@ -82,6 +82,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     private var currentMedia: DiscoveryCapturedMedia?
     private var analysisTask: Task<Void, Never>?
+    private var freshLocationForAnalysis: DiscoveryLocation?
 
     var flowType: DiscoveryCreationFlowType {
         configuration.type
@@ -125,9 +126,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         confirmationState = nil
         analysisState = nil
         currentMedia = nil
+        freshLocationForAnalysis = nil
         flowState = .cancelled
         error = nil
-        locationService.stopTracking()
         flowState = .idle
     }
 
@@ -159,6 +160,26 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         error = nil
     }
 
+    // Re-check location permission when app returns to foreground and
+    // update confirmation state accordingly. If permission has just been
+    // granted during the confirmation stage (camera flow), kick off
+    // location resolution and update the UI badges.
+    func refreshLocationPermissionOnForeground() {
+        // Only relevant while confirming; no-op otherwise.
+        guard case .confirming = flowState else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let granted: Bool
+            if let cached = LocationPermissionCache.shared.current {
+                granted = cached
+            } else {
+                granted = await self.locationService.isPermissionGranted()
+            }
+            await self.apply(permissionGranted: granted)
+        }
+    }
+
     func syncCreditBalance(_ newValue: Int?) async {
         let normalized = await creditBalanceStore.set(newValue)
         creditBalance = normalized
@@ -171,6 +192,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         analysisState = nil
         confirmationState = nil
         creditBalance = nil
+        freshLocationForAnalysis = nil
 
         switch configuration.type {
         case .camera:
@@ -186,10 +208,18 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             await locationService.startTrackingIfNeeded()
             // Also proactively request a fresh location fix now (fire-and-forget),
             // so that by the time we reach confirmation we likely have a recent fix.
+            // Store it for analysis if available.
             Task { [weak self] in
                 guard let self else { return }
                 self.debugLog("Prefetching fresh location at camera start")
-                _ = await self.locationService.currentLocation(requireFresh: true)
+                var fresh: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
+                if fresh == nil {
+                    fresh = await self.locationService.currentLocation()
+                }
+                if let fresh {
+                    self.freshLocationForAnalysis = fresh
+                    print("[Prefetch][FreshForAnalysis] lat=\(fresh.latitude), lon=\(fresh.longitude)")
+                }
             }
             flowState = retake ? .capturingRetake : .capturingInitial
             do {
@@ -230,6 +260,111 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
     }
 
+    private func apply(permissionGranted granted: Bool) async {
+        // Update current confirmation snapshot with new permission value.
+        guard var current = confirmationState else { return }
+        let wasGranted = current.isLocationPermissionGranted
+        if wasGranted == granted {
+            return
+        }
+
+        current = DiscoveryConfirmationState(
+            media: current.media,
+            displayImageData: current.displayImageData,
+            creditBalance: current.creditBalance,
+            location: current.location,
+            locationDescription: current.locationDescription,
+            isLocationPermissionGranted: granted,
+            isResolvingLocation: current.isResolvingLocation,
+            customContext: current.customContext,
+            nearbyPlaces: current.nearbyPlaces,
+            nearbyPlacesContext: current.nearbyPlacesContext
+        )
+        confirmationState = current
+        if case .confirming = flowState, let state = confirmationState {
+            flowState = .confirming(state)
+        }
+
+        // If permission is newly granted during camera flow and we don't yet
+        // have coordinates, start resolving and update the UI badge.
+        if flowType == .camera, granted, current.location == nil {
+            confirmationState = confirmationState.map { existing in
+                DiscoveryConfirmationState(
+                    media: existing.media,
+                    displayImageData: existing.displayImageData,
+                    creditBalance: existing.creditBalance,
+                    location: existing.location,
+                    locationDescription: existing.locationDescription,
+                    isLocationPermissionGranted: existing.isLocationPermissionGranted,
+                    isResolvingLocation: true,
+                    customContext: existing.customContext,
+                    nearbyPlaces: existing.nearbyPlaces,
+                    nearbyPlacesContext: existing.nearbyPlacesContext
+                )
+            }
+            if case .confirming = flowState, let state = confirmationState {
+                flowState = .confirming(state)
+            }
+
+            // Resolve location and nearby places in background.
+            Task { [weak self] in
+                guard let self else { return }
+                await self.locationService.startTrackingIfNeeded()
+                var resolved: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
+                if resolved == nil {
+                    resolved = await self.locationService.currentLocation()
+                }
+                guard let coords = resolved else { return }
+
+                let description = Self.makeLocationDescription(from: coords)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if let existing = self.confirmationState {
+                        self.confirmationState = DiscoveryConfirmationState(
+                            media: existing.media,
+                            displayImageData: existing.displayImageData,
+                            creditBalance: existing.creditBalance,
+                            location: coords,
+                            locationDescription: description,
+                            isLocationPermissionGranted: existing.isLocationPermissionGranted,
+                            isResolvingLocation: false,
+                            customContext: existing.customContext,
+                            nearbyPlaces: existing.nearbyPlaces,
+                            nearbyPlacesContext: existing.nearbyPlacesContext
+                        )
+                        if case .confirming = self.flowState, let state = self.confirmationState {
+                            self.flowState = .confirming(state)
+                        }
+                    }
+                }
+
+                // Prepare nearby places after coordinates are available.
+                if let selection = await self.locationService.prepareNearbyPlaces(for: coords) {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if let existing = self.confirmationState {
+                            self.confirmationState = DiscoveryConfirmationState(
+                                media: existing.media,
+                                displayImageData: existing.displayImageData,
+                                creditBalance: existing.creditBalance,
+                                location: existing.location,
+                                locationDescription: existing.locationDescription,
+                                isLocationPermissionGranted: existing.isLocationPermissionGranted,
+                                isResolvingLocation: existing.isResolvingLocation,
+                                customContext: existing.customContext,
+                                nearbyPlaces: selection.snapshot.places,
+                                nearbyPlacesContext: selection.context
+                            )
+                            if case .confirming = self.flowState, let state = self.confirmationState {
+                                self.flowState = .confirming(state)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func prepareConfirmation(with media: DiscoveryCapturedMedia) async {
         // Determine permission once (from cached snapshot if available) to avoid showing wrong badge state.
         let permissionNow: Bool
@@ -241,8 +376,25 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             permissionNow = granted
             debugLog("Queried location permission: \(permissionNow)")
         }
-        // Seed initial state based on flow type: uploads use EXIF immediately; camera resolves current fix.
-        let initialLocation: DiscoveryLocation? = (flowType == .upload) ? media.location : nil
+        // Seed initial state based on flow type:
+        // - uploads use EXIF immediately
+        // - camera uses any last-known location immediately (no spinner), and fetches fresh in background
+        let initialLocation: DiscoveryLocation?
+        switch flowType {
+        case .upload:
+            initialLocation = media.location
+        case .camera:
+            // Show spinner while resolving on confirm; do not set a location yet.
+            initialLocation = nil
+        }
+        if let initialLocation {
+            switch flowType {
+            case .upload:
+                print("[Confirm] Using EXIF coordinates for upload: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
+            case .camera:
+                print("[Confirm] Using last-known coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
+            }
+        }
         let initialResolving: Bool = (flowType == .camera) && permissionNow && (initialLocation == nil)
         let initialConfirmationState = DiscoveryConfirmationState(
             media: media,
@@ -261,6 +413,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         flowState = .confirming(initialConfirmationState)
         currentMedia = media
 
+        // Debug: dump nearby cache state as we enter confirmation
+        await locationService.debugLogNearbyState(current: initialLocation)
+
         // Ensure tracking is on for camera; uploads do not need live location.
         // Tracking is started at the beginning of the camera flow, so avoid starting again here.
         // (Keeps a single start point and prevents redundant calls.)
@@ -271,22 +426,23 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             creditBalance = cached
         }
 
-        // Fire location resolution in background so the confirm UI isn't blocked.
+        // Confirm-stage: resolve a fresh location (shows spinner while pending)
         if flowType == .camera {
             Task { [weak self] in
                 guard let self else { return }
-                // Prefer a fresh fix; fall back to last-known if needed.
                 self.debugLog("Resolving camera location: requesting fresh fix")
                 var resolved: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
                 if resolved == nil {
-                    self.debugLog("Fresh fix unavailable; falling back to last-known location")
+                    self.debugLog("Fresh fix unavailable; falling back to last-known for confirm")
                     resolved = await self.locationService.currentLocation()
                 }
                 guard let resolved else { return }
                 let description = Self.makeLocationDescription(from: resolved)
-                await MainActor.run {
-                    self.confirmationState = self.confirmationState.map { current in
-                        DiscoveryConfirmationState(
+                print("[Confirm] Camera coordinates resolved: lat=\(resolved.latitude), lon=\(resolved.longitude)")
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if let current = self.confirmationState {
+                        self.confirmationState = DiscoveryConfirmationState(
                             media: current.media,
                             displayImageData: current.displayImageData,
                             creditBalance: current.creditBalance,
@@ -298,10 +454,67 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                             nearbyPlaces: current.nearbyPlaces,
                             nearbyPlacesContext: current.nearbyPlacesContext
                         )
+                        if case .confirming = self.flowState, let state = self.confirmationState {
+                            self.flowState = .confirming(state)
+                        }
                     }
-                    self.debugLog("Resolved location set; disabling resolving badge")
-                    if case .confirming = self.flowState, let state = self.confirmationState {
-                        self.flowState = .confirming(state)
+                }
+            }
+        }
+
+        // Kick off nearby-places using the initial seed location only; do not refetch after fresh fix arrives.
+        if let seed = initialLocation {
+            Task { [weak self] in
+                guard let self else { return }
+                if let selection = await self.locationService.prepareNearbyPlaces(for: seed) {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if let current = self.confirmationState {
+                            self.confirmationState = DiscoveryConfirmationState(
+                                media: current.media,
+                                displayImageData: current.displayImageData,
+                                creditBalance: current.creditBalance,
+                                location: current.location,
+                                locationDescription: current.locationDescription,
+                                isLocationPermissionGranted: current.isLocationPermissionGranted,
+                                isResolvingLocation: current.isResolvingLocation,
+                                customContext: current.customContext,
+                                nearbyPlaces: selection.snapshot.places,
+                                nearbyPlacesContext: selection.context
+                            )
+                            if case .confirming = self.flowState, let state = self.confirmationState {
+                                self.flowState = .confirming(state)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // For uploads with EXIF coordinates, pre-warm nearby immediately in background.
+        if flowType == .upload, let exifLocation = media.location {
+            Task { [weak self] in
+                guard let self else { return }
+                if let selection = await self.locationService.prepareNearbyPlaces(for: exifLocation) {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if let current = self.confirmationState {
+                            self.confirmationState = DiscoveryConfirmationState(
+                                media: current.media,
+                                displayImageData: current.displayImageData,
+                                creditBalance: current.creditBalance,
+                                location: current.location,
+                                locationDescription: current.locationDescription,
+                                isLocationPermissionGranted: current.isLocationPermissionGranted,
+                                isResolvingLocation: current.isResolvingLocation,
+                                customContext: current.customContext,
+                                nearbyPlaces: selection.snapshot.places,
+                                nearbyPlacesContext: selection.context
+                            )
+                            if case .confirming = self.flowState, let state = self.confirmationState {
+                                self.flowState = .confirming(state)
+                            }
+                        }
                     }
                 }
             }
@@ -366,13 +579,46 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         flowState = .analyzing(initialState)
 
         do {
+            // Deterministic confirm-stage path: if coordinates exist and nearby are missing,
+            // ask locationService to prepare nearby and wait (bounded by config timeout).
+            var effectiveConfirmation = confirmation
+            if let coords = confirmation.location, (confirmation.nearbyPlaces == nil || confirmation.nearbyPlaces?.isEmpty == true) {
+                if let selection = await locationService.prepareNearbyPlaces(for: coords) {
+                    effectiveConfirmation = DiscoveryConfirmationState(
+                        media: confirmation.media,
+                        displayImageData: confirmation.displayImageData,
+                        creditBalance: confirmation.creditBalance,
+                        location: confirmation.location,
+                        locationDescription: confirmation.locationDescription,
+                        isLocationPermissionGranted: confirmation.isLocationPermissionGranted,
+                        isResolvingLocation: confirmation.isResolvingLocation,
+                        customContext: confirmation.customContext,
+                        nearbyPlaces: selection.snapshot.places,
+                        nearbyPlacesContext: selection.context
+                    )
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if case .confirming = self.flowState {
+                            self.confirmationState = effectiveConfirmation
+                            self.flowState = .confirming(effectiveConfirmation)
+                        }
+                    }
+                }
+            }
+            let analysisLocation = self.freshLocationForAnalysis ?? effectiveConfirmation.location
+            if let loc = analysisLocation {
+                let source = (self.freshLocationForAnalysis != nil) ? "fresh" : "confirmation"
+                print("[ANALYSIS_LOC] source=\(source) lat=\(loc.latitude) lon=\(loc.longitude)")
+            } else {
+                print("[ANALYSIS_LOC] source=none")
+            }
             let payload = DiscoveryAnalysisPayload(
                 base64Image: try await imageEncoder.makeBase64Payload(from: media, maxDimension: configuration.maxImageDimension),
-                location: confirmation.location,
-                customContext: confirmation.customContext,
+                location: analysisLocation,
+                customContext: effectiveConfirmation.customContext,
                 pushToken: pushToken,
-                nearbyPlaces: confirmation.nearbyPlaces,
-                nearbyPlacesContext: confirmation.nearbyPlacesContext
+                nearbyPlaces: effectiveConfirmation.nearbyPlaces,
+                nearbyPlacesContext: effectiveConfirmation.nearbyPlacesContext
             )
 
             let sessionId = UUID()
@@ -391,7 +637,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             await handleAnalysisCancellation()
         } catch {
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
-            locationService.stopTracking()
             if Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to friendly no-credits error and sync local cache.
                 self.error = .noCredits
@@ -445,7 +690,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 state.userPromptVersion = userVersion
             }
             // Do not republish flowState here; wait for the final end signal.
-            locationService.stopTracking()
             onDiscoveryCreated?(discoveryId)
             hydrateDiscoverySummaryIfNeeded(for: discoveryId)
             // Optimistically decrement credits on success.
@@ -457,7 +701,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 }
             }
         case let .error(message, status):
-            locationService.stopTracking()
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to a friendly no-credits error and sync local cache.
                 error = .noCredits
@@ -491,7 +734,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         analysisTask = nil
         analysisState = nil
         flowState = .cancelled
-        locationService.stopTracking()
         flowState = .idle
     }
 

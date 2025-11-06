@@ -56,6 +56,16 @@ public struct AppRootView: View {
         }
         #endif
 
+        let nearbyInspectorFactory: (() -> AnyView)? = {
+            AnyView(
+                NearbyCacheInspectorView(
+                    loadSnapshots: { await container.listNearbyCache() },
+                    loadCurrent: { await container.currentLocationForCache() },
+                    clearSnapshots: { await container.clearNearbyCache() }
+                )
+            )
+        }
+
         return RootContentView(
             feedUseCase: container.discoveryFeedUseCase,
             deletionUseCase: container.discoveryDeletionUseCase,
@@ -66,7 +76,14 @@ public struct AppRootView: View {
             makeVoiceoverController: voiceoverFactory,
             makeCreditsViewModel: creditsFactory,
             fetchCreditBalance: balanceFetcher,
-            clearAppStoreLocal: clearAppStoreLocal
+            clearAppStoreLocal: clearAppStoreLocal,
+            makeNearbyCacheInspector: nearbyInspectorFactory,
+            startLocationTracking: {
+                await container.startAppLocationTracking()
+            },
+            stopLocationTracking: {
+                container.stopAppLocationTracking()
+            }
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

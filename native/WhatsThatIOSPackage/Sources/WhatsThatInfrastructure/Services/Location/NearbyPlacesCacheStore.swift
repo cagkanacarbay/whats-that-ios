@@ -38,9 +38,9 @@ public actor NearbyPlacesCacheStore {
             let age = now.timeIntervalSince(snapshot.fetchedAt)
             guard age <= ttl else { continue }
 
-            let radiusLimit = max(distance, snapshot.radiusMeters)
+            // Selection is based strictly on reuse distance (ignore snapshot.radiusMeters)
             let delta = snapshot.origin.distance(to: coordinate)
-            guard delta <= radiusLimit else { continue }
+            guard delta <= distance else { continue }
 
             if let currentBest = best {
                 if delta < currentBest.distance {
@@ -75,6 +75,11 @@ public actor NearbyPlacesCacheStore {
 
     public func prune(ttl: TimeInterval, now: Date) async {
         snapshots = purgeExpiredSnapshots(ttl: ttl, now: now)
+        await persist()
+    }
+
+    public func clearAll() async {
+        snapshots.removeAll()
         await persist()
     }
 

@@ -131,43 +131,32 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             "base64Image": payload.base64Image
         ]
 
-        // Align payload shape with ask-ai-v7 expectations (as used by RN client):
-        // location -> { location: { coords: { latitude, longitude } }, nearbyPlaces: [...] }
-        if payload.location != nil || (payload.nearbyPlaces?.isEmpty == false) || payload.nearbyPlacesContext != nil {
+        // Align payload shape with ask-ai-v7 expectations:
+        // Only include nearbyPlaces/nearbyPlacesContext when coordinates are present.
+        if let location = payload.location {
             var locationContainer: [String: Any] = [:]
-            var nearbyPayload: Any?
-            var nearbyContextPayload: Any?
 
-            if let location = payload.location {
-                let coords: [String: Any] = [
-                    "latitude": location.latitude,
-                    "longitude": location.longitude
-                ]
-                locationContainer["location"] = [
-                    "coords": coords
-                ]
-            }
+            let coords: [String: Any] = [
+                "latitude": location.latitude,
+                "longitude": location.longitude
+            ]
+            locationContainer["location"] = [
+                "coords": coords
+            ]
 
             if let nearbyPlaces = payload.nearbyPlaces, !nearbyPlaces.isEmpty {
                 if let encoded = try? encodeToJSONObject(nearbyPlaces) {
                     locationContainer["nearbyPlaces"] = encoded
-                    nearbyPayload = encoded
                 }
             }
 
             if let nearbyPlacesContext = payload.nearbyPlacesContext {
                 if let encoded = try? encodeToJSONObject(nearbyPlacesContext) {
                     locationContainer["nearbyPlacesContext"] = encoded
-                    nearbyContextPayload = encoded
                 }
             }
 
-            if locationContainer.isEmpty == false {
-                body["location"] = locationContainer
-                if let nearbyPayload {
-                    logNearbyPlacesPayload(places: nearbyPayload, context: nearbyContextPayload)
-                }
-            }
+            body["location"] = locationContainer
         }
 
         if let customContext = payload.customContext {
@@ -183,6 +172,12 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         // avoid duplication and match server expectations.
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        // Debug log for ask-ai request composition
+        let hasCoords = payload.location != nil
+        let hasNearby = (payload.nearbyPlaces?.isEmpty == false)
+        let hasContext = (payload.nearbyPlacesContext != nil)
+        print("[AskAI] Request started: hasCoords=\(hasCoords), hasNearby=\(hasNearby), hasContext=\(hasContext)")
 
         return request
     }

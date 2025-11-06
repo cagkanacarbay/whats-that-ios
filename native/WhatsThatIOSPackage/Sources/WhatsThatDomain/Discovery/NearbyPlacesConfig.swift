@@ -9,6 +9,7 @@ public struct NearbyPlacesConfig: Equatable, Sendable {
     public let locationDistanceFilterMeters: Double
     public let locationDesiredAccuracyMeters: Double
     public let sampleStaleInterval: TimeInterval
+    public let confirmStageFetchTimeout: TimeInterval
 
     public init(
         fetchRadiusMeters: Double,
@@ -18,7 +19,8 @@ public struct NearbyPlacesConfig: Equatable, Sendable {
         maxCacheEntries: Int,
         locationDistanceFilterMeters: Double,
         locationDesiredAccuracyMeters: Double,
-        sampleStaleInterval: TimeInterval
+        sampleStaleInterval: TimeInterval,
+        confirmStageFetchTimeout: TimeInterval
     ) {
         self.fetchRadiusMeters = fetchRadiusMeters
         self.distanceThresholdMeters = distanceThresholdMeters
@@ -28,6 +30,7 @@ public struct NearbyPlacesConfig: Equatable, Sendable {
         self.locationDistanceFilterMeters = locationDistanceFilterMeters
         self.locationDesiredAccuracyMeters = locationDesiredAccuracyMeters
         self.sampleStaleInterval = sampleStaleInterval
+        self.confirmStageFetchTimeout = confirmStageFetchTimeout
     }
 }
 
@@ -40,6 +43,7 @@ public extension NearbyPlacesConfig {
         maxCacheEntries: 50,
         locationDistanceFilterMeters: 100,
         locationDesiredAccuracyMeters: 50,
-        sampleStaleInterval: 15 * 60
+        sampleStaleInterval: 15 * 60,
+        confirmStageFetchTimeout: 15
     )
 }

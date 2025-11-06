@@ -4,10 +4,12 @@ import WhatsThatShared
 
 struct SettingsView: View {
     private let makeCreditsView: (@escaping (Int?) -> Void) -> AnyView
+    private let makeNearbyCacheInspector: () -> AnyView
     private let onClose: () -> Void
 
     @StateObject private var viewModel: SettingsViewModel
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
+    @State private var isNearbyInspectorPresented = false
 
     init(
         userEmail: String?,
@@ -15,12 +17,14 @@ struct SettingsView: View {
         onResetOnboarding: @escaping () async -> Result<Void, Error>,
         onFetchCreditBalance: @escaping () async -> Result<Int, Error>,
         makeCreditsView: @escaping (@escaping (Int?) -> Void) -> AnyView,
+        makeNearbyCacheInspector: @escaping () -> AnyView,
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
         self.makeCreditsView = makeCreditsView
+        self.makeNearbyCacheInspector = makeNearbyCacheInspector
         self.onClose = onClose
         _viewModel = StateObject(
             wrappedValue: SettingsViewModel(
@@ -43,6 +47,7 @@ struct SettingsView: View {
                 themeSection
                 accountSection
                 onboardingSection
+                devSection
             }
             .task {
                 await viewModel.refreshCreditBalance()
@@ -247,6 +252,29 @@ struct SettingsView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 4)
+        }
+    }
+
+    private var devSection: some View {
+        Section(header: Text("Development")) {
+            Button {
+                isNearbyInspectorPresented = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "location.viewfinder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.accentColor)
+                    Text("Nearby places cache (dev)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+            .sheet(isPresented: $isNearbyInspectorPresented) {
+                makeNearbyCacheInspector()
+            }
         }
     }
 

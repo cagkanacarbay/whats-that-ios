@@ -46,6 +46,7 @@ struct DiscoveryCreationFlowView: View {
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
     @State private var activeAlert: ActiveAlert?
     @State private var activeSheet: ActiveSheet?
+    @Environment(\.scenePhase) private var scenePhase
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
@@ -90,6 +91,11 @@ struct DiscoveryCreationFlowView: View {
                     activeAlert = .flowError(IdentifiedError(error: error))
                 } else if case .flowError = activeAlert {
                     activeAlert = nil
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    viewModel.refreshLocationPermissionOnForeground()
                 }
             }
             .sheet(item: $activeSheet, onDismiss: {

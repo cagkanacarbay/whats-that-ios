@@ -338,4 +338,8 @@ private final class StubLocationService: DiscoveryLocationService {
     }
 
     func registerMediaLocation(_ location: DiscoveryLocation) async {}
+
+    func debugLogNearbyState(current: DiscoveryLocation?) async {}
+    func listNearbyCache() async -> [NearbyPlacesSnapshot] { [] }
+    func clearNearbyCache() async {}
 }

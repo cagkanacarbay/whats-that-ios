@@ -24,6 +24,7 @@ public final class SupabaseNearbyPlacesFetcher: NearbyPlacesFetching {
         longitude: Double,
         radius: Double
     ) async throws -> [NearbyPlace] {
+        print("[Nearby] Requesting Edge nearby-places: lat=\(latitude), lon=\(longitude), radius=\(radius)")
         guard let supabaseURL = configuration.supabaseURL else {
             throw NearbyPlacesFetcherError.invalidConfiguration
         }
@@ -62,7 +63,16 @@ public final class SupabaseNearbyPlacesFetcher: NearbyPlacesFetching {
             NearbyPlacesEdgeResponse.self,
             from: data
         )
-        return edgeResponse.places ?? []
+        let places = edgeResponse.places ?? []
+        print("[Nearby] Result returned: places=\(places.count)")
+        for (idx, place) in places.enumerated() {
+            if let loc = place.location {
+                print("[Nearby]  • Place[\(idx)]: lat=\(loc.latitude), lon=\(loc.longitude)")
+            } else {
+                print("[Nearby]  • Place[\(idx)]: no coordinates")
+            }
+        }
+        return places
     }
 
     private static func functionsBaseURL(from supabaseURL: URL) -> URL {

@@ -24,6 +24,7 @@ public struct AppDependencyContainer: Sendable {
     private let creditsRepository: DiscoveryCreditsRepository
     private let creditsStore: any CreditsStore
     private let creditBalanceStore: CreditBalanceStore
+    private let locationService: DiscoveryLocationService
 #endif
 
 #if os(iOS)
@@ -36,7 +37,8 @@ public struct AppDependencyContainer: Sendable {
         voiceoverRepository: any DiscoveryVoiceoverRepository,
         creditsRepository: DiscoveryCreditsRepository,
         creditsStore: any CreditsStore,
-        creditBalanceStore: CreditBalanceStore
+        creditBalanceStore: CreditBalanceStore,
+        locationService: DiscoveryLocationService
     ) {
         self.configuration = configuration
         self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
@@ -49,6 +51,7 @@ public struct AppDependencyContainer: Sendable {
         self.creditsRepository = creditsRepository
         self.creditsStore = creditsStore
         self.creditBalanceStore = creditBalanceStore
+        self.locationService = locationService
     }
 #else
     init(
@@ -190,7 +193,8 @@ public extension AppDependencyContainer {
             voiceoverRepository: voiceoverRepository,
             creditsRepository: creditsRepository,
             creditsStore: creditsStore,
-            creditBalanceStore: creditBalanceStore
+            creditBalanceStore: creditBalanceStore,
+            locationService: locationService
         )
 #else
         return AppDependencyContainer(
@@ -241,6 +245,30 @@ public extension AppDependencyContainer {
         } catch {
             return .failure(error)
         }
+    }
+
+    // MARK: - App-wide Location Lifecycle
+    @MainActor
+    func startAppLocationTracking() async {
+        await locationService.startTrackingIfNeeded()
+        _ = await locationService.currentLocation(requireFresh: true)
+    }
+
+    func stopAppLocationTracking() {
+        locationService.stopTracking()
+    }
+
+    // MARK: - Dev/QA: Nearby Cache Inspection
+    func listNearbyCache() async -> [NearbyPlacesSnapshot] {
+        await locationService.listNearbyCache()
+    }
+
+    func currentLocationForCache() async -> DiscoveryLocation? {
+        await locationService.currentLocation()
+    }
+
+    func clearNearbyCache() async {
+        await locationService.clearNearbyCache()
     }
 
     /// Clears local App Store state used by this app for testing purposes.

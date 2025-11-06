@@ -8,6 +8,7 @@ import Combine
 public struct RootContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var passwordResetLinkCoordinator: PasswordResetLinkCoordinator
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: AppRootViewModel
     @State private var authError: AuthError?
     @State private var authStartMode: AuthenticationFlowView.Mode = .signUp
@@ -21,6 +22,9 @@ public struct RootContentView: View {
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
     private let clearAppStoreLocal: () async -> Result<Void, Error>
+    private let makeNearbyCacheInspector: (() -> AnyView)?
+    private let startLocationTracking: (() async -> Void)?
+    private let stopLocationTracking: (() -> Void)?
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -34,7 +38,10 @@ public struct RootContentView: View {
         makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
         fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) },
-        clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) }
+        clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) },
+        makeNearbyCacheInspector: (() -> AnyView)? = nil,
+        startLocationTracking: (() async -> Void)? = nil,
+        stopLocationTracking: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -43,6 +50,9 @@ public struct RootContentView: View {
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
         self.clearAppStoreLocal = clearAppStoreLocal
+        self.makeNearbyCacheInspector = makeNearbyCacheInspector
+        self.startLocationTracking = startLocationTracking
+        self.stopLocationTracking = stopLocationTracking
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -195,6 +205,7 @@ public struct RootContentView: View {
                     }
                     return AnyView(CreditsView(viewModel: viewModel))
                 },
+                makeNearbyCacheInspector: { makeNearbyCacheInspector?() ?? AnyView(Text("Not available")) },
                 onSendPasswordReset: { email in
                     do {
                         try await viewModel.requestPasswordReset(email: email)
@@ -250,9 +261,31 @@ public struct RootContentView: View {
                     authStartMode = .signUp
                 }
             }
+            // Start/resume tracking when authenticated and app is active; stop when leaving main state
+            if case .main = current, scenePhase == .active {
+                if let startLocationTracking { Task { await startLocationTracking() } }
+            }
+            if case .main = previous, case .main = current {
+                // still main -> no-op
+            } else if case .main = previous {
+                stopLocationTracking?()
+            }
         }
         .onChange(of: storedAppearance) { _, _ in
             syncBrandTheme()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Start/resume tracking on foreground when authenticated; stop otherwise
+            switch newPhase {
+            case .active:
+                if case .main = viewModel.flowState {
+                    if let startLocationTracking { Task { await startLocationTracking() } }
+                }
+            case .background, .inactive:
+                stopLocationTracking?()
+            @unknown default:
+                break
+            }
         }
     }
 

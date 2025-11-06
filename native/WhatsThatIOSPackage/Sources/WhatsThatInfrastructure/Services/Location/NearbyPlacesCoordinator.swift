@@ -142,6 +142,10 @@ public actor NearbyPlacesCoordinator {
         now: Date,
         preferImmediateFetch: Bool
     ) -> Bool {
+        // If we already have a cached snapshot selected for current coordinates, reuse it.
+        if latestSnapshot != nil {
+            return false
+        }
         if let lastDate = lastFetchDate,
            now.timeIntervalSince(lastDate) < config.fetchDebounceInterval {
             if !preferImmediateFetch { return false }
@@ -154,9 +158,7 @@ public actor NearbyPlacesCoordinator {
             }
         }
 
-        if latestSnapshot != nil && !preferImmediateFetch {
-            return false
-        }
+        // latestSnapshot check handled above; no additional gating needed here.
 
         return true
     }

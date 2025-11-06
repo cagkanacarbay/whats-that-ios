@@ -44,11 +44,10 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         manager.distanceFilter = configuration.locationDistanceFilterMeters
         manager.pausesLocationUpdatesAutomatically = true
 
-        log("Init: desiredAccuracy=\(configuration.locationDesiredAccuracyMeters), distanceFilter=\(configuration.locationDistanceFilterMeters)")
+        // verbose init logging removed
     }
 
     public func startTrackingIfNeeded() async {
-        log("startTrackingIfNeeded() invoked")
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -56,10 +55,7 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     return
                 }
                 Task { @MainActor in
-                    self.log("Requesting authorization if needed")
                     await self.requestAuthorizationIfNeeded()
-                    let auth = self.locationManager.authorizationStatus
-                    self.log("Authorization status after request: \(Self.describeAuthorization(auth)))")
                     self.locationManager.desiredAccuracy = self.config.locationDesiredAccuracyMeters
                     self.locationManager.distanceFilter = self.config.locationDistanceFilterMeters
                     continuation.resume()
@@ -70,10 +66,7 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         queue.async { [weak self] in
             guard let self, !self.isUpdating else { return }
             self.isUpdating = true
-            Task { @MainActor in
-                self.log("Starting continuous location updates (startUpdatingLocation)")
-                self.locationManager.startUpdatingLocation()
-            }
+            Task { @MainActor in self.locationManager.startUpdatingLocation() }
         }
     }
 
@@ -81,15 +74,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         queue.async { [weak self] in
             guard let self else { return }
             self.isUpdating = false
-            Task { @MainActor in
-                self.log("Stopping continuous location updates (stopUpdatingLocation)")
-                self.locationManager.stopUpdatingLocation()
-            }
+            Task { @MainActor in self.locationManager.stopUpdatingLocation() }
         }
     }
 
     public func currentLocation() async -> DiscoveryLocation? {
-        log("currentLocation() called")
         return await withCheckedContinuation { (continuation: CheckedContinuation<DiscoveryLocation?, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -98,16 +87,14 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                 }
 
                 if let lastLocation = self.lastLocation {
-                    self.log("Returning last known location immediately: (\(lastLocation.coordinate.latitude), \(lastLocation.coordinate.longitude))")
                     let discoveryLocation = self.makeImmediateDiscoveryLocation(from: lastLocation)
                     continuation.resume(returning: discoveryLocation)
                 } else {
-                    self.log("No last location; requesting one-shot location update")
                     let id = UUID()
                     self.pendingContinuations[id] = continuation
                     Task { @MainActor in
                         await self.requestAuthorizationIfNeeded()
-                        self.log("Requesting one-shot location (requestLocation)")
+                        self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation()")
                         self.locationManager.requestLocation()
                     }
                 }
@@ -134,7 +121,6 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         if !requireFresh {
             return await currentLocation()
         }
-        log("currentLocation(requireFresh: true) called")
         return await withCheckedContinuation { (continuation: CheckedContinuation<DiscoveryLocation?, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -142,9 +128,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     return
                 }
 
-                // If we have a very recent last location (<= 15s), use it immediately to avoid spinner hangs
-                if let last = self.lastLocation, Date().timeIntervalSince(last.timestamp) < 15 {
-                    self.log("Fresh required but last fix is recent (<5s); returning last-known")
+                // If we have a very recent last location, use it immediately to avoid spinner hangs
+                let recentThreshold: TimeInterval = 15.0
+                if let last = self.lastLocation, Date().timeIntervalSince(last.timestamp) < recentThreshold {
+                    let thresholdStr = Int(recentThreshold)
+                    self.log("Fresh required but last fix is recent (<\(thresholdStr)s); returning last-known")
                     let discovery = self.makeImmediateDiscoveryLocation(from: last)
                     continuation.resume(returning: discovery)
                     return
@@ -155,11 +143,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                 // Kick off a request for a fresh one-shot location
                 Task { @MainActor in
                     await self.requestAuthorizationIfNeeded()
-                    self.log("Requesting fresh location (requestLocation)")
+                    self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation()")
                     self.locationManager.requestLocation()
                 }
                 // Add a timeout fallback to prevent indefinite hangs
-                let timeoutSeconds: TimeInterval = 2.0
+                let timeoutSeconds: TimeInterval = 15.0
                 Task.detached { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                     guard let self else { return }
@@ -167,11 +155,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                         guard let self else { return }
                         if let pending = self.pendingContinuations.removeValue(forKey: id) {
                             if let last = self.lastLocation {
-                                self.log("Fresh fix timeout (\(timeoutSeconds)s); returning last-known")
+                                self.log("[FF_EVENT] TIMEOUT_FALLBACK id=\(id.uuidString) timeout=\(timeoutSeconds)s used=last_known lat=\(last.coordinate.latitude) lon=\(last.coordinate.longitude)")
                                 let discovery = self.makeImmediateDiscoveryLocation(from: last)
                                 pending.resume(returning: discovery)
                             } else {
-                                self.log("Fresh fix timeout (\(timeoutSeconds)s); no last-known available")
+                                self.log("[FF_EVENT] TIMEOUT_NO_LAST id=\(id.uuidString) timeout=\(timeoutSeconds)s used=nil")
                                 pending.resume(returning: nil)
                             }
                         }
@@ -195,28 +183,42 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
     }
 
     public func prepareNearbyPlaces(for location: DiscoveryLocation?) async -> NearbyPlacesSelection? {
+        // Build a confirm-stage sample (prefer immediate fetch) and wait up to configured timeout.
+        let confirmTimeout = config.confirmStageFetchTimeout
+        let deadline = Date().addingTimeInterval(confirmTimeout)
+
+        var confirmSample: DiscoveryLocationSample?
         if let location {
-            await registerMediaLocation(location)
-            if let selection = await coordinator.currentSelection() {
-                return selection
-            }
-        } else if let lastLocation = readLastLocation() {
-            let sample = makeSample(from: lastLocation, source: .live)
-            await coordinator.register(sample: sample)
+            print("[Confirm][Nearby] Coordinates available at confirm stage (EXIF): lat=\(location.latitude), lon=\(location.longitude)")
+            confirmSample = DiscoveryLocationSample(
+                coordinate: GeoCoordinate(latitude: location.latitude, longitude: location.longitude),
+                timestamp: Date(),
+                horizontalAccuracy: config.locationDesiredAccuracyMeters,
+                source: .exif
+            )
+        } else if let last = readLastLocation() {
+            print("[Confirm][Nearby] Using last-known coordinates at confirm stage: lat=\(last.coordinate.latitude), lon=\(last.coordinate.longitude)")
+            confirmSample = makeSample(from: last, source: .live)
         }
 
-        if let selection = await coordinator.currentSelection() {
-            return selection
+        if let sample = confirmSample {
+            print("[Confirm][Nearby] Checking cache for lat=\(sample.coordinate.latitude), lon=\(sample.coordinate.longitude), reuseDistance=\(config.distanceThresholdMeters)m")
+            await coordinator.register(sample: sample, preferImmediateFetch: true)
         }
 
-        let deadline = Date().addingTimeInterval(1.5)
+        if let selection = await coordinator.currentSelection() { return selection }
+
+        // Poll for nearby selection; if a fetch fails, re-trigger register with preferImmediateFetch
+        // periodically (no empty snapshot caching, bounded by confirmTimeout).
+        var lastRefetch = Date.distantPast
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 200_000_000)
-            if let selection = await coordinator.currentSelection() {
-                return selection
+            if let selection = await coordinator.currentSelection() { return selection }
+            if let sample = confirmSample, Date().timeIntervalSince(lastRefetch) >= 1.0 {
+                await coordinator.register(sample: sample, preferImmediateFetch: true)
+                lastRefetch = Date()
             }
         }
-
         return nil
     }
 
@@ -233,19 +235,24 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         await coordinator.register(sample: sample, preferImmediateFetch: true)
     }
 
+    public func debugLogNearbyState(current: DiscoveryLocation?) async {
+        // verbose confirm-nearby logging removed
+    }
+
+    public func listNearbyCache() async -> [NearbyPlacesSnapshot] {
+        await cacheStore.allSnapshots()
+    }
+
+    public func clearNearbyCache() async {
+        await cacheStore.clearAll()
+    }
+
     @MainActor
     private func requestAuthorizationIfNeeded() async {
         switch locationManager.authorizationStatus {
         case .notDetermined:
-            log("Authorization not determined; requesting when-in-use")
             locationManager.requestWhenInUseAuthorization()
-        case .restricted, .denied:
-            log("Authorization restricted/denied; not requesting")
-            break
-        case .authorizedAlways, .authorizedWhenInUse:
-            log("Authorization already granted")
-            break
-        @unknown default:
+        default:
             break
         }
     }
@@ -303,6 +310,9 @@ extension CoreLocationDiscoveryLocationService: CLLocationManagerDelegate {
             // Resume any pending continuations immediately with coordinate-only info.
             let discoveryLocation = self.makeImmediateDiscoveryLocation(from: latest)
             self.log("didUpdateLocations: count=\(locations.count), latest=(\(latest.coordinate.latitude), \(latest.coordinate.longitude)), pending=\(self.pendingContinuations.count)")
+            if !self.pendingContinuations.isEmpty {
+                self.log("[FF_EVENT] DELIVERED_BEFORE_TIMEOUT pending_count=\(self.pendingContinuations.count) lat=\(latest.coordinate.latitude) lon=\(latest.coordinate.longitude)")
+            }
             let continuations = self.pendingContinuations
             self.pendingContinuations.removeAll()
             for (_, cont) in continuations {
@@ -312,7 +322,6 @@ extension CoreLocationDiscoveryLocationService: CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        log("didFailWithError: \(error.localizedDescription)")
         // Swallow errors; currentLocation will handle fallback.
     }
 }

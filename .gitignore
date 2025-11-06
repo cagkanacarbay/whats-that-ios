@@ -65,3 +65,5 @@ native/Config/Environments/*.local.xcconfig
 # Environment configuration (only keep example template tracked)
 native/Config/Environments/*.xcconfig
 !native/Config/Environments/Example.xcconfig
+
+.env.mcp

@@ -23,6 +23,12 @@ public protocol DiscoveryLocationService: Sendable {
     func attachLocationMetadata(from media: DiscoveryCapturedMedia) async -> DiscoveryLocation?
     func prepareNearbyPlaces(for location: DiscoveryLocation?) async -> NearbyPlacesSelection?
     func registerMediaLocation(_ location: DiscoveryLocation) async
+    /// Debug logging helper to inspect cache content and current selection.
+    func debugLogNearbyState(current: DiscoveryLocation?) async
+    /// Returns all cached nearby places snapshots (dev/QA tooling).
+    func listNearbyCache() async -> [NearbyPlacesSnapshot]
+    /// Clears cached nearby places snapshots (dev/QA tooling).
+    func clearNearbyCache() async
 }
 
 public extension DiscoveryLocationService {
@@ -30,6 +36,9 @@ public extension DiscoveryLocationService {
     func currentLocation(requireFresh: Bool) async -> DiscoveryLocation? {
         await currentLocation()
     }
+    func debugLogNearbyState(current _: DiscoveryLocation?) async {}
+    func listNearbyCache() async -> [NearbyPlacesSnapshot] { [] }
+    func clearNearbyCache() async {}
 }
 
 public protocol DiscoveryCreditsRepository: Sendable {

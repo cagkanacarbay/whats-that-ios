@@ -329,6 +329,16 @@ private final class StubLocationService: DiscoveryLocationService {
         resolvedLocation
     }
 
+    func currentLocationIfRecent(maxAge: TimeInterval, maxAccuracyMeters: Double) async -> DiscoveryLocation? {
+        // Test stub: treat provided location as always recent/accurate if present
+        resolvedLocation
+    }
+
+    func currentLocationStrictFreshEphemeral(timeout: TimeInterval) async -> DiscoveryLocation? {
+        // Test stub: return the same stubbed location immediately
+        resolvedLocation
+    }
+
     func attachLocationMetadata(from media: DiscoveryCapturedMedia) async -> DiscoveryLocation? {
         resolvedLocation ?? media.location
     }

@@ -83,6 +83,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var currentMedia: DiscoveryCapturedMedia?
     private var analysisTask: Task<Void, Never>?
     private var freshLocationForAnalysis: DiscoveryLocation?
+    private var ephemeralFreshTask: Task<Void, Never>?
+    private var ephemeralFreshInFlight = false
 
     var flowType: DiscoveryCreationFlowType {
         configuration.type
@@ -123,6 +125,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         debugLog("cancelFlow()")
         analysisTask?.cancel()
         analysisTask = nil
+        ephemeralFreshTask?.cancel()
+        ephemeralFreshTask = nil
+        ephemeralFreshInFlight = false
         confirmationState = nil
         analysisState = nil
         currentMedia = nil
@@ -138,6 +143,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     func beginAnalysis() {
         debugLog("beginAnalysis()")
+        // Once analysis begins, we don't block on ephemeral location.
+        ephemeralFreshTask?.cancel()
+        ephemeralFreshTask = nil
         guard case let .confirming(state) = flowState else { return }
         guard let media = currentMedia else {
             error = .captureFailed
@@ -203,22 +211,43 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 flowState = .error(message: FlowError.permissionDenied.errorDescription ?? "Permission denied")
                 return
             }
-            // Begin location updates as soon as camera flow starts to minimize time to first fix.
-            debugLog("Camera permission granted; starting location tracking")
-            await locationService.startTrackingIfNeeded()
-            // Also proactively request a fresh location fix now (fire-and-forget),
-            // so that by the time we reach confirmation we likely have a recent fix.
-            // Store it for analysis if available.
-            Task { [weak self] in
+            // Do not (re)start continuous tracking here; app-wide tracking handles it.
+            // We rely on a single ephemeral strict-fresh request instead.
+            // Start a single ephemeral, high-accuracy fresh request that can run up to 30s in the background.
+            // Do not block UI on this; use last-known immediately where possible.
+            ephemeralFreshInFlight = true
+            ephemeralFreshTask?.cancel()
+            ephemeralFreshTask = Task { [weak self] in
                 guard let self else { return }
-                self.debugLog("Prefetching fresh location at camera start")
-                var fresh: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
-                if fresh == nil {
-                    fresh = await self.locationService.currentLocation()
-                }
-                if let fresh {
-                    self.freshLocationForAnalysis = fresh
-                    print("[Prefetch][FreshForAnalysis] lat=\(fresh.latitude), lon=\(fresh.longitude)")
+                self.debugLog("Ephemeral fresh location request (30s) started")
+                let fresh = await self.locationService.currentLocationStrictFreshEphemeral(timeout: 30)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.ephemeralFreshInFlight = false
+                    if let fresh {
+                        self.freshLocationForAnalysis = fresh
+                        print("[Prefetch][EphemeralFresh] lat=\(fresh.latitude), lon=\(fresh.longitude)")
+                        // If we are still on confirm, update coordinates without blocking.
+                        if let existing = self.confirmationState {
+                            let description = Self.makeLocationDescription(from: fresh)
+                            self.confirmationState = DiscoveryConfirmationState(
+                                media: existing.media,
+                                displayImageData: existing.displayImageData,
+                                creditBalance: existing.creditBalance,
+                                location: fresh,
+                                locationDescription: description,
+                                isLocationPermissionGranted: existing.isLocationPermissionGranted,
+                                isResolvingLocation: false,
+                                customContext: existing.customContext,
+                                nearbyPlaces: existing.nearbyPlaces,
+                                nearbyPlacesContext: existing.nearbyPlacesContext
+                            )
+                            if case .confirming = self.flowState, let state = self.confirmationState {
+                                self.flowState = .confirming(state)
+                            }
+                        }
+                    }
                 }
             }
             flowState = retake ? .capturingRetake : .capturingInitial
@@ -306,19 +335,18 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 flowState = .confirming(state)
             }
 
-            // Resolve location and nearby places in background.
+            // Resolve location and nearby places in background using a single ephemeral fresh request.
             Task { [weak self] in
                 guard let self else { return }
-                await self.locationService.startTrackingIfNeeded()
-                var resolved: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
-                if resolved == nil {
-                    resolved = await self.locationService.currentLocation()
-                }
-                guard let coords = resolved else { return }
-
-                let description = Self.makeLocationDescription(from: coords)
+                self.ephemeralFreshTask?.cancel()
+                self.ephemeralFreshInFlight = true
+                let resolved = await self.locationService.currentLocationStrictFreshEphemeral(timeout: 30)
+                guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self else { return }
+                    self.ephemeralFreshInFlight = false
+                    guard let coords = resolved else { return }
+                    let description = Self.makeLocationDescription(from: coords)
                     if let existing = self.confirmationState {
                         self.confirmationState = DiscoveryConfirmationState(
                             media: existing.media,
@@ -338,8 +366,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     }
                 }
 
-                // Prepare nearby places after coordinates are available.
-                if let selection = await self.locationService.prepareNearbyPlaces(for: coords) {
+                if let coords = resolved, let selection = await self.locationService.prepareNearbyPlaces(for: coords) {
                     await MainActor.run { [weak self] in
                         guard let self else { return }
                         if let existing = self.confirmationState {
@@ -378,21 +405,30 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
         // Seed initial state based on flow type:
         // - uploads use EXIF immediately
-        // - camera uses any last-known location immediately (no spinner), and fetches fresh in background
+        // - camera prefers ephemeral fresh (if already available), otherwise last-known if recent/accurate
         let initialLocation: DiscoveryLocation?
         switch flowType {
         case .upload:
             initialLocation = media.location
         case .camera:
-            // Show spinner while resolving on confirm; do not set a location yet.
-            initialLocation = nil
+            // Prefer the already-fetched ephemeral fresh if it arrived before confirm.
+            if let fresh = freshLocationForAnalysis {
+                initialLocation = fresh
+            } else {
+                // Try to use a recent last-known fix to avoid spinner.
+                initialLocation = await locationService.currentLocationIfRecent(maxAge: 30, maxAccuracyMeters: 65)
+            }
         }
         if let initialLocation {
             switch flowType {
             case .upload:
                 print("[Confirm] Using EXIF coordinates for upload: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
             case .camera:
-                print("[Confirm] Using last-known coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
+                if freshLocationForAnalysis != nil {
+                    print("[Confirm] Using ephemeral coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
+                } else {
+                    print("[Confirm] Using last-known coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
+                }
             }
         }
         let initialResolving: Bool = (flowType == .camera) && permissionNow && (initialLocation == nil)
@@ -427,40 +463,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
 
         // Confirm-stage: resolve a fresh location (shows spinner while pending)
-        if flowType == .camera {
-            Task { [weak self] in
-                guard let self else { return }
-                self.debugLog("Resolving camera location: requesting fresh fix")
-                var resolved: DiscoveryLocation? = await self.locationService.currentLocation(requireFresh: true)
-                if resolved == nil {
-                    self.debugLog("Fresh fix unavailable; falling back to last-known for confirm")
-                    resolved = await self.locationService.currentLocation()
-                }
-                guard let resolved else { return }
-                let description = Self.makeLocationDescription(from: resolved)
-                print("[Confirm] Camera coordinates resolved: lat=\(resolved.latitude), lon=\(resolved.longitude)")
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    if let current = self.confirmationState {
-                        self.confirmationState = DiscoveryConfirmationState(
-                            media: current.media,
-                            displayImageData: current.displayImageData,
-                            creditBalance: current.creditBalance,
-                            location: resolved,
-                            locationDescription: description,
-                            isLocationPermissionGranted: current.isLocationPermissionGranted,
-                            isResolvingLocation: false,
-                            customContext: current.customContext,
-                            nearbyPlaces: current.nearbyPlaces,
-                            nearbyPlacesContext: current.nearbyPlacesContext
-                        )
-                        if case .confirming = self.flowState, let state = self.confirmationState {
-                            self.flowState = .confirming(state)
-                        }
-                    }
-                }
-            }
-        }
+        // For camera flow: do not issue an additional fresh request here; rely on the single
+        // ephemeral request started at camera start. It will update confirmation when it arrives.
 
         // Kick off nearby-places using the initial seed location only; do not refetch after fresh fix arrives.
         if let seed = initialLocation {

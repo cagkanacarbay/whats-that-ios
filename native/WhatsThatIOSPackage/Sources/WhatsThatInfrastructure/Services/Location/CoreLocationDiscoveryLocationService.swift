@@ -10,6 +10,7 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
     private var lastLocation: CLLocation?
     private var isUpdating = false
     private var pendingContinuations: [UUID: CheckedContinuation<DiscoveryLocation?, Never>] = [:]
+    private var ephemeralFetchers: [UUID: EphemeralFetcher] = [:]
 
     private let config: NearbyPlacesConfig
     private let cacheStore: NearbyPlacesCacheStore
@@ -44,6 +45,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         manager.distanceFilter = configuration.locationDistanceFilterMeters
         manager.pausesLocationUpdatesAutomatically = true
 
+        // Minimal diagnostics to avoid heavy Core Location property reads on main thread
+        #if DEBUG
+        self.log("init(mainThread=\(Thread.isMainThread)) desired=\(manager.desiredAccuracy) distanceFilter=\(manager.distanceFilter) pauses=\(manager.pausesLocationUpdatesAutomatically)")
+        #endif
+
         // verbose init logging removed
     }
 
@@ -58,6 +64,9 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     await self.requestAuthorizationIfNeeded()
                     self.locationManager.desiredAccuracy = self.config.locationDesiredAccuracyMeters
                     self.locationManager.distanceFilter = self.config.locationDistanceFilterMeters
+                    #if DEBUG
+                    self.log("startTrackingIfNeeded(configured) desired=\(self.locationManager.desiredAccuracy) distanceFilter=\(self.locationManager.distanceFilter) pauses=\(self.locationManager.pausesLocationUpdatesAutomatically)")
+                    #endif
                     continuation.resume()
                 }
             }
@@ -66,6 +75,9 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         queue.async { [weak self] in
             guard let self, !self.isUpdating else { return }
             self.isUpdating = true
+            #if DEBUG
+            self.log("startUpdatingLocation() isUpdating=true")
+            #endif
             Task { @MainActor in self.locationManager.startUpdatingLocation() }
         }
     }
@@ -74,6 +86,9 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         queue.async { [weak self] in
             guard let self else { return }
             self.isUpdating = false
+            #if DEBUG
+            self.log("stopUpdatingLocation() isUpdating=false")
+            #endif
             Task { @MainActor in self.locationManager.stopUpdatingLocation() }
         }
     }
@@ -91,14 +106,29 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     continuation.resume(returning: discoveryLocation)
                 } else {
                     let id = UUID()
+                    #if DEBUG
+                    self.log("currentLocation(requireFresh=false) queueing continuation id=\(id.uuidString) pending_before=\(self.pendingContinuations.count)")
+                    #endif
                     self.pendingContinuations[id] = continuation
                     Task { @MainActor in
                         await self.requestAuthorizationIfNeeded()
-                        self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation()")
+                        self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation() pending=\(self.pendingContinuations.count)")
                         self.locationManager.requestLocation()
                     }
                 }
             }
+        }
+    }
+
+    public func currentLocationIfRecent(maxAge: TimeInterval, maxAccuracyMeters: Double) async -> DiscoveryLocation? {
+        return queue.sync { [weak self] in
+            guard let self, let last = self.lastLocation else { return nil }
+            let age = Date().timeIntervalSince(last.timestamp)
+            let accuracy = max(last.horizontalAccuracy, 0)
+            if age <= maxAge, accuracy <= maxAccuracyMeters {
+                return self.makeImmediateDiscoveryLocation(from: last)
+            }
+            return nil
         }
     }
 
@@ -139,11 +169,14 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                 }
 
                 let id = UUID()
+                #if DEBUG
+                self.log("currentLocation(requireFresh=true) queueing continuation id=\(id.uuidString) pending_before=\(self.pendingContinuations.count) isUpdating=\(self.isUpdating)")
+                #endif
                 self.pendingContinuations[id] = continuation
                 // Kick off a request for a fresh one-shot location
                 Task { @MainActor in
                     await self.requestAuthorizationIfNeeded()
-                    self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation()")
+                    self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation() pending=\(self.pendingContinuations.count)")
                     self.locationManager.requestLocation()
                 }
                 // Add a timeout fallback to prevent indefinite hangs
@@ -151,6 +184,9 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                 Task.detached { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                     guard let self else { return }
+                    #if DEBUG
+                    self.log("[FF_EVENT] TIMEOUT_CHECK id=\(id.uuidString) pending_now=\(self.pendingContinuations[id] != nil) total_pending=\(self.pendingContinuations.count)")
+                    #endif
                     self.queue.async { [weak self] in
                         guard let self else { return }
                         if let pending = self.pendingContinuations.removeValue(forKey: id) {
@@ -164,6 +200,31 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    public func currentLocationStrictFreshEphemeral(timeout: TimeInterval = 30.0) async -> DiscoveryLocation? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<DiscoveryLocation?, Never>) in
+            Task { @MainActor in
+                let id = UUID()
+                let fetcher = EphemeralFetcher(id: id, timeout: timeout) { [weak self] result in
+                    guard let self else { return }
+                    self.queue.async { [weak self] in
+                        guard let self else { return }
+                        _ = self.ephemeralFetchers.removeValue(forKey: id)
+                    }
+                    switch result {
+                    case .success(let location):
+                        continuation.resume(returning: self.makeImmediateDiscoveryLocation(from: location))
+                    case .failure:
+                        continuation.resume(returning: nil)
+                    }
+                }
+                fetcher.start()
+                self.queue.async { [weak self] in
+                    self?.ephemeralFetchers[id] = fetcher
                 }
             }
         }
@@ -322,7 +383,16 @@ extension CoreLocationDiscoveryLocationService: CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // Swallow errors; currentLocation will handle fallback.
+        // Log error details for diagnostics; currentLocation handles fallback/timeout.
+        let nsError = error as NSError
+        var codeDescription = "code=\(nsError.code)"
+        if nsError.domain == (kCLErrorDomain as String) {
+            if let clCode = CLError.Code(rawValue: nsError.code) {
+                codeDescription = "code=\(clCode.rawValue) (\(clCode))"
+            }
+        }
+        self.log("[FF_EVENT] REQUEST_FAILED domain=\(nsError.domain) \(codeDescription) localized=\(nsError.localizedDescription)")
+        // Intentionally do not retry here; we're only increasing visibility to understand why fresh fixes fail
     }
 }
 #endif
@@ -345,6 +415,84 @@ extension CoreLocationDiscoveryLocationService {
         #if DEBUG
         print("[LocationService] \(message)")
         #endif
+    }
+}
+#endif
+
+#if canImport(CoreLocation)
+private final class EphemeralFetcher: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+    private let id: UUID
+    private let timeout: TimeInterval
+    private let completion: (Result<CLLocation, Error>) -> Void
+    private let manager: CLLocationManager
+    private var finished = false
+
+    init(id: UUID, timeout: TimeInterval, completion: @escaping (Result<CLLocation, Error>) -> Void) {
+        self.id = id
+        self.timeout = timeout
+        self.completion = completion
+        self.manager = CLLocationManager()
+        super.init()
+
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = kCLDistanceFilterNone
+        manager.pausesLocationUpdatesAutomatically = false
+        if #available(iOS 11.0, *) {
+            manager.showsBackgroundLocationIndicator = false
+        }
+    }
+
+    func start() {
+        // If permission undetermined, request it; otherwise request a one-shot fix
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        default:
+            manager.requestLocation()
+        }
+
+        // Timeout guard
+        Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(self.timeout * 1_000_000_000))
+            self.finish(nil)
+        }
+    }
+
+    private func finish(_ location: CLLocation?) {
+        guard !finished else { return }
+        finished = true
+        if let location {
+            completion(.success(location))
+        } else {
+            completion(.failure(NSError(domain: "EphemeralFetcher", code: -1)))
+        }
+    }
+
+    // MARK: - CLLocationManagerDelegate
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        default:
+            break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        if let last = locations.last {
+            finish(last)
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Do not finish immediately on unknown errors; allow timeout to give the system a chance.
+        let nsError = error as NSError
+        if nsError.domain == kCLErrorDomain as String, nsError.code == CLError.locationUnknown.rawValue {
+            return
+        }
+        finish(nil)
     }
 }
 #endif

@@ -16,10 +16,15 @@ public protocol DiscoveryLocationService: Sendable {
     func startTrackingIfNeeded() async
     func stopTracking()
     func currentLocation() async -> DiscoveryLocation?
+    /// Returns a last-known location only if it is recent and accurate per thresholds.
+    func currentLocationIfRecent(maxAge: TimeInterval, maxAccuracyMeters: Double) async -> DiscoveryLocation?
     /// Returns app-level location permission status.
     func isPermissionGranted() async -> Bool
     /// Optionally request a fresh location fix, avoiding immediate last-known returns when true.
     func currentLocation(requireFresh: Bool) async -> DiscoveryLocation?
+    /// Requests a fresh, high-accuracy fix using a short-lived, dedicated CLLocationManager.
+    /// Returns when a new sample arrives or the timeout elapses. Does not block UI flow.
+    func currentLocationStrictFreshEphemeral(timeout: TimeInterval) async -> DiscoveryLocation?
     func attachLocationMetadata(from media: DiscoveryCapturedMedia) async -> DiscoveryLocation?
     func prepareNearbyPlaces(for location: DiscoveryLocation?) async -> NearbyPlacesSelection?
     func registerMediaLocation(_ location: DiscoveryLocation) async
@@ -33,9 +38,11 @@ public protocol DiscoveryLocationService: Sendable {
 
 public extension DiscoveryLocationService {
     func isPermissionGranted() async -> Bool { false }
+    func currentLocationIfRecent(maxAge _: TimeInterval, maxAccuracyMeters _: Double) async -> DiscoveryLocation? { nil }
     func currentLocation(requireFresh: Bool) async -> DiscoveryLocation? {
         await currentLocation()
     }
+    func currentLocationStrictFreshEphemeral(timeout _: TimeInterval) async -> DiscoveryLocation? { nil }
     func debugLogNearbyState(current _: DiscoveryLocation?) async {}
     func listNearbyCache() async -> [NearbyPlacesSnapshot] { [] }
     func clearNearbyCache() async {}

@@ -79,6 +79,12 @@ USE_REMOTE_DEPS=1 xcodebuild \
 - Populate the placeholders `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`, and `GOOGLE_REVERSED_CLIENT_ID` in `Config/Shared.xcconfig` (and override in Debug/Release files as needed); missing values will cause the app to terminate during startup.
 - Remember to build with `USE_REMOTE_DEPS=1` (e.g., scheme environment variable or command line) whenever you need Supabase/Google Sign-In packages compiled into the binary.
 
+### Deep Linking
+- The app registers a custom URL scheme `whatsthat://` (see `Config/AppInfo.plist`).
+- Example website link to open the app: `<a href="whatsthat://open">Open in app</a>`.
+- You can pass simple paths, e.g. `whatsthat://share/<uuid>`; the app will launch and receive the URL via `.onOpenURL`.
+- Universal Links (`https://whats-that.app/...`) are also forwarded via `NSUserActivityTypeBrowsingWeb`.
+
 ### Test Structure
 - **Unit Tests**: Module-specific folders under `WhatsThatIOSPackage/Tests/` (XCTest today)
 - **UI Tests**: `WhatsThatIOSUITests/` (XCUITest framework)

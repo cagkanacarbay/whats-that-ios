@@ -50,7 +50,6 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         self.log("init(mainThread=\(Thread.isMainThread)) desired=\(manager.desiredAccuracy) distanceFilter=\(manager.distanceFilter) pauses=\(manager.pausesLocationUpdatesAutomatically)")
         #endif
 
-        // verbose init logging removed
     }
 
     public func startTrackingIfNeeded() async {

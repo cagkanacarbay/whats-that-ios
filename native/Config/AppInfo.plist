@@ -42,10 +42,18 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.example.whatsthatios.google</string>
+			<string>app.whatsthat.google</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.whatsthat.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>whatsthat</string>
 			</array>
 		</dict>
 	</array>

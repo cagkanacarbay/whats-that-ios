@@ -5,11 +5,16 @@ import WhatsThatShared
 struct DiscoveriesGridView: View {
     @ObservedObject var viewModel: DiscoveryFeedViewModel
     let availableWidth: CGFloat
+    // Used to center empty state vertically
+    var availableHeight: CGFloat? = nil
     let cardSpacing: CGFloat
     @Binding var cardFrames: [Int64: CGRect]
     let activeDiscoveryId: Int64?
     let onLoadMore: (DiscoverySummary) async -> Void
     let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
+    // Empty-state quick actions
+    var onTapCamera: (() -> Void)? = nil
+    var onTapUpload: (() -> Void)? = nil
 
     private var gridColumns: [GridItem] {
         [
@@ -33,7 +38,7 @@ struct DiscoveriesGridView: View {
             if viewModel.isRefreshing {
                 skeletonGrid
             } else {
-                EmptyDiscoveriesView()
+                EmptyDiscoveriesView(onCamera: onTapCamera, onUpload: onTapUpload, minHeight: availableHeight)
             }
         case .loading:
             skeletonGrid
@@ -46,7 +51,7 @@ struct DiscoveriesGridView: View {
             )
         case .loaded, .idle:
             if viewModel.discoveries.isEmpty {
-                EmptyDiscoveriesView()
+                EmptyDiscoveriesView(onCamera: onTapCamera, onUpload: onTapUpload, minHeight: availableHeight)
             } else {
                 gridContent
             }

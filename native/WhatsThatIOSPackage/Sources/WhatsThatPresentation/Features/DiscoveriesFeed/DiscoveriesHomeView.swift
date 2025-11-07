@@ -20,6 +20,8 @@ struct DiscoveriesHomeView: View {
     @Binding private var pendingCreatedSummary: DiscoverySummary?
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
+    private let onQuickCamera: (() -> Void)?
+    private let onQuickUpload: (() -> Void)?
 
     @StateObject private var viewModel: DiscoveryFeedViewModel
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
@@ -53,7 +55,9 @@ struct DiscoveriesHomeView: View {
         pendingDiscoveryId: Binding<Int64?>,
         pendingCreatedSummary: Binding<DiscoverySummary?>,
         onSignOut: @escaping () -> Void,
-        onSettings: (() -> Void)? = nil
+        onSettings: (() -> Void)? = nil,
+        onQuickCamera: (() -> Void)? = nil,
+        onQuickUpload: (() -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -62,6 +66,8 @@ struct DiscoveriesHomeView: View {
         self._pendingCreatedSummary = pendingCreatedSummary
         self.onSignOut = onSignOut
         self.onSettings = onSettings
+        self.onQuickCamera = onQuickCamera
+        self.onQuickUpload = onQuickUpload
         _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
         _detailCoordinator = StateObject(
             wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
@@ -77,6 +83,11 @@ struct DiscoveriesHomeView: View {
             let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
             let contentWidth = max(gridAvailableWidth - (gridHorizontalPadding * 2), 0)
             let metrics = headerMetrics
+            // Height available for grid content below the header & its padding
+            let contentHeight = max(
+                proxy.size.height - metrics.headerSpacerHeight - metrics.gridTopPadding - gridBottomPadding,
+                0
+            )
 
             ZStack(alignment: .top) {
                 backgroundColor
@@ -89,6 +100,7 @@ struct DiscoveriesHomeView: View {
                         DiscoveriesGridView(
                             viewModel: viewModel,
                             availableWidth: contentWidth,
+                            availableHeight: contentHeight,
                             cardSpacing: gridSpacing,
                             cardFrames: $cardFrames,
                             activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
@@ -101,7 +113,9 @@ struct DiscoveriesHomeView: View {
                                     imageURL: imageURL,
                                     startFrame: frame
                                 )
-                            }
+                            },
+                            onTapCamera: onQuickCamera,
+                            onTapUpload: onQuickUpload
                         )
                         .padding(.horizontal, gridHorizontalPadding)
                         .padding(.bottom, gridBottomPadding)

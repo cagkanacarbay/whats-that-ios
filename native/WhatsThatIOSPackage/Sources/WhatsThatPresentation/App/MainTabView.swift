@@ -69,7 +69,9 @@ struct MainTabView: View {
                     pendingDiscoveryId: $pendingDiscoveryId,
                     pendingCreatedSummary: $pendingCreatedSummary,
                     onSignOut: onSignOut,
-                    onSettings: onSettings
+                    onSettings: onSettings,
+                    onQuickCamera: { selectedTab = .camera },
+                    onQuickUpload: { selectedTab = .upload }
                 )
                 .id(feedRefreshToken)
                 .tag(Tab.discoveries)
@@ -91,14 +93,14 @@ struct MainTabView: View {
 
                 DiscoveryCreationFlowView(
                     viewModel: uploadViewModel,
-                    placeholderEmoji: "📤",
-                    ctaTitle: "Upload a photo to analyze",
+                    placeholderEmoji: "🖼️",
+                    ctaTitle: "Choose a photo from your gallery",
                     retryTitle: "Select again",
                     makeCreditsViewModel: makeCreditsViewModel
                 )
                 .tag(Tab.upload)
                 .tabItem {
-                    Label("Upload", systemImage: "square.and.arrow.up")
+                    Label("Gallery", systemImage: "photo.on.rectangle")
                 }
             }
         
@@ -108,8 +110,8 @@ struct MainTabView: View {
             {
                 DiscoveryCreationFlowView(
                     viewModel: overlayViewModel,
-                    placeholderEmoji: overlayTab == .camera ? "📷" : "📤",
-                    ctaTitle: overlayTab == .camera ? "Take a photo to discover" : "Upload a photo to analyze",
+                    placeholderEmoji: overlayTab == .camera ? "📷" : "🖼️",
+                    ctaTitle: overlayTab == .camera ? "Take a photo to discover" : "Choose a photo from your gallery",
                     retryTitle: overlayTab == .camera ? "Try again" : "Select again",
                     makeCreditsViewModel: makeCreditsViewModel
                 )

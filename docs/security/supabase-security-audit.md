@@ -23,6 +23,41 @@ Status Update (2025-11-06)
   - No app code changes required; function signatures and return shapes preserved.
   - Grants aligned to callers: `authenticated` (user-token RPCs) vs `service_role` (backend-only).
 
+Status Update (2025-11-07)
+- GraphQL exposure removed in Cloud: `graphql_public` removed from Dashboard → API → Exposed schemas (REST no longer exposes GraphQL RPC).
+- Repo aligned for local: `supabase/config.toml:11` now `schemas = ["public"]`.
+- Function config aligned in repo: added `[functions.ask-ai-v7] (verify_jwt=true)`, `[functions.nearby-places] (verify_jwt=true)`, `[functions.shared-discovery] (verify_jwt=false)`, `[functions.validate-receipt] (verify_jwt=true)`.
+- Verification: `/rest/v1/rpc/graphql` returns 404 (local and Cloud). `/graphql/v1` may still exist (extension present) — expected.
+
+Status Update (2025-11-08)
+- Removed over-broad INSERT policies on `public.discoveries` to enforce Edge-only inserts.
+  - Migration: `20251108_drop_discoveries_insert_policies.sql`
+  - Dropped policies:
+    - "Enable insert for authenticated users only" (with_check=true)
+    - "Enable insert for users based on user_id" (with_check: auth.uid() = user_id)
+- Rationale: All valid inserts originate from Edge Function `ask-ai-v7` using `service_role`, which bypasses RLS. Removing table-level INSERT policies closes an unnecessary write surface via PostgREST.
+- Verification:
+  - POST to `/rest/v1/discoveries` as anon/authenticated → denied (401/403).
+  - Edge Function `ask-ai-v7` insert via `service_role` → succeeds.
+- Migration hygiene note: a prior `db push` error (duplicate key on `schema_migrations.version`) was caused by two migrations sharing the same version prefix (`20251107_*`). Resolved by issuing the new migration with a unique version timestamp (`20251108_*`).
+
+Discoveries INSERT Policies (Current Findings)
+(Remediated on 2025-11-08 — see Status Update above)
+- Live policies on `public.discoveries` (queried via Advisors/SQL):
+  - INSERT (polcmd=a): "Enable insert for authenticated users only" — roles: authenticated; with_check: true (unconditional allow for any row)
+  - INSERT (polcmd=a): "Enable insert for users based on user_id" — roles: PUBLIC; with_check: (auth.uid() = user_id)
+  - SELECT: "Enable users to view their own data only" — roles: authenticated; using: (auth.uid() = user_id)
+  - DELETE: "Enable delete for users based on user_id" — roles: PUBLIC; using: (auth.uid() = user_id)
+
+- Risk and impact
+  - Because RLS policies are OR’d, the unconditional INSERT policy to `authenticated` makes the table writable by any logged-in user regardless of `user_id`. The stricter PUBLIC policy is effectively bypassed for authenticated users.
+  - App path check: code search shows the only legitimate insertion is in Edge Function `ask-ai-v7` using `supabaseAdmin` (service_role), which bypasses RLS; client code does not perform table INSERTs. Recent API logs show RPC/table reads and storage usage, but no POST to `/rest/v1/discoveries` within the observed window.
+
+- Recommended remediation
+  - Drop both existing INSERT policies on `public.discoveries` to eliminate direct table INSERTs via REST. Keep INSERTs exclusively through the Edge Function (service_role).
+  - Optionally re-introduce a single, least-privilege INSERT policy later if client-side INSERT is needed, scoped to `authenticated` with `WITH CHECK (auth.uid() = user_id)`.
+  - Verify after change: anon/ authenticated POST to `/rest/v1/discoveries` should fail; Edge Function insert continues to work.
+
 Decision Log
 - Public sharing endpoint (shared‑discovery)
   - Decision: Keep current design (public link semantics, origin allowlist for browsers, no IP throttling, no token expiry). Links remain always available until the user deletes the discovery.
@@ -33,7 +68,7 @@ Executive Summary
 - Critical
   - Enable RLS on public.nearby_places_rate_limits or ensure it is truly private. Advisors flagged: “RLS Disabled in Public”.
   - Pin function search_path and fully-qualify objects for all SECURITY DEFINER functions (advisor: function_search_path_mutable). Prevents search_path hijacking.
-  - Confirm Postgres upgrades (advisory: supabase-postgres-15.8.1.121 has available security patches). Schedule DB upgrade.
+  - Completed: Postgres minor upgrade applied in Cloud; keep regular upgrade cadence.
 - High
   - Enable leaked password protection in Supabase Auth (HaveIBeenPwned check).
   - Validate Edge Functions’ verify_jwt settings: shared-discovery intentionally public; others should remain verify_jwt = true.
@@ -48,7 +83,7 @@ Evidence (Automated Checks)
   - 0011_function_search_path_mutable WARN: public functions with mutable search_path: add_credits_after_validation, consume_credit_for_discovery, enforce_nearby_places_rate_limit, get_discoveries_with_location, get_discovery_analysis, grant_initial_credits, refund_credit.
   - 0013_rls_disabled_in_public ERROR: Table public.nearby_places_rate_limits has RLS disabled.
   - Auth leaked password protection WARN: Feature disabled.
-  - Postgres version WARN: Security patches available for current version; upgrade recommended.
+- Postgres version WARN: Resolved by upgrading to latest patched minor.
 - Tables with RLS (sample):
   - Enabled: public.discoveries, public.credit_transactions, public.user_credits, storage.objects, storage.buckets (and many auth tables)
   - Disabled: public.nearby_places_rate_limits (flagged)
@@ -174,7 +209,9 @@ Pre‑Production Checklist (Actionable)
   - [ ] Pin search_path on all SECURITY DEFINER functions and fully‑qualify object references.
   - [ ] Re‑audit policies: avoid role public where authenticated suffices; ensure no anon EXECUTE on mutating RPCs.
   - [ ] Schedule Postgres upgrade to latest patched minor version.
-  - [ ] If GraphQL not needed, remove graphql_public from config.toml [api].schemas.
+  - [x] If GraphQL not needed, remove graphql_public from API exposure.
+    - Cloud: Removed from Dashboard → API → Exposed schemas.
+    - Local: `supabase/config.toml:11` now `schemas = ["public"]`.
 
 - Edge Functions
   - [ ] Ensure verify_jwt = true for ask-ai-v7, nearby-places, validate-receipt; verify_jwt = false only for shared-discovery.
@@ -226,9 +263,9 @@ Implementation Status Checklist
   - [x] Pin search_path for all remaining SECURITY DEFINER functions (add_credits_after_validation, consume_credit_for_discovery, get_discoveries_with_location, get_discovery_analysis, grant_initial_credits, refund_credit)
     - Verified working: get_discoveries_with_location, add_credits_after_validation, consume_credit_for_discovery
     - [ ] Verify working: refund_credit (failure path refund), grant_initial_credits (starter credits idempotency), get_discovery_analysis (owner/admin access)
-  - [ ] Simplify discoveries INSERT policies to authenticated-only with with_check (auth.uid() = user_id)
-  - [ ] Schedule Postgres upgrade to latest patched minor version
-  - [ ] Remove graphql_public from [api].schemas in config.toml if GraphQL is not required
+  - [x] Drop discoveries INSERT policies (Edge-only inserts via service_role) — Migration: 20251108_drop_discoveries_insert_policies.sql
+  - [x] Postgres upgraded to latest patched minor (Cloud)
+  - [x] Remove graphql_public from API exposure (Cloud + repo config aligned)
 
 - Edge Functions
   - [x] nearby-places uses authenticated user (anon key + Authorization header) instead of service role
@@ -246,7 +283,7 @@ Implementation Status Checklist
   - [ ] Confirm EU region and DPA with Supabase; document subprocessors
 
 - Configuration & Secrets
-  - [ ] Add explicit per-function verify_jwt blocks in supabase/config.toml for clarity
+  - [x] Add explicit per-function verify_jwt blocks in supabase/config.toml for clarity (repo updated; redeploy functions to apply in Cloud)
   - [ ] Document secret rotation procedures and incident response playbooks
 
 Deployment notes for completed items
@@ -254,3 +291,15 @@ Deployment notes for completed items
   - supabase db push
 - Redeploy the updated Edge Function:
   - supabase functions deploy nearby-places
+
+What’s Next (Security Focus)
+- Verify remaining function paths end-to-end:
+  - `refund_credit` (failed analysis refund), `grant_initial_credits` (starter credits idempotency), `get_discovery_analysis` (owner/admin access).
+- Harden `shared-discovery` public endpoint:
+  - Add per-IP throttling and request metrics; consider short-lived signed tokens or moving to verify_jwt=true behind a tiny website backend.
+- Auth hardening:
+  - Enable leaked password checks and email confirmations; plan optional MFA/TOTP for sensitive flows.
+- Data retention & privacy:
+  - Define retention for `raw_receipt_data`; implement DSAR export/delete runbooks.
+- Platform hygiene:
+  - Plan Postgres minor upgrade; run Supabase Advisors regularly; standardize unique timestamp prefixes for migrations to avoid version collisions.

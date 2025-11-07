@@ -89,6 +89,7 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
     case passwordResetLinkInvalid
     case passwordResetLinkExpired
     case passwordUpdateFailed
+    case passwordSame
     case cancelled
     case unknown
 
@@ -110,6 +111,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "Your reset link has expired. Request a new one to continue."
         case .passwordUpdateFailed:
             return "We couldn't update your password. Please try again."
+        case .passwordSame:
+            return "Your new password matches the current one. Please choose a different password."
         case .cancelled:
             return "The sign-in flow was cancelled."
         case .unknown:

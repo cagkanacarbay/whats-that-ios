@@ -329,6 +329,8 @@ public struct RootContentView: View {
             return "Link expired"
         case .passwordUpdateFailed:
             return "Update failed"
+        case .passwordSame:
+            return "Use a different password"
         case .cancelled:
             return "Sign in cancelled"
         case .unknown:
@@ -355,6 +357,8 @@ public struct RootContentView: View {
             return "Your reset link has expired. Request a new one to continue."
         case .passwordUpdateFailed:
             return "We couldn't update your password. Please try again."
+        case .passwordSame:
+            return "Your new password is the same as your current password. Please choose a different one."
         case .cancelled:
             return "This sign in was cancelled."
         case .unknown:
@@ -418,9 +422,14 @@ public struct RootContentView: View {
     }
 
     private func isPasswordResetURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "https" else { return false }
-        let path = url.path.lowercased()
-        return path.hasPrefix("/auth/reset")
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "https" {
+            let path = url.path.lowercased()
+            return path.hasPrefix("/auth/reset")
+        }
+        // Accept custom scheme deep link for password reset as well
+        if scheme == "whatsthat" { return true }
+        return false
     }
 
     private func extractPasswordResetURL(from url: URL) -> URL? {

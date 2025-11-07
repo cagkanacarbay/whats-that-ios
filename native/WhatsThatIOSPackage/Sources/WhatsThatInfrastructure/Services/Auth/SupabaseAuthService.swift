@@ -403,7 +403,7 @@ public final actor SupabaseAuthService: AuthService {
                 } else if errorCode == .reauthenticationNeeded || errorCode == .sessionNotFound {
                     return .passwordResetLinkExpired
                 } else if errorCode == .samePassword {
-                    return .passwordUpdateFailed
+                    return .passwordSame
                 }
             default:
                 break

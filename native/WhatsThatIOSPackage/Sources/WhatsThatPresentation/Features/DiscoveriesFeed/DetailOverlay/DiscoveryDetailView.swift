@@ -391,10 +391,7 @@ private struct DiscoveryDetailContentView: View {
                         }
 
                         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-                            Text(discovery.title)
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(textColor)
-
+                            // Title is already shown in the image overlay; avoid repeating here.
                             detailDescriptionView(isReady: isMarkdownReady)
                         }
                     }
@@ -442,10 +439,6 @@ private struct DiscoveryDetailContentView: View {
             scrollOffset = 0
             baselineOffset = nil
         }
-    }
-
-    private var textColor: Color {
-        palette.textPrimary
     }
 
     private var additionalBottomPadding: CGFloat { 0 }

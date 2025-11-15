@@ -252,7 +252,6 @@ serve(async (req) => {
         p_platform: 'ios',
         p_product_id: productId,
         p_store_transaction_id: storeTransactionId,
-        p_raw_receipt_data: receiptData, // Optionally store the receipt
       });
 
       if (rpcError) {

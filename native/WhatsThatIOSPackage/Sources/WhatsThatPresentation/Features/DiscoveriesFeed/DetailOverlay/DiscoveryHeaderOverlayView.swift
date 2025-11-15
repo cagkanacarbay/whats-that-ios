@@ -177,9 +177,9 @@ struct DiscoveryHeaderOverlayView: View {
                 .flatMap { $0.windows }
                 .first(where: { $0.isKeyWindow })?
                 .safeAreaInsets.top ?? 0
-            return globalInset + 12
+            return globalInset - 4
         }
-        return baseInset + 12
+        return baseInset - 4
     }
 }
 

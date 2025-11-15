@@ -19,7 +19,7 @@ The native iOS implementation will continue to use the existing Supabase backend
 
 ### `credit_transactions`
 - **Purpose:** Audit log for credit balance changes.
-- **Key Columns:** `id`, `user_id`, `amount`, `transaction_type` (`INITIAL`, `PURCHASE`, `USAGE`, `ADJUSTMENT`), `description`, `platform`, `product_id`, `store_transaction_id`, `validation_status`, `discovery_id`, `created_at`.
+- **Key Columns:** `id`, `user_id`, `amount`, `transaction_type` (`INITIAL`, `PURCHASE`, `USAGE`, `ADJUSTMENT`), `description`, `platform`, `product_id`, `store_transaction_id`, `created_at`.
 - **Clients:** Edge Function `validate-receipt`, RPCs invoked during AI runs, refund logic, potential analytics.
 
 ### `push_tokens`

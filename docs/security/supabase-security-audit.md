@@ -41,6 +41,16 @@ Status Update (2025-11-08)
   - Edge Function `ask-ai-v7` insert via `service_role` → succeeds.
 - Migration hygiene note: a prior `db push` error (duplicate key on `schema_migrations.version`) was caused by two migrations sharing the same version prefix (`20251107_*`). Resolved by issuing the new migration with a unique version timestamp (`20251108_*`).
 
+Status Update (2025-11-09)
+- Eliminated storage of raw Apple receipts (`raw_receipt_data`).
+  - Edge: `validate-receipt` no longer sends raw receipts to the DB RPC.
+  - DB: Dropped `raw_receipt_data` column from `public.credit_transactions` and updated `add_credits_after_validation` RPC to remove the parameter.
+  - Migration: `2025110901_remove_raw_receipt_data.sql`
+  - Rationale: Data minimization (GDPR) — idempotency/audit use `store_transaction_id`, `platform`, `product_id`, and `amount`; raw receipt not required post-validation.
+  - Verification: iOS sandbox purchase → credits granted; credit_transactions row created without raw receipt; no column present.
+  - Cleanup: Dropped legacy `purchase_receipt` and `discovery_id` columns (unused).
+    - Migration: `2025110902_drop_purchase_receipt_and_discovery_id.sql`
+
 Discoveries INSERT Policies (Current Findings)
 (Remediated on 2025-11-08 — see Status Update above)
 - Live policies on `public.discoveries` (queried via Advisors/SQL):
@@ -71,8 +81,8 @@ Executive Summary
   - Completed: Postgres minor upgrade applied in Cloud; keep regular upgrade cadence.
 - High
   - Enable leaked password protection in Supabase Auth (HaveIBeenPwned check).
-  - Validate Edge Functions’ verify_jwt settings: shared-discovery intentionally public; others should remain verify_jwt = true.
-  - Add rate limiting and abuse protections to public endpoints (notably shared-discovery) to reduce token brute-force risks.
+  - Validate Edge Functions’ verify_jwt settings: shared-discovery intentionally public (no rate limiting by decision); others remain verify_jwt = true.
+  - Public endpoints: shared-discovery intentionally unthrottled; monitor only. Optional website-backend gating is deferred.
 - Medium
   - Review RLS/policies for least-privilege on storage and core tables; tighten any policies that allow role public when authenticated suffices.
   - Review retention for sensitive payloads (e.g., raw Apple receipt data). Consider encrypt-at-rest and short retention.
@@ -270,7 +280,7 @@ Implementation Status Checklist
 - Edge Functions
   - [x] nearby-places uses authenticated user (anon key + Authorization header) instead of service role
   - [x] verify_jwt settings confirmed: ask-ai-v7=true, nearby-places=true, validate-receipt=true, shared-discovery=false
-  - [ ] Add rate limiting/abuse controls for shared-discovery (per-IP throttle, TTL/HMAC token)
+  - [x] Decision: No rate limiting/IP throttling for shared-discovery (intentionally public & always-on). Monitor only; see Future Considerations for optional website-backend gating.
 
 - Auth
   - [ ] Enable leaked password protection (HaveIBeenPwned)
@@ -278,8 +288,8 @@ Implementation Status Checklist
   - [ ] Verify MFA/TOTP UX for high‑risk actions
 
 - Privacy & Compliance
-  - [ ] Define retention for raw_receipt_data (delete after X days) and/or encrypt with pgsodium
-  - [ ] Implement DSAR export/delete function and operational runbook
+  - [x] Do not store raw Apple receipts (raw_receipt_data removed; Edge no longer sends)
+  - [x] DSAR handling for now: manual via email — documented in Privacy Policy and Terms; automation deferred
   - [ ] Confirm EU region and DPA with Supabase; document subprocessors
 
 - Configuration & Secrets
@@ -295,11 +305,11 @@ Deployment notes for completed items
 What’s Next (Security Focus)
 - Verify remaining function paths end-to-end:
   - `refund_credit` (failed analysis refund), `grant_initial_credits` (starter credits idempotency), `get_discovery_analysis` (owner/admin access).
-- Harden `shared-discovery` public endpoint:
-  - Add per-IP throttling and request metrics; consider short-lived signed tokens or moving to verify_jwt=true behind a tiny website backend.
+- Shared-discovery decision affirmed (no rate limiting):
+  - Keep current design (always-on, public by token, origin allowlist). Monitor volumes; optional website-backend gating is deferred and captured in Future Considerations.
 - Auth hardening:
-  - Enable leaked password checks and email confirmations; plan optional MFA/TOTP for sensitive flows.
+  - Email confirmations, leaked password checks, and MFA are deferred (not required by GDPR; use risk-based approach). Keep sessions reasonable and monitor auth anomalies.
 - Data retention & privacy:
-  - Define retention for `raw_receipt_data`; implement DSAR export/delete runbooks.
+  - With raw receipts removed, focus on DSAR (export/delete) runbooks and documenting operator steps.
 - Platform hygiene:
-  - Plan Postgres minor upgrade; run Supabase Advisors regularly; standardize unique timestamp prefixes for migrations to avoid version collisions.
+  - Run Supabase Advisors regularly; standardize unique timestamp prefixes for migrations to avoid version collisions.

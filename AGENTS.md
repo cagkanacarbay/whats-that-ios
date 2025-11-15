@@ -34,3 +34,9 @@
 ## Configuration & Secrets
 - Copy `native/Config/Environments/Example.xcconfig` to a local file (e.g., `Development.xcconfig`) and provide Supabase and Google keys.
 - Never commit secrets; rely on xcconfig overrides and launch arguments to inject environment-specific values.
+
+## Database Migrations
+- Use a date-preserving, unique version prefix: `YYYYMMDDNN_*.sql`.
+  - Example: `2025110901_remove_raw_receipt_data.sql`, `2025110902_drop_purchase_receipt_and_discovery_id.sql`.
+  - `YYYYMMDD` is the calendar date; `NN` is a 2-digit sequence for multiple migrations on the same day.
+- Rationale: Supabase uses the numeric prefix as the migration version. This scheme avoids duplicate-version collisions while keeping dates accurate.

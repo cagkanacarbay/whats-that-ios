@@ -1,5 +1,6 @@
 import SwiftUI
 import WhatsThatShared
+import UIKit
 
 struct PreOnboardingCarousel: View {
     struct Slide: Identifiable {
@@ -11,7 +12,7 @@ struct PreOnboardingCarousel: View {
 
     private let slides: [Slide] = [
         Slide(
-            title: "We give the world a voice.",
+            title: "See the world with new eyes.",
             message: "Point your camera and let the world share its stories.",
             imageName: "OnboardingIntro"
         ),
@@ -27,54 +28,56 @@ struct PreOnboardingCarousel: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let topInset: CGFloat = 0
+            let bottomInset = proxy.safeAreaInsets.bottom
+            content(width: width, topInset: topInset, bottomInset: bottomInset)
+                .frame(width: width, height: proxy.size.height)
+        }
+    }
+
+    @ViewBuilder
+    private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
+        
         VStack(spacing: BrandSpacing.large) {
-            Spacer()
 
             TabView(selection: $index) {
-                ForEach(Array(slides.enumerated()), id: \.element.id) { offset, slide in
-                    VStack(spacing: BrandSpacing.large) {
-                        Image(slide.imageName)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 260)
-                            .accessibilityHidden(false)
-
-                        VStack(spacing: BrandSpacing.small) {
-                            Text(slide.title)
-                                .font(.system(size: 28, weight: .bold))
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(titleColor)
-                            Text(slide.message)
-                                .font(.system(size: 17, weight: .medium))
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(bodyColor)
-                                .padding(.horizontal)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .tag(offset)
+                ForEach(slides.indices, id: \.self) { idx in
+                    SlidePage(
+                        slide: slides[idx],
+                        titleColor: titleColor,
+                        bodyColor: bodyColor,
+                        containerWidth: width,
+                        topInset: topInset
+                    )
+                    .tag(idx)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 420)
+            // Respect the safe area so the image aligns with the notch.
+            // Do not extend under the status bar/notch for pre-onboarding visuals.
+            .frame(width: width)
+            .ignoresSafeArea(edges: .top)
 
-            PageIndicators(count: slides.count, currentIndex: index)
+            // Page indicator + actions tightly grouped
+            Spacer(minLength: BrandSpacing.small)
+            VStack(spacing: BrandSpacing.small) {
+                PageIndicators(count: slides.count, currentIndex: index)
 
-            if index == slides.count - 1 {
-                BrandPrimaryButton(title: "Get Started", action: onContinue)
-            } else {
-                HStack(spacing: BrandSpacing.medium) {
-                    BrandSecondaryButton(title: "Skip") {
-                        onContinue()
+                if index == slides.count - 1 {
+                    BrandPrimaryButton(title: "Get Started", action: onContinue)
+                        .padding(.horizontal, BrandSpacing.large)
+                } else {
+                    HStack(spacing: BrandSpacing.medium) {
+                        BrandSecondaryButton(title: "Skip") { onContinue() }
+                        BrandPrimaryButton(title: "Next") { withAnimation { index += 1 } }
                     }
-                    BrandPrimaryButton(title: "Next") {
-                        withAnimation { index += 1 }
-                    }
+                    .padding(.horizontal, BrandSpacing.large)
                 }
             }
-            Spacer()
+            .padding(.bottom, bottomInset + BrandSpacing.small)
         }
-        .padding(.top, BrandSpacing.large)
     }
 
     private var titleColor: Color {
@@ -83,6 +86,55 @@ struct PreOnboardingCarousel: View {
 
     private var bodyColor: Color {
         colorScheme == .dark ? BrandColors.Dark.bodyText : BrandColors.Light.bodyText
+    }
+}
+
+// MARK: - Slide Page Subview (helps compiler type-check and keeps layout simple)
+
+private struct SlidePage: View {
+    let slide: PreOnboardingCarousel.Slide
+    let titleColor: Color
+    let bodyColor: Color
+    let containerWidth: CGFloat
+    let topInset: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+
+            let imageHeight = containerWidth * 1.5 // 2:3 (w:h) -> h = w * 3/2
+            let epsilon: CGFloat = 1.0 / max(UIScreen.main.scale, 1)
+            // Expand the container slightly (topInset + epsilon) so the overlay isn't clipped
+            // and offset upwards by the same amount to eliminate any top sliver at all scales.
+            Color.clear
+                .frame(width: containerWidth, height: imageHeight + topInset + epsilon)
+                .overlay(alignment: .top) {
+                    Image(slide.imageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: containerWidth, height: imageHeight + topInset + epsilon, alignment: .top)
+                        .offset(y: -(topInset + epsilon))
+                        .ignoresSafeArea(edges: .top)
+                        .accessibilityHidden(false)
+                }
+                
+            VStack(spacing: BrandSpacing.small) {
+                Text(slide.title)
+                    .font(.system(size: 28, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(titleColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, BrandSpacing.large)
+                Text(slide.message)
+                    .font(.system(size: 17, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(bodyColor)
+                    .padding(.horizontal, BrandSpacing.large)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // .padding(.top, BrandSpacing.small)
+        }
+        .frame(width: containerWidth)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -111,3 +163,16 @@ private struct PageIndicators: View {
     }
 }
 
+// MARK: - Helpers
+
+// Shifts content up by the safe-area top amount using APIs that integrate with layout rounding.
+private struct TopSafeAreaShift: ViewModifier {
+    let topInset: CGFloat
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.safeAreaPadding(.top, -topInset)
+        } else {
+            content.padding(.top, -topInset)
+        }
+    }
+}

@@ -3,7 +3,7 @@ import type { PromptConfig } from '../../types.ts';
 export const userPromptMetadata: PromptConfig = {
   name: "SINGULAR_USER_PROMPT",
   description: "Context payload for GEPA-optimized discovery generation",
-  version: "0.5.0",
+  version: "0.5.1",
   author: "What's That Team",
   variables: [
     "locationContext",
@@ -16,13 +16,13 @@ export const userPromptMetadata: PromptConfig = {
     json: false
   },
   style: {
-    tone: "instructional",
-    length: 'concise',
+    tone: "knowledgeable guide, traveler-focused, entertaining",
+    length: 'standard',
     focus: ["context integration", "anti-repetition", "clarity"]
   }
 };
 
-export const userPromptContent = `Transform a “discovery stimulus” (image, coordinates, and context) into a polished discovery for “What’s That?” exactly as described in your system prompt: produce the guided narrative plus strict metadata, following all structure and tone requirements.
+export const userPromptContent = `Transform a “discovery stimulus” (image, coordinates, and context) into a polished audio guide narrative as described in your system prompt: produce the guided narrative plus strict metadata, following all structure and tone requirements.
 
 # Discovery context
 
@@ -38,10 +38,5 @@ export const userPromptContent = `Transform a “discovery stimulus” (image, c
 ## Custom context from the app team
 {customContext}
 
-Task - Apply your overal approach defined in the system prompt to deliver a delightful discovery for the user
-1. Identify
-2. Validate
-3. Enrich
-4. Localize
-5. Style and Clarity
+Task - Apply your overal approach defined in the system prompt to deliver a delightful discovery for the user.
 `.trim();

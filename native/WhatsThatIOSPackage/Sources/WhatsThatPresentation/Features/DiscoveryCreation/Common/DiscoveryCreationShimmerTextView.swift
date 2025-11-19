@@ -27,8 +27,9 @@ struct ShimmerTextView: View {
 
     // Tunables
     private let fontSize: CGFloat = 30
-    private let passDuration: Double = 2.0  // seconds for one shimmer pass (slower)
-    private let highlightWidthRatio: CGFloat = 0.28 // fraction of availableWidth
+    private let passDuration: Double = 1.0   // seconds for one shimmer pass
+    private let startDelay: Double = 0.2     // delay before starting shimmer after text changes
+    private let highlightWidthRatio: CGFloat = 0.42 // fraction of availableWidth
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var notified = false
@@ -49,7 +50,7 @@ struct ShimmerTextView: View {
     private var shimmeringBody: some View {
         let scale = scaleFactor(for: availableWidth)
         let width = max(availableWidth, 1)
-        let stripeWidth = max(60, min(width * highlightWidthRatio, 160))
+        let stripeWidth = max(80, min(width * highlightWidthRatio, 220))
         let travel = width + stripeWidth
         let xOffset = -stripeWidth/2 + Double(progress) * travel - (travel - width)/2
 
@@ -106,13 +107,15 @@ struct ShimmerTextView: View {
         withAnimation(.none) {
             progress = 0
         }
-        let animation = Animation
-            .linear(duration: passDuration)
-            .repeatForever(autoreverses: false)
-        withAnimation(animation) {
-            progress = 1
+        let animation = Animation.linear(duration: passDuration)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) {
+            withAnimation(animation) {
+                progress = 1
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + passDuration) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + startDelay + passDuration) {
             if !notified {
                 notified = true
                 log("shimmerCompleted text=\"\(text)\" notifying=true")
@@ -140,27 +143,35 @@ struct ShimmerTextView: View {
         let beamFeather: Color
         let beamCore: Color
 
-        static func palette(for textColor: Color, fallbackScheme _: ColorScheme) -> ShimmerHighlightPalette {
-            if let brightness = perceivedBrightness(for: textColor), brightness > 0.75 {
-                return .silvery
+        static func palette(for textColor: Color, fallbackScheme scheme: ColorScheme) -> ShimmerHighlightPalette {
+            if let brightness = perceivedBrightness(for: textColor) {
+                if brightness > 0.8 {
+                    // Very bright text (typically on darker backgrounds) gets a cooler glint.
+                    return .silvery
+                } else if brightness < 0.35, scheme == .light {
+                    // Dark lettering on light backgrounds gets a stronger white-hot beam.
+                    return .whiteHot
+                }
             }
-            return .whiteHot
+
+            // Fall back to a mode-based default so shimmer stays obvious in both themes.
+            return scheme == .dark ? .whiteHot : .silvery
         }
 
         // Keep the shimmer white-hot against darker text so it pops instantly.
         static let whiteHot = ShimmerHighlightPalette(
             textHighlight: Color.white,
-            beamEdge: Color.white.opacity(0.08),
-            beamFeather: Color.white.opacity(0.58),
+            beamEdge: Color.white.opacity(0.0),
+            beamFeather: Color.white.opacity(0.7),
             beamCore: Color.white
         )
 
         // Cool-toned glint maintains contrast against already-bright lettering.
         static let silvery = ShimmerHighlightPalette(
-            textHighlight: Color(red: 0.88, green: 0.94, blue: 1.0),
-            beamEdge: Color(red: 0.56, green: 0.72, blue: 0.96).opacity(0.05),
-            beamFeather: Color(red: 0.66, green: 0.8, blue: 1.0).opacity(0.65),
-            beamCore: Color(red: 0.95, green: 0.98, blue: 1.0)
+            textHighlight: Color(red: 0.9, green: 0.96, blue: 1.0),
+            beamEdge: Color(red: 0.56, green: 0.72, blue: 0.96).opacity(0.0),
+            beamFeather: Color(red: 0.66, green: 0.8, blue: 1.0).opacity(0.8),
+            beamCore: Color(red: 0.96, green: 0.99, blue: 1.0)
         )
 
         private static func perceivedBrightness(for color: Color) -> CGFloat? {
@@ -203,6 +214,7 @@ struct ShimmerTextView: View {
             )
             .frame(width: width, height: height)
             .offset(x: xOffset)
+            .blur(radius: 8)
         }
     }
 
@@ -235,13 +247,14 @@ struct ShimmerTextView: View {
                         .mask(
                             ShimmerStripe(
                                 width: stripeWidth,
-                                height: fontSize * 1.85,
+                                height: fontSize * 2.8,
                                 xOffset: xOffset,
                                 palette: highlightPalette
                             )
                         )
-                        .blendMode(.plusLighter)
-                        .shadow(color: highlightPalette.beamCore.opacity(0.28), radius: 6, x: 0, y: 0)
+                        .blendMode(.screen)
+                        .shadow(color: highlightPalette.beamCore.opacity(0.7), radius: 10, x: 0, y: 0)
+                        .shadow(color: highlightPalette.beamFeather.opacity(0.5), radius: 20, x: 0, y: 0)
                 }
                 .scaleEffect(scale, anchor: .center)
                 .frame(maxWidth: .infinity)

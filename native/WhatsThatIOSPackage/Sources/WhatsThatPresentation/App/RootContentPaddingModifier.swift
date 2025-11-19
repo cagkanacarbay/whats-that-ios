@@ -17,10 +17,10 @@ struct RootContentPaddingModifier: ViewModifier {
             content
                 .padding(.bottom, BrandSpacing.small)
         case .postOnboarding:
+            // Post-onboarding mirrors the hero carousel layout: edge-to-edge with
+            // only minimal breathing room near the home indicator.
             content
-                .padding(.horizontal, BrandSpacing.large)
-                .padding(.top, BrandSpacing.large)
-                .padding(.bottom, BrandSpacing.xLarge)
+                .padding(.bottom, BrandSpacing.small)
         case .loading:
             content
         }

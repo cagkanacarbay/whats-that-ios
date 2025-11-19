@@ -14,6 +14,7 @@ public struct RootContentView: View {
     @State private var authStartMode: AuthenticationFlowView.Mode = .signUp
     @State private var isSettingsPresented = false
     @State private var settingsSheetDetent: PresentationDetent = .fraction(0.8)
+    @State private var mainTabDestination: MainTabDestination = .discoveries
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
@@ -114,14 +115,19 @@ public struct RootContentView: View {
                     )
                     .id(authStartMode)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
-                case let .postOnboarding(user):
-                    PostOnboardingSummary(
-                        user: user,
-                        onContinue: {
+                case .postOnboarding(_):
+                    PostOnboardingCarousel(
+                        onComplete: {
+                            mainTabDestination = .discoveries
                             Task { await viewModel.completePostOnboarding() }
                         },
-                        onSignOut: {
-                            Task { try? await viewModel.signOut() }
+                        onLaunchCamera: {
+                            mainTabDestination = .camera
+                            Task { await viewModel.completePostOnboarding() }
+                        },
+                        onLaunchUpload: {
+                            mainTabDestination = .upload
+                            Task { await viewModel.completePostOnboarding() }
                         }
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -133,6 +139,7 @@ public struct RootContentView: View {
                             cameraViewModel: makeCreationViewModel(.camera),
                             uploadViewModel: makeCreationViewModel(.upload),
                             voiceoverControllerFactory: makeVoiceoverController,
+                            initialTab: mainTabDestination,
                             onSignOut: {
                                 Task { try? await viewModel.signOut() }
                             },
@@ -141,6 +148,9 @@ public struct RootContentView: View {
                             },
                             makeCreditsViewModel: makeCreditsViewModel
                         )
+                        .onAppear {
+                            mainTabDestination = .discoveries
+                        }
                     } else {
                         Text("Voiceover playback is available on iOS builds only.")
                             .font(.headline)

@@ -1,6 +1,12 @@
 import SwiftUI
 import WhatsThatDomain
 
+enum MainTabDestination {
+    case camera
+    case discoveries
+    case upload
+}
+
 struct MainTabView: View {
     private enum Tab: Hashable {
         case camera
@@ -8,7 +14,7 @@ struct MainTabView: View {
         case upload
     }
 
-    @State private var selectedTab: Tab = .discoveries
+    @State private var selectedTab: Tab
     @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var voiceoverController: VoiceoverPlaybackController
@@ -33,6 +39,7 @@ struct MainTabView: View {
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
         voiceoverControllerFactory: @escaping () -> VoiceoverPlaybackController,
+        initialTab: MainTabDestination = .discoveries,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
@@ -42,6 +49,7 @@ struct MainTabView: View {
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         self.makeCreditsViewModel = makeCreditsViewModel
+        _selectedTab = State(initialValue: Self.tab(for: initialTab))
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
         _voiceoverController = StateObject(wrappedValue: voiceoverControllerFactory())
@@ -127,38 +135,47 @@ struct MainTabView: View {
             uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
             cameraViewModel.onAnalysisBegan = handleAnalysisBegan
             uploadViewModel.onAnalysisBegan = handleAnalysisBegan
+            handleTabChange(to: selectedTab, isInitial: true)
         }
         .onDisappear {
             summaryFallbackTask?.cancel()
         }
         .onChange(of: selectedTab) { _, newValue in
-            switch newValue {
-            case .camera:
-                uploadViewModel.cancelFlow()
-                cameraViewModel.startFlow()
-                activeOverlayTab = nil
-            case .upload:
-                cameraViewModel.cancelFlow()
-                uploadViewModel.startFlow()
-                activeOverlayTab = nil
-            case .discoveries:
-                if activeOverlayTab != .camera {
-                    cameraViewModel.cancelFlow()
-                }
-                if activeOverlayTab != .upload {
-                    uploadViewModel.cancelFlow()
-                }
-                if needsFeedRefresh {
-                    feedRefreshToken = UUID()
-                    needsFeedRefresh = false
-                }
-            }
+            handleTabChange(to: newValue)
         }
         .onChange(of: cameraViewModel.flowState.phase) { _, newPhase in
             updateOverlayVisibility(for: .camera, phase: newPhase)
         }
         .onChange(of: uploadViewModel.flowState.phase) { _, newPhase in
             updateOverlayVisibility(for: .upload, phase: newPhase)
+        }
+    }
+
+    private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
+        switch tab {
+        case .camera:
+            uploadViewModel.cancelFlow()
+            cameraViewModel.startFlow()
+            activeOverlayTab = nil
+        case .upload:
+            cameraViewModel.cancelFlow()
+            uploadViewModel.startFlow()
+            activeOverlayTab = nil
+        case .discoveries:
+            if activeOverlayTab != .camera {
+                cameraViewModel.cancelFlow()
+            }
+            if activeOverlayTab != .upload {
+                uploadViewModel.cancelFlow()
+            }
+            if needsFeedRefresh {
+                feedRefreshToken = UUID()
+                needsFeedRefresh = false
+            }
+            if isInitial {
+                cameraViewModel.cancelFlow()
+                uploadViewModel.cancelFlow()
+            }
         }
     }
 
@@ -287,5 +304,16 @@ struct MainTabView: View {
             return nil
         }
         return URL(string: path)
+    }
+
+    private static func tab(for destination: MainTabDestination) -> Tab {
+        switch destination {
+        case .camera:
+            return .camera
+        case .discoveries:
+            return .discoveries
+        case .upload:
+            return .upload
+        }
     }
 }

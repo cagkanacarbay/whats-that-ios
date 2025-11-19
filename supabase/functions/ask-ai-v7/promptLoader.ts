@@ -1,12 +1,7 @@
 import type { Logger } from '../_shared/logger.ts';
 import type { PromptConfig, AssembledPrompt } from './types.ts';
-
-// Import singular prompt
-import {
-  singularSystemPrompt,
-  singularPromptConfig,
-  singularPromptContent
-} from './prompts/singular/prompt.ts';
+import { systemPromptContent } from './prompts/system-prompt.ts';
+import { userPromptContent, userPromptMetadata } from './prompts/user-prompt.ts';
 
 /**
  * Replace variables in prompt content
@@ -64,9 +59,9 @@ export async function assemblePrompt(
   
   switch (promptType) {
     case 'singular':
-      config = singularPromptConfig;
-      rawSystemPrompt = singularSystemPrompt;
-      rawUserPrompt = singularPromptContent;
+      config = userPromptMetadata;
+      rawSystemPrompt = systemPromptContent;
+      rawUserPrompt = userPromptContent;
       break;
     default:
       throw new Error(`Unknown prompt type: ${promptType}`);

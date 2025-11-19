@@ -249,7 +249,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.validate-receipt]
 enabled = true
 verify_jwt = true
-import_map = "./functions/validate-receipt/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/validate-receipt/index.ts"
@@ -260,7 +259,6 @@ entrypoint = "./functions/validate-receipt/index.ts"
 [functions.ask-ai-v7]
 enabled = true
 verify_jwt = true
-import_map = "./functions/ask-ai-v7/deno.json"
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/ask-ai-v7/index.ts"
 

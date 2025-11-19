@@ -6,7 +6,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import OpenAI from 'npm:openai';
 import { assemblePrompt } from './promptLoader.ts'; 
 import { extractLocationInfo, HandleNearbyPlacesLocation, Place } from './places.ts';

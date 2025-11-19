@@ -7,7 +7,7 @@
 // - Origin policy is driven by DENO_ENV via ../_shared/cors.ts
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 import { buildCorsHeaders, isOriginAllowed } from '../_shared/cors.ts'
 import { createLogger } from '../_shared/logger.ts'
 

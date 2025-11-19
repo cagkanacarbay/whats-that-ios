@@ -27,10 +27,10 @@ The Smithsonian IPOP model (Pekarik et al.) is a predictive theory about **exper
 
 The four IPOP dimensions are:
 
-- **Ideas (I)** – attraction to concepts, explanations, theories, and patterns.
-- **People (P)** – attraction to human stories, emotions, relationships, and social scenes.
-- **Objects (O)** – attraction to things themselves: materials, craftsmanship, visual detail, technology.
-- **Physical (Ph)** – attraction to bodily and sensory experience: movement, sound, light, touch, spatial immersion.
+- **Ideas (I)** – an attraction to concepts, abstractions, linear thought, facts and reasons.
+- **People (P)** – an attraction to human connection, affective experience, stories, and social interactions.
+- **Objects (O)** – an attraction to things, aesthetics, craftsmanship, ownership, and visual language.
+- **Physical (Ph)** – an attraction to somatic sensations, including movement, touch, sound, taste, light, and smell.
 
 Everyone uses all four, but in different strengths; typically one dimension is more dominant for a given person.
 
@@ -67,14 +67,15 @@ We adapt IPOP as follows:
 
 - For each discovery, the AI:
   - Chooses one **primary lens**: Ideas, People, Objects, or Physical.
-  - Chooses one **flip lens**, different from the primary.
+  - Optionally chooses one **flip lens**, different from the primary.
 - The narrative structure:
   - **Attract** – the first H2 section uses the **primary lens** to hook the user in the way that lens describes
     (a sharp idea, a human story, a striking material detail, or a sensory moment).
-  - **Engage** – the middle sections deepen that same lens, occasionally touching other **secondary** lenses where they
+  - **Engage** – the middle sections deepen that same lens, occasionally touching other IPOP dimensions where they
     clearly add value.
-  - **Flip** – the final H2 section uses the **flip lens** to give an **unexpected perspective** on the same
-    subject, in a different IPOP dimension.
+  - **Flip** – when a flip lens is chosen, the final H2 section uses it to give an **unexpected perspective** on the
+    same subject, in a different IPOP dimension. When no flip lens is chosen, the final section continues in the
+    primary lens.
 
 Over time:
 
@@ -187,40 +188,33 @@ For each discovery, the model:
 
 - Internally chooses:
   - One **primary lens**: `Ideas`, `People`, `Objects`, or `Physical` (always required).
-  - Optionally, one **secondary lens**, different from the primary.
-  - Optionally, one **flip lens**, different from the primary (and usually different from the secondary).
+  - Optionally, one **flip lens**, different from the primary.
 - Builds the narrative so that:
   - The first H2 section (Attract) is dominated by the **primary lens**.
-  - Middle sections (Engage) deepen the primary lens. When a **secondary lens** is chosen:
-    - At least one H2 section should be intentionally structured around that secondary lens (not just a name‑drop).
-    - That section should **expand or build on** the same subject and material introduced via the primary lens,
-      but viewed through a different IPOP dimension (e.g. after an Ideas section about a revolution, a People
-      section about one person caught up in it).
-    - The overall spine of the narrative still follows the primary lens; secondary is complementary, not a twist.
+  - Middle sections (Engage) deepen the primary lens. They can incorporate details that naturally belong to other
+    IPOP dimensions (e.g. a brief human story in an Ideas‑driven narrative).
   - If a **flip lens** is chosen, the final H2 section (Flip) uses that lens to offer an **unexpected perspective** on
     the same subject, in a different IPOP dimension. If no flip lens is chosen, the final section continues in the
-    primary (or secondary) lens.
+    primary lens.
 
 Additional rules:
 
 - On **cold starts** (first discovery for a subject in this session):
-  - The model must choose a **primary** and a **flip** lens.
-  - A **secondary** lens is optional and should only be chosen when there is enough material for a distinct
-    section built around that lens.
+  - The model must choose a **primary** lens.
+  - A **flip** lens is optional and should be chosen only when there is enough material for a distinct, short Flip
+    section that adds a meaningfully different perspective.
 - On **later discoveries** of the same or related subject:
   - The model must choose a **primary** lens.
-  - **Secondary** and **flip** lenses are optional:
-    - A secondary lens is chosen only when we clearly dedicate at least one section to it.
+  - A **flip** lens is optional:
     - A flip lens is used when a short, late “surprise” angle genuinely adds value; otherwise, the narrative may
-      simply end from the primary (or secondary) perspective.
+      simply end from the primary perspective.
 
 We also:
 
 - Record the lens choices in `metadata_json`, for example:
-  - `"ipop": { "primary": "Ideas", "secondary": ["People"], "flip": "Physical" }`
-  - `"secondary"` and `"flip"` may be `null` when not used.
-  - Only declare a secondary lens in metadata if at least one section is primarily written through that lens
-    (e.g. a substantial “artist story” section), not when it is only mentioned in passing.
+  - `"ipop": { "primary": "Ideas", "flip": "Physical" }`
+  - `"flip"` may be `null` when not used.
+
 - Enforce the usual structural constraints (JSON first, then 3–5 H2 sections).
 
 ---
@@ -248,16 +242,7 @@ We also:
   - Use only when real content (specifics + tangential true content) has already been used for that subject and we
     still need fresh material.
   - Keep fictional vignettes short, grounded in plausible roles and conditions, and varied between discoveries.
-
-About **secondary lenses**:
-
-- A secondary lens is optional and should be used only when:
-  - There is enough material for at least one section that is clearly built from that lens’ perspective, and
-  - That section adds something meaningfully different from the primary lens section(s).
-- Light touches of other dimensions (e.g. briefly naming an artist when the focus is on the painting’s style)
-  do **not** justify marking a secondary lens. Only sustained treatment (e.g. telling a full artist story section in
-  a primarily Objects‑driven narrative) should be logged as a secondary lens.
-
+  
 The next subsections give concrete, multi‑regional examples for each lens.
 
 ### 5.1 Ideas lens (I)
@@ -453,6 +438,33 @@ Vignette:
 > from the surface disappears, this thin circle of yellow becomes his entire world: walls, rails, faces of friends.
 > At the end of a shift, he comes back up coated in dust, blinking in the desert sun, grateful that the lamp
 > stayed lit and the rock stayed still.
+
+### 5.6 Writing the first H2 (Attract hook)
+
+The first H2 is the **hook**. In a few words, it tells the user what kind of story is coming and why this stop matters. It should be short, spoken‑friendly, and clearly aligned with the chosen IPOP lens.
+
+**What a good hook should achieve**
+
+- **Promise a clear payoff**  
+  Use a single short line that tells the user what this stop will give them.
+
+- **Match IPOP lens clearly**  
+  Make it obvious whether the story is mainly about ideas, people, objects, or physical experience.
+
+- **Use simple, concrete language**  
+  Keep hooks short, easy to say aloud, and built from everyday words.
+
+- **Optionally mention place or figure when it really matters**  
+  For famous or locally important subjects, you can include the place or person name in the hook, but do not overuse this so nearby hooks do not all sound the same.
+
+**Examples**
+
+- `The courtyard that changed India` — Ideas lens; specific turning point; nationally significant courtyard.  
+- `Meeting Frida eye to eye` — People lens; intimate encounter with a famous artist and self‑portrait.  
+- `How speed stays smooth` — Objects lens; mechanism in a high‑speed train (e.g. Shinkansen) model or exhibit.  
+- `Minerals as a coded map` — Ideas + Objects lenses; metaphor that reframes a mineral display wall as information.  
+- `A lamp in complete darkness` — People + Physical lenses; fictional vignette around a miner’s lamp (type‑level object, felt environment).  
+- `A tomb built for love` — People lens; compressed emotional premise for a world‑famous monument (e.g. Taj Mahal).
 
 ---
 

@@ -39,45 +39,46 @@ struct PreOnboardingCarousel: View {
 
     @ViewBuilder
     private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
-        
-        VStack(spacing: BrandSpacing.large) {
-
-            TabView(selection: $index) {
-                ForEach(slides.indices, id: \.self) { idx in
-                    SlidePage(
-                        slide: slides[idx],
-                        titleColor: titleColor,
-                        bodyColor: bodyColor,
-                        containerWidth: width,
-                        topInset: topInset
-                    )
-                    .tag(idx)
-                }
+        TabView(selection: $index) {
+            ForEach(slides.indices, id: \.self) { idx in
+                SlidePage(
+                    slide: slides[idx],
+                    titleColor: titleColor,
+                    bodyColor: bodyColor,
+                    containerWidth: width,
+                    topInset: topInset
+                )
+                .tag(idx)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // Respect the safe area so the image aligns with the notch.
-            // Do not extend under the status bar/notch for pre-onboarding visuals.
-            .frame(width: width)
-            .ignoresSafeArea(edges: .top)
-
-            // Page indicator + actions tightly grouped
-            Spacer(minLength: BrandSpacing.small)
-            VStack(spacing: BrandSpacing.small) {
-                PageIndicators(count: slides.count, currentIndex: index)
-
-                if index == slides.count - 1 {
-                    BrandPrimaryButton(title: "Get Started", action: onContinue)
-                        .padding(.horizontal, BrandSpacing.large)
-                } else {
-                    HStack(spacing: BrandSpacing.medium) {
-                        BrandSecondaryButton(title: "Skip") { onContinue() }
-                        BrandPrimaryButton(title: "Next") { withAnimation { index += 1 } }
-                    }
-                    .padding(.horizontal, BrandSpacing.large)
-                }
-            }
-            .padding(.bottom, bottomInset + BrandSpacing.small)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        // Respect the safe area so the image aligns with the notch.
+        // Do not extend under the status bar/notch for pre-onboarding visuals.
+        .frame(width: width)
+        .ignoresSafeArea(edges: .top)
+        .safeAreaInset(edge: .bottom) {
+            callToAction(bottomInset: bottomInset)
+        }
+    }
+
+    @ViewBuilder
+    private func callToAction(bottomInset: CGFloat) -> some View {
+        VStack(spacing: BrandSpacing.small) {
+            PageIndicators(count: slides.count, currentIndex: index)
+
+            if index == slides.count - 1 {
+                BrandPrimaryButton(title: "Get Started", action: onContinue)
+            } else {
+                HStack(spacing: BrandSpacing.medium) {
+                    BrandSecondaryButton(title: "Skip") { onContinue() }
+                    BrandPrimaryButton(title: "Next") { withAnimation { index += 1 } }
+                }
+            }
+        }
+        // .padding(.top, BrandSpacing.small)
+        .padding(.horizontal, BrandSpacing.large)
+        .padding(.bottom, min(bottomInset, BrandSpacing.small))
+        .background(backgroundColor)
     }
 
     private var titleColor: Color {
@@ -86,6 +87,10 @@ struct PreOnboardingCarousel: View {
 
     private var bodyColor: Color {
         colorScheme == .dark ? BrandColors.Dark.bodyText : BrandColors.Light.bodyText
+    }
+
+    private var backgroundColor: Color {
+        colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
     }
 }
 
@@ -113,9 +118,10 @@ private struct SlidePage: View {
                         .scaledToFit()
                         .frame(width: containerWidth, height: imageHeight + topInset + epsilon, alignment: .top)
                         .offset(y: -(topInset + epsilon))
-                        .ignoresSafeArea(edges: .top)
+                        // .ignoresSafeArea(edges: .top)
                         .accessibilityHidden(false)
                 }
+                // .ignoresSafeArea(edges: .top)
                 
             VStack(spacing: BrandSpacing.small) {
                 Text(slide.title)
@@ -131,10 +137,11 @@ private struct SlidePage: View {
                     .padding(.horizontal, BrandSpacing.large)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // .padding(.top, BrandSpacing.small)
+            .padding(.top, BrandSpacing.large)
         }
         .frame(width: containerWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
     }
 }
 

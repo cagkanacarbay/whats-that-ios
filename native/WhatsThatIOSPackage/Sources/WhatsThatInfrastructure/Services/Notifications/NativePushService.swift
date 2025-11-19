@@ -1,7 +1,9 @@
-#if canImport(UserNotifications)
 import Foundation
 @preconcurrency import UserNotifications
 import WhatsThatDomain
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public final class NativePushService: DiscoveryPushService, @unchecked Sendable {
     private let center: UNUserNotificationCenter
@@ -26,7 +28,18 @@ public final class NativePushService: DiscoveryPushService, @unchecked Sendable 
             break
         }
 
-        return nil
+        if let existing = await NativePushTokenStore.shared.currentToken() {
+            return existing
+        }
+
+        await registerForRemoteNotifications()
+        return await NativePushTokenStore.shared.waitForToken()
+    }
+
+    @MainActor
+    private func registerForRemoteNotifications() {
+        #if canImport(UIKit)
+        UIApplication.shared.registerForRemoteNotifications()
+        #endif
     }
 }
-#endif

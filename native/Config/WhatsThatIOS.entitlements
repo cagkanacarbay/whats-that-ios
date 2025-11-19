@@ -11,5 +11,7 @@
 		<string>applinks:whats-that.app</string>
 		<string>applinks:whats-that.expo.dev</string>
 	</array>
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

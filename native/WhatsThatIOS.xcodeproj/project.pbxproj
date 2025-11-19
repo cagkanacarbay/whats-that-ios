@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		8B41F6832DEDD23B001A66F9 /* WhatsThatIOSFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6822DEDD23B001A66F9 /* WhatsThatIOSFeature */; };
 		8B41F6852DEDD25C001A66F9 /* WhatsThatIOSFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6842DEDD25C001A66F9 /* WhatsThatIOSFeature */; };
-		8B9999002DEF000100AA11BB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8B9999012DEF000100AA11BB /* Assets.xcassets */; };
+		8B9999002DEF000100AA11BB /* WhatsThatIOS/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8B9999012DEF000100AA11BB /* WhatsThatIOS/Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,18 +25,18 @@
 /* Begin PBXFileReference section */
 		8B41F6452DEDD0D5001A66F9 /* WhatsThatIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatsThatIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B41F65C2DEDD0D6001A66F9 /* WhatsThatIOS.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatsThatIOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		8B9999012DEF000100AA11BB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = WhatsThatIOS/Assets.xcassets; sourceTree = "<group>"; };
+		8B9999012DEF000100AA11BB /* WhatsThatIOS/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = WhatsThatIOS/Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		8BD71C0A2DEE41E000CEDD92 /* Exceptions for "Config" folder in "WhatsThatIOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				AppInfo.plist,
 				Debug.xcconfig,
 				Release.xcconfig,
 				Shared.xcconfig,
 				Tests.xcconfig,
-				AppInfo.plist,
 			);
 			target = 8B41F6442DEDD0D5001A66F9 /* WhatsThatIOS */;
 		};
@@ -53,10 +53,10 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8B41F6472DEDD0D5001A66F9 /* WhatsThatIOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = WhatsThatIOS;
 			exceptions = (
 				8BD71C0B2DEE41E000CEDD93 /* Exceptions for "WhatsThatIOS" folder in "WhatsThatIOS" target */,
 			);
+			path = WhatsThatIOS;
 			sourceTree = "<group>";
 		};
 		8B41F65F2DEDD0D6001A66F9 /* WhatsThatIOSUITests */ = {
@@ -102,6 +102,7 @@
 				8B41F65F2DEDD0D6001A66F9 /* WhatsThatIOSUITests */,
 				8B41F6812DEDD23B001A66F9 /* Frameworks */,
 				8B41F6462DEDD0D5001A66F9 /* Products */,
+				B2D2F6122EB2435C00D9AB5F /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -119,6 +120,14 @@
 			children = (
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B2D2F6122EB2435C00D9AB5F /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				8B9999012DEF000100AA11BB /* WhatsThatIOS/Assets.xcassets */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -216,7 +225,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8B9999002DEF000100AA11BB /* Assets.xcassets in Resources */,
+				8B9999002DEF000100AA11BB /* WhatsThatIOS/Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -388,12 +397,14 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_DISPLAY_NAME)";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.1;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -411,12 +422,14 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_DISPLAY_NAME)";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.1;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

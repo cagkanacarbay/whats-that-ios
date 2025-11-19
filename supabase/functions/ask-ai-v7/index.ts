@@ -8,6 +8,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import OpenAI from 'npm:openai';
+import { SignJWT, importPKCS8 } from 'npm:jose';
 import { assemblePrompt } from './promptLoader.ts'; 
 import { extractLocationInfo, HandleNearbyPlacesLocation, Place } from './places.ts';
 import { systemPromptMetadata } from './prompts/system-prompt.ts';
@@ -78,81 +79,135 @@ function createAdminClient(): SupabaseClient {
   });
 }
 
-// --- Helper: Send Push Notification via Expo ---
+// --- Helper: Create APNs JWT using jose ---
+async function createApnsJwt(logger: Logger): Promise<string> {
+  const teamId = Deno.env.get('APNS_TEAM_ID');
+  const keyId = Deno.env.get('APNS_KEY_ID');
+  const privateKey = Deno.env.get('APNS_PRIVATE_KEY');
+
+  if (!teamId || !keyId || !privateKey) {
+    logger.error('APNs credentials not configured', {
+      hasTeamId: Boolean(teamId),
+      hasKeyId: Boolean(keyId),
+      hasPrivateKey: Boolean(privateKey),
+    });
+    throw new Error('APNs credentials not configured.');
+  }
+
+  const algorithm = 'ES256';
+  const pkcs8 = privateKey.trim();
+  const key = await importPKCS8(pkcs8, algorithm);
+
+  const now = Math.floor(Date.now() / 1000);
+  return await new SignJWT({})
+    .setProtectedHeader({ alg: algorithm, kid: keyId })
+    .setIssuedAt(now)
+    .setIssuer(teamId)
+    .sign(key);
+}
+
+// --- Helper: Send Push Notification via APNs ---
+async function sendApnsPushNotification(
+  deviceToken: string,
+  title: string,
+  body: string,
+  discoveryId: string,
+  logger: Logger
+): Promise<boolean> {
+  const bundleId = Deno.env.get('APNS_BUNDLE_ID');
+  const environment = (Deno.env.get('APNS_ENVIRONMENT') || 'sandbox').toLowerCase();
+
+  if (!bundleId) {
+    logger.error('APNs bundle ID not configured');
+    return false;
+  }
+
+  const host =
+    environment === 'production'
+      ? 'https://api.push.apple.com'
+      : 'https://api.sandbox.push.apple.com';
+
+  const url = `${host}/3/device/${deviceToken}`;
+
+  let jwt: string;
+  try {
+    jwt = await createApnsJwt(logger);
+  } catch (error) {
+    logger.error('Failed to create APNs JWT', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+
+  const payload = {
+    aps: {
+      alert: {
+        title,
+        body,
+      },
+      sound: 'default',
+    },
+    discoveryId,
+    type: 'discovery_complete',
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        authorization: `bearer ${jwt}`,
+        'apns-topic': bundleId,
+        'apns-push-type': 'alert',
+        'apns-priority': '10',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responseText = await response.text();
+    let responseJson: any = undefined;
+    try {
+      responseJson = responseText ? JSON.parse(responseText) : undefined;
+    } catch {
+      // non-JSON response; keep raw text for logs
+    }
+
+    if (response.ok) {
+      logger.info('APNs push notification sent successfully', {
+        deviceTokenSuffix: deviceToken.slice(-6),
+        discoveryId,
+      });
+      return true;
+    }
+
+    logger.error('APNs push API error', {
+      deviceTokenSuffix: deviceToken.slice(-6),
+      discoveryId,
+      httpStatus: response.status,
+      reason: (responseJson?.reason ?? responseText) || 'Unknown',
+    });
+    return false;
+  } catch (error) {
+    logger.error('Failed to send APNs push notification', {
+      deviceTokenSuffix: deviceToken.slice(-6),
+      discoveryId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+// --- Helper: Dispatch Push Notification (APNs only) ---
 async function sendPushNotification(
   pushToken: string,
   title: string,
   body: string,
   discoveryId: string,
   logger: Logger
-) {
-  try {
-    const tokenSuffix = pushToken.slice(-6);
-    logger.debug('Attempting to send push notification', {
-      tokenSuffix,
-      discoveryId,
-    });
+): Promise<boolean> {
+  if (!pushToken) return false;
 
-    const message = {
-      to: pushToken,
-      sound: 'default',
-      title,
-      body,
-      data: {
-        discoveryId,
-        type: 'discovery_complete',
-      },
-    };
-
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-
-    const responseData = await response.json();
-
-    if (response.ok && responseData.data) {
-      if (responseData.data.status === 'ok') {
-        logger.info('Push notification sent successfully', {
-          tokenSuffix,
-          discoveryId,
-        });
-        return true;
-      }
-      if (responseData.data.status === 'error') {
-        logger.error('Expo push API error', {
-          tokenSuffix,
-          discoveryId,
-          errorMessage: responseData.data.message,
-          errorDetails: responseData.data.details,
-        });
-        if (responseData.data.details?.error === 'DeviceNotRegistered') {
-          logger.warn('Push token reported as unregistered', { tokenSuffix });
-        }
-        return false;
-      }
-    }
-
-    logger.error('Unexpected push notification response format', {
-      tokenSuffix,
-      discoveryId,
-      httpStatus: response.status,
-      expoStatus: responseData?.data?.status,
-    });
-    return false;
-  } catch (error) {
-    logger.error('Failed to send push notification', {
-      tokenSuffix: pushToken.slice(-6),
-      discoveryId,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
+  return sendApnsPushNotification(pushToken, title, body, discoveryId, logger);
 }
 
 // --- Helper: Format GPS coordinates ---

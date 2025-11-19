@@ -4,6 +4,7 @@ import WhatsThatPresentation
 
 @main
 struct WhatsThatIOSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var passwordResetLinkCoordinator = PasswordResetLinkCoordinator()
 
     var body: some Scene {

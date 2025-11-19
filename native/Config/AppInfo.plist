@@ -22,22 +22,6 @@
 	<array>
 		<string>$(PLATFORM_NAME)</string>
 	</array>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>MinimumOSVersion</key>
-	<string>$(IPHONEOS_DEPLOYMENT_TARGET)</string>
-	<key>SUPABASE_ANON_KEY</key>
-	<string>$(SUPABASE_ANON_KEY)</string>
-	<key>SUPABASE_URL</key>
-	<string>$(SUPABASE_URL)</string>
-	<key>SUPABASE_PASSWORD_RESET_REDIRECT_URL</key>
-	<string>$(SUPABASE_PASSWORD_RESET_REDIRECT_URL)</string>
-	<key>GOOGLE_CLIENT_ID</key>
-	<string>$(GOOGLE_CLIENT_ID)</string>
-	<key>GOOGLE_REVERSED_CLIENT_ID</key>
-	<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -57,6 +41,30 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GOOGLE_CLIENT_ID</key>
+	<string>$(GOOGLE_CLIENT_ID)</string>
+	<key>GOOGLE_REVERSED_CLIENT_ID</key>
+	<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>MinimumOSVersion</key>
+	<string>$(IPHONEOS_DEPLOYMENT_TARGET)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We use your camera to capture photos for new discoveries.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to personalize discoveries with nearby context.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>We can save the photos you capture to your library for safekeeping.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We access your photo library so you can upload pictures to analyze.</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>SUPABASE_PASSWORD_RESET_REDIRECT_URL</key>
+	<string>$(SUPABASE_PASSWORD_RESET_REDIRECT_URL)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -72,21 +80,14 @@
 		<string>LaunchBackground</string>
 		<key>UIImageName</key>
 		<string>LaunchLogo</string>
-		<!-- Keep image centered; don't scale to safe area -->
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<false/>
 	</dict>
+	<key>UIStatusBarStyle</key>
+	<string></string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>We use your camera to capture photos for new discoveries.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We access your photo library so you can upload pictures to analyze.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>We can save the photos you capture to your library for safekeeping.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>We use your location to personalize discoveries with nearby context.</string>
 </dict>
 </plist>

@@ -15,6 +15,7 @@ struct BrandPrimaryButton: View {
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
+                .contentShape(Rectangle())
                 .overlay(alignment: .trailing) {
                     if isLoading {
                         ProgressView()
@@ -34,6 +35,7 @@ struct BrandPrimaryButton: View {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium)
                 .stroke(currentBorder, lineWidth: 1)
         }
+        .contentShape(Rectangle())
         .opacity(isLoading ? 0.7 : 1)
     }
 
@@ -85,11 +87,13 @@ struct BrandSecondaryButton: View {
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(primaryColor)
         .background(secondaryBackground)
         .cornerRadius(BrandCornerRadius.medium)
+        .contentShape(Rectangle())
         .overlay {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium)
                 .stroke(borderColor, lineWidth: 1)

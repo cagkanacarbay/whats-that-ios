@@ -7,6 +7,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import Anthropic from 'npm:@anthropic-ai/sdk';
 import OpenAI from 'npm:openai';
 import { SignJWT, importPKCS8 } from 'npm:jose';
 import { assemblePrompt } from './promptLoader.ts'; 
@@ -20,8 +21,9 @@ import type { Logger } from '../_shared/logger.ts';
 
 // --- Constants ---
 const CREDITS_PER_DISCOVERY = 1;
-// const OPENAI_MODEL = "gpt-4o-mini"; // Temporary test model for streaming work
+const GEMINI_MODEL = "gemini-2.5-flash";
 const OPENAI_MODEL = "gpt-5-mini"; 
+const CLAUDE_MODEL = "claude-3-5-sonnet-20241022";
 const STREAM_RETRY_LIMIT = 3;
 
 // Utility: mask an identifier by showing beginning and end
@@ -291,6 +293,7 @@ serve(async (req: Request) => {
     headers,
   });
 
+  const t0 = performance.now();
   (async () => {
     const handlerLogger = logger.child({ scope: 'handler' });
     const supabaseAdmin = createAdminClient();
@@ -466,50 +469,95 @@ serve(async (req: Request) => {
       const promptLogger = handlerLogger.child({ scope: 'prompt' });
       const { system: systemPrompt, user: userPrompt } = await assemblePrompt('singular', promptVariables, promptLogger);
 
-      sendEvent('status', { stage: 'model', message: 'Contacting OpenAI…' });
+      type ModelResult = { rawResponse: string; modelUsed: string };
+      const TOKEN_BATCH_TARGET = 160;
 
-      const openai = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') });
-      if (!openai.apiKey) {
-        throw new Error('Missing OPENAI_API_KEY');
-      }
+      const runGemini = async (emitToken: (text: string) => void): Promise<ModelResult> => {
+        sendEvent('status', { stage: 'model', message: 'Contacting Gemini…' });
+        const apiKey = Deno.env.get('GEMINI_API_KEY');
+        if (!apiKey) {
+          throw new Error('Missing GEMINI_API_KEY');
+        }
 
-      let rawResponse = '';
-      let modelUsed = OPENAI_MODEL;
-
-      const startTime = performance.now();
-
-      const streamLogger = logger.child({ scope: 'openai-stream' });
-      const openaiStream = await retryWithBackoff(async () => {
-        const responseStream = await openai.responses.stream({
-          model: OPENAI_MODEL,
-          reasoning: { effort: "low" },
-          instructions: systemPrompt,
-          max_output_tokens: 5000,
-          temperature: 1,
-          input: [
+        const streamLogger = logger.child({ scope: 'gemini-stream' });
+        const requestStart = performance.now();
+        const requestStartIso = new Date().toISOString();
+        streamLogger.info('Gemini request dispatched', { at: requestStartIso });
+        const payload = {
+          systemInstruction: {
+            role: 'system',
+            parts: [{ text: systemPrompt }],
+          },
+          contents: [
             {
               role: 'user',
-              content: [
-                { type: 'input_text', text: userPrompt },
+              parts: [
+                { text: userPrompt },
                 {
-                  type: 'input_image',
-                  image_url: `data:image/jpeg;base64,${base64Image}`,
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: base64Image,
+                  },
                 },
               ],
             },
           ],
+          generationConfig: {
+            temperature: 1,
+            maxOutputTokens: 5000,
+          },
+        };
+
+        const reader = await retryWithBackoff(async () => {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`,
+            {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                'x-goog-api-key': apiKey,
+              },
+              body: JSON.stringify(payload),
+            },
+          );
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            streamLogger.error('Gemini HTTP error', {
+              status: response.status,
+              bodySnippet: errorText?.slice(0, 300),
+            });
+            const err = new Error(`Gemini request failed with status ${response.status}`);
+            (err as any).status = response.status;
+            throw err;
+          }
+
+          if (!response.body) {
+            throw new Error('Gemini response body missing');
+          }
+
+          return response.body.getReader();
+        }, streamLogger, STREAM_RETRY_LIMIT, 'Gemini');
+
+        const now = performance.now();
+        const streamReadyLatencySeconds = (now - requestStart) / 1000;
+        const totalSinceInitialRequestSeconds = (now - t0) / 1000;
+        streamLogger.info('Gemini stream ready', {
+          latencySeconds: Number(streamReadyLatencySeconds.toFixed(2)),
+          totalSinceInitialRequestSeconds: Number(totalSinceInitialRequestSeconds.toFixed(2)),
+          t0Iso: new Date(Date.now() - (performance.now() - t0)).toISOString(),
         });
-        return responseStream;
-      }, streamLogger, STREAM_RETRY_LIMIT, 'OpenAI');
 
-      sendEvent('status', { stage: 'stream', message: 'Streaming analysis…' });
+        sendEvent('status', { stage: 'stream', message: 'Streaming analysis…' });
+        const decoder = new TextDecoder();
 
-      try {
-        const TOKEN_BATCH_TARGET = 160;
+        let buffer = '';
+        let rawResponse = '';
         let pendingTokenBatch = '';
         let chunkCounter = 0;
         let streamingCompleteLogged = false;
         let initialChunkSent = false;
+        let modelUsed = GEMINI_MODEL;
 
         const logStreamingDone = () => {
           if (streamingCompleteLogged) return;
@@ -537,18 +585,38 @@ serve(async (req: Request) => {
           }
 
           logChunk(label, batch);
-          sendEvent('token', { text: batch });
+          emitToken(batch);
           pendingTokenBatch = '';
           if (!initialChunkSent) {
             initialChunkSent = true;
           }
         };
 
-        streamLogger.info('Streaming begun');
+        const processPayload = (payloadText: string) => {
+          const normalized = payloadText.startsWith('data:')
+            ? payloadText.replace(/^data:\s*/, '')
+            : payloadText;
+          const trimmed = normalized.trim();
+          if (!trimmed) return;
+          let parsed: any = null;
+          try {
+            parsed = JSON.parse(trimmed);
+          } catch (parseError) {
+            streamLogger.debug('Gemini chunk parse failed', {
+              errorMessage: parseError instanceof Error ? parseError.message : String(parseError),
+              snippet: trimmed.slice(0, 240),
+            });
+            return;
+          }
 
-        for await (const event of openaiStream) {
-          if (event.type === 'response.output_text.delta') {
-            const delta = event.delta;
+          const parts = parsed?.candidates?.[0]?.content?.parts ?? [];
+          if (parsed?.candidates?.[0]?.model) {
+            modelUsed = parsed.candidates[0].model;
+          }
+
+          for (const part of parts) {
+            if (typeof part.text !== 'string') continue;
+            const delta = part.text;
             rawResponse += delta;
             pendingTokenBatch += delta;
 
@@ -563,42 +631,394 @@ serve(async (req: Request) => {
               const label = shouldFlushInitial ? 'initial' : 'batch';
               flushPendingTokens(label);
             }
-          } else if (event.type === 'response.output_text.done') {
-            flushPendingTokens('finalize');
-            sendEvent('status', { stage: 'stream', message: 'Model output received.' });
-          } else if (event.type === 'response.completed') {
-            logStreamingDone();
-          } else if (event.type === 'response.error') {
-            streamLogger.error('OpenAI stream error event', {
-              errorMessage: event.error?.message,
-              errorCode: event.error?.code,
+          }
+        };
+
+        streamLogger.info('Streaming begun');
+
+        let eventLines: string[] = [];
+
+        const flushEvent = () => {
+          if (eventLines.length === 0) return;
+          const payloadText = eventLines.join('\n').trim();
+          eventLines = [];
+          if (!payloadText || payloadText === '[DONE]') return;
+          processPayload(payloadText);
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            flushEvent();
+            flushPendingTokens('final');
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmedLine = line.trimEnd();
+            if (trimmedLine.startsWith('data:')) {
+              const dataPart = trimmedLine.replace(/^data:\s*/, '');
+              eventLines.push(dataPart);
+              continue;
+            }
+
+            if (trimmedLine === '') {
+              flushEvent();
+              continue;
+            }
+
+            // Fallback: if the stream is not SSE-prefixed, accumulate as-is.
+            eventLines.push(trimmedLine);
+          }
+        }
+
+        const leftover = buffer.trim();
+        if (leftover) {
+          eventLines.push(leftover);
+          flushEvent();
+          flushPendingTokens('leftover');
+        }
+
+        logStreamingDone();
+
+        if (!rawResponse.trim()) {
+          throw new Error(`${GEMINI_MODEL} returned empty response`);
+        }
+
+        return { rawResponse, modelUsed };
+      };
+
+      const runOpenAI = async (emitToken: (text: string) => void): Promise<ModelResult> => {
+        sendEvent('status', { stage: 'model', message: 'Contacting ChatGPT…' });
+
+        const openai = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') });
+        if (!openai.apiKey) {
+          throw new Error('Missing OPENAI_API_KEY');
+        }
+
+        let rawResponse = '';
+        let modelUsed = OPENAI_MODEL;
+
+        const requestStart = performance.now();
+        const requestStartIso = new Date().toISOString();
+        const streamLogger = logger.child({ scope: 'openai-stream' });
+        streamLogger.info('ChatGPT request dispatched', { at: requestStartIso });
+
+        const openaiStream = await retryWithBackoff(async () => {
+          const responseStream = await openai.responses.stream({
+            model: OPENAI_MODEL,
+            reasoning: { effort: "low" },
+            instructions: systemPrompt,
+            max_output_tokens: 5000,
+            temperature: 1,
+            input: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'input_text', text: userPrompt },
+                  {
+                    type: 'input_image',
+                    image_url: `data:image/jpeg;base64,${base64Image}`,
+                  },
+                ],
+              },
+            ],
+          });
+          return responseStream;
+        }, streamLogger, STREAM_RETRY_LIMIT, 'OpenAI');
+
+        const now = performance.now();
+        const streamReadyLatencySeconds = (now - requestStart) / 1000;
+        const totalSinceInitialRequestSeconds = (now - t0) / 1000;
+        streamLogger.info('ChatGPT stream ready', {
+          latencySeconds: Number(streamReadyLatencySeconds.toFixed(2)),
+          totalSinceInitialRequestSeconds: Number(totalSinceInitialRequestSeconds.toFixed(2)),
+          t0Iso: new Date(Date.now() - (performance.now() - t0)).toISOString(),
+        });
+
+        sendEvent('status', { stage: 'stream', message: 'Streaming analysis…' });
+
+        try {
+          const startTime = performance.now();
+          let pendingTokenBatch = '';
+          let chunkCounter = 0;
+          let streamingCompleteLogged = false;
+          let initialChunkSent = false;
+
+          const logStreamingDone = () => {
+            if (streamingCompleteLogged) return;
+            streamingCompleteLogged = true;
+            streamLogger.info('Streaming completed', {
+              totalChars: rawResponse.length,
+              chunkCount: chunkCounter,
             });
-            throw new Error(event.error?.message || 'OpenAI streaming error');
+          };
+
+          const logChunk = (label: string, chunk: string) => {
+            chunkCounter += 1;
+            streamLogger.debug('Streaming chunk emitted', {
+              chunkIndex: chunkCounter,
+              chunkLength: chunk.length,
+              label,
+            });
+          };
+
+          const flushPendingTokens = (label: string) => {
+            const batch = pendingTokenBatch;
+            if (batch.trim().length === 0) {
+              pendingTokenBatch = '';
+              return;
+            }
+
+            logChunk(label, batch);
+            emitToken(batch);
+            pendingTokenBatch = '';
+            if (!initialChunkSent) {
+              initialChunkSent = true;
+            }
+          };
+
+          streamLogger.info('Streaming begun');
+
+          for await (const event of openaiStream) {
+            if (event.type === 'response.output_text.delta') {
+              const delta = event.delta;
+              rawResponse += delta;
+              pendingTokenBatch += delta;
+
+              const hasSentenceBreak = /[.!?]\s$/.test(pendingTokenBatch);
+              const trimmedPending = pendingTokenBatch.trim();
+              const shouldFlushInitial = !initialChunkSent && trimmedPending.length > 0;
+              if (
+                pendingTokenBatch.length >= TOKEN_BATCH_TARGET ||
+                hasSentenceBreak ||
+                shouldFlushInitial
+              ) {
+                const label = shouldFlushInitial ? 'initial' : 'batch';
+                flushPendingTokens(label);
+              }
+            } else if (event.type === 'response.output_text.done') {
+              flushPendingTokens('finalize');
+              sendEvent('status', { stage: 'stream', message: 'Model output received.' });
+            } else if (event.type === 'response.completed') {
+              logStreamingDone();
+            } else if (event.type === 'response.error') {
+              streamLogger.error('OpenAI stream error event', {
+                errorMessage: event.error?.message,
+                errorCode: event.error?.code,
+              });
+              throw new Error(event.error?.message || 'OpenAI streaming error');
+            }
+          }
+
+          flushPendingTokens('final');
+          logStreamingDone();
+        } catch (streamError) {
+          streamLogger.error('OpenAI stream iteration failed', {
+            errorMessage: streamError instanceof Error ? streamError.message : String(streamError),
+          });
+          throw streamError;
+        }
+
+        const finalResponse = await openaiStream.finalResponse();
+        if (finalResponse?.model) {
+          modelUsed = finalResponse.model;
+        }
+        // Streaming duration already logged inside try block; no additional timing needed.
+        if (!rawResponse.trim()) {
+          throw new Error(`${OPENAI_MODEL} returned empty response`);
+        }
+
+        return { rawResponse, modelUsed };
+      };
+
+      const runClaude = async (emitToken: (text: string) => void): Promise<ModelResult> => {
+        sendEvent('status', { stage: 'model', message: 'Contacting Claude…' });
+
+        const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+        if (!apiKey) {
+          throw new Error('Missing ANTHROPIC_API_KEY');
+        }
+
+        const anthropic = new Anthropic({ apiKey });
+        const streamLogger = logger.child({ scope: 'claude-stream' });
+        const requestStart = performance.now();
+        const requestStartIso = new Date().toISOString();
+        streamLogger.info('Claude request dispatched', { at: requestStartIso });
+
+        const claudeStream = await retryWithBackoff(async () => {
+          return await anthropic.messages.stream({
+            model: CLAUDE_MODEL,
+            max_tokens: 5000,
+            temperature: 1,
+            system: systemPrompt,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: userPrompt },
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: 'image/jpeg',
+                      data: base64Image,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
+        }, streamLogger, STREAM_RETRY_LIMIT, 'Claude');
+
+        const now = performance.now();
+        const streamReadyLatencySeconds = (now - requestStart) / 1000;
+        const totalSinceInitialRequestSeconds = (now - t0) / 1000;
+        streamLogger.info('Claude stream ready', {
+          latencySeconds: Number(streamReadyLatencySeconds.toFixed(2)),
+          totalSinceInitialRequestSeconds: Number(totalSinceInitialRequestSeconds.toFixed(2)),
+          t0Iso: new Date(Date.now() - (performance.now() - t0)).toISOString(),
+        });
+
+        sendEvent('status', { stage: 'stream', message: 'Streaming analysis…' });
+
+        let rawResponse = '';
+        let pendingTokenBatch = '';
+        let chunkCounter = 0;
+        let streamingCompleteLogged = false;
+        let initialChunkSent = false;
+        let modelUsed = CLAUDE_MODEL;
+
+        const logStreamingDone = () => {
+          if (streamingCompleteLogged) return;
+          streamingCompleteLogged = true;
+          streamLogger.info('Streaming completed', {
+            totalChars: rawResponse.length,
+            chunkCount: chunkCounter,
+          });
+        };
+
+        const logChunk = (label: string, chunk: string) => {
+          chunkCounter += 1;
+          streamLogger.debug('Streaming chunk emitted', {
+            chunkIndex: chunkCounter,
+            chunkLength: chunk.length,
+            label,
+          });
+        };
+
+        const flushPendingTokens = (label: string) => {
+          const batch = pendingTokenBatch;
+          if (batch.trim().length === 0) {
+            pendingTokenBatch = '';
+            return;
+          }
+
+          logChunk(label, batch);
+          emitToken(batch);
+          pendingTokenBatch = '';
+          if (!initialChunkSent) {
+            initialChunkSent = true;
+          }
+        };
+
+        streamLogger.info('Streaming begun');
+
+        for await (const event of claudeStream) {
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            const delta = event.delta.text ?? '';
+            rawResponse += delta;
+            pendingTokenBatch += delta;
+
+            const hasSentenceBreak = /[.!?]\s$/.test(pendingTokenBatch);
+            const trimmedPending = pendingTokenBatch.trim();
+            const shouldFlushInitial = !initialChunkSent && trimmedPending.length > 0;
+            if (
+              pendingTokenBatch.length >= TOKEN_BATCH_TARGET ||
+              hasSentenceBreak ||
+              shouldFlushInitial
+            ) {
+              const label = shouldFlushInitial ? 'initial' : 'batch';
+              flushPendingTokens(label);
+            }
+          } else if (event.type === 'message_delta') {
+            if (event.delta?.stop_reason) {
+              streamLogger.debug('Claude stop reason observed', { stopReason: event.delta.stop_reason });
+            }
+          } else if (event.type === 'error') {
+            streamLogger.error('Claude stream error event', {
+              errorMessage: (event as any).error?.message,
+            });
+            throw new Error((event as any).error?.message || 'Claude streaming error');
           }
         }
 
         flushPendingTokens('final');
         logStreamingDone();
-      } catch (streamError) {
-        streamLogger.error('OpenAI stream iteration failed', {
-          errorMessage: streamError instanceof Error ? streamError.message : String(streamError),
-        });
-        throw streamError;
+
+        const finalMessage = await claudeStream.finalMessage();
+        if (finalMessage?.model) {
+          modelUsed = finalMessage.model;
+        }
+
+        if (!rawResponse.trim()) {
+          throw new Error(`${CLAUDE_MODEL} returned empty response`);
+        }
+
+        return { rawResponse, modelUsed };
+      };
+
+      const providers = [
+        { name: 'Gemini', runner: runGemini },
+        { name: 'ChatGPT', runner: runOpenAI },
+        { name: 'Claude', runner: runClaude },
+      ];
+
+      let modelResult: ModelResult | null = null;
+      let lastError: any = null;
+
+      for (const provider of providers) {
+        const currentIndex = providers.findIndex((p) => p.name === provider.name);
+        const nextProvider = currentIndex >= 0 && currentIndex + 1 < providers.length
+          ? providers[currentIndex + 1].name
+          : null;
+        let emittedTokens = false;
+        const emitToken = (text: string) => {
+          emittedTokens = true;
+          sendEvent('token', { text });
+        };
+
+        try {
+          handlerLogger.info('Model attempt started', { provider: provider.name });
+          modelResult = await provider.runner(emitToken);
+          handlerLogger.info('Model attempt succeeded', { provider: provider.name });
+          break;
+        } catch (providerError: any) {
+          lastError = providerError;
+          handlerLogger.error(`${provider.name} provider failed`, {
+            errorMessage: providerError?.message ?? String(providerError),
+          });
+          if (emittedTokens) {
+            throw providerError;
+          }
+          handlerLogger.warn('Falling back to next provider', {
+            failedProvider: provider.name,
+            nextProvider: nextProvider ?? 'none',
+          });
+          sendEvent('status', { stage: 'model', message: `${provider.name} unavailable, trying next provider…` });
+        }
       }
 
-      const finalResponse = await openaiStream.finalResponse();
-      if (finalResponse?.model) {
-        modelUsed = finalResponse.model;
+      if (!modelResult) {
+        throw lastError ?? new Error('All model providers failed');
       }
-      const durationSeconds = (performance.now() - startTime) / 1000;
-      streamLogger.info('OpenAI streaming latency recorded', {
-        model: OPENAI_MODEL,
-        durationSeconds: Number(durationSeconds.toFixed(2)),
-      });
 
-      if (!rawResponse.trim()) {
-        throw new Error(`${OPENAI_MODEL} returned empty response`);
-      }
+      const { rawResponse, modelUsed } = modelResult;
+      handlerLogger.info('Model used for response', { modelUsed });
 
       sendEvent('status', { stage: 'parse', message: 'Parsing AI response…' });
 

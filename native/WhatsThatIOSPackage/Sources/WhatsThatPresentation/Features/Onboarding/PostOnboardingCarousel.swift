@@ -33,25 +33,25 @@ struct PostOnboardingCarousel: View {
         Slide(
             title: "Welcome aboard!",
             message: "You’ve got 3 free credits. Each credit explains one photo with quick, personalized insights—no typing.",
-            imageName: "OnboardingIntro",
+            imageName: "post1",
             kind: .overview
         ),
         Slide(
             title: "Snap and get answers.",
             message: "Point your camera and get instant explanations tailored to what you care about.",
-            imageName: "OnboardingStories",
+            imageName: "post2",
             kind: .overview
         ),
         Slide(
             title: "Unlock local insights.",
             message: "With location permissions, discoveries include nearby places and meaningful context. Used only to improve results—never sold.",
-            imageName: "OnboardingIntro",
+            imageName: "post3",
             kind: .locationPermission
         ),
         Slide(
             title: "Make your first discovery.",
             message: "Use your 3 free credits now—try Camera take a picture or Upload a photo from your gallery.",
-            imageName: "OnboardingStories",
+            imageName: "post4",
             kind: .actions
         )
     ]

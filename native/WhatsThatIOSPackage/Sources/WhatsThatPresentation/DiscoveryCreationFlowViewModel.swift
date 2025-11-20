@@ -116,6 +116,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     func startFlow(retake: Bool = false) {
         debugLog("startFlow(retake: \(retake))")
+        guard canStartFlow(retake: retake) else {
+            debugLog("startFlow blocked; currentState=\(flowStateSummary(flowState))")
+            return
+        }
         Task {
             await beginFlow(retake: retake)
         }
@@ -207,6 +211,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             flowState = retake ? .capturingRetake : .requestingPermissions
             let granted = await captureService.requestPermission(for: .camera)
             guard granted else {
+                debugLog("Camera permission denied in beginFlow(retake: \(retake))")
                 error = .permissionDenied
                 flowState = .error(message: FlowError.permissionDenied.errorDescription ?? "Permission denied")
                 return
@@ -252,7 +257,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
             flowState = retake ? .capturingRetake : .capturingInitial
             do {
+                debugLog("Invoking captureService.capturePhoto() (retake: \(retake))")
                 let media = try await captureService.capturePhoto()
+                debugLog("captureService.capturePhoto() completed successfully")
                 await prepareConfirmation(with: media)
             } catch {
                 if DiscoveryFlowCancellationError.isCancellation(error) {
@@ -261,6 +268,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     flowState = .idle
                     return
                 }
+                debugLog("captureService.capturePhoto() failed with error: \(error)")
                 self.error = .captureFailed
                 flowState = .error(message: FlowError.captureFailed.errorDescription ?? "Capture failed")
             }
@@ -845,6 +853,20 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private func syncFlowStateWithAnalysis() {
         if let analysisState {
             flowState = .analyzing(analysisState)
+        }
+    }
+
+    private func canStartFlow(retake: Bool) -> Bool {
+        switch flowState {
+        case .idle, .cancelled, .error:
+            return true
+        case .confirming:
+            // Allow retake from confirmation, but do not implicitly
+            // start a new capture unless the user explicitly requests it.
+            return retake
+        case .requestingPermissions, .capturingInitial, .capturingRetake,
+             .selectingInitial, .selectingRetake, .analyzing:
+            return false
         }
     }
 

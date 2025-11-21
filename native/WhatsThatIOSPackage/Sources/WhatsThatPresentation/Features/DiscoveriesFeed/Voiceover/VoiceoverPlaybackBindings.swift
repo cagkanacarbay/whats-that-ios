@@ -71,9 +71,12 @@ struct VoiceoverPlaybackBindings {
 
     @MainActor
     func commitPendingSliderValue() {
-        if let pendingSliderValue {
-            controller.seek(to: pendingSliderValue)
+        guard let pendingSliderValue else {
+            return
         }
-        pendingSliderValue = nil
+
+        controller.seek(to: pendingSliderValue) {
+            self.pendingSliderValue = nil
+        }
     }
 }

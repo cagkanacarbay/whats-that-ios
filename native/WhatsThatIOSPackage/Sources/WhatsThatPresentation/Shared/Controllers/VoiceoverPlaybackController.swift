@@ -44,6 +44,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var assetStates: [Int64: DiscoveryVoiceoverAsset] = [:]
     @Published public var isDetailOverlayActive: Bool = false
+    @Published public var suppressProgressUpdates: Bool = false
 
     private let repository: any DiscoveryVoiceoverRepository
     private let audioSession: AVAudioSession
@@ -52,6 +53,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var playerItemStatusObservation: NSKeyValueObservation?
     private var endPlaybackObserver: NSObjectProtocol?
     private var playTask: Task<Void, Never>?
+    private var isSeeking = false
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -181,15 +183,23 @@ public extension VoiceoverPlaybackController {
         teardownObservers()
     }
 
-    func seek(to seconds: TimeInterval) {
+    func seek(to seconds: TimeInterval, completion: (() -> Void)? = nil) {
         guard let duration, duration > 0 else {
+            completion?()
             return
         }
 
         let clamped = max(0, min(seconds, duration))
         let time = CMTime(seconds: clamped, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-        position = clamped
+        isSeeking = true
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.position = clamped
+                self.isSeeking = false
+                completion?()
+            }
+        }
     }
 
     func isLoading(discoveryId: Int64) -> Bool {
@@ -304,6 +314,7 @@ private extension VoiceoverPlaybackController {
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             Task { @MainActor in
+                guard !self.suppressProgressUpdates, !self.isSeeking else { return }
                 self.position = time.seconds
                 if self.duration == nil {
                     if let asset = self.player.currentItem?.asset,

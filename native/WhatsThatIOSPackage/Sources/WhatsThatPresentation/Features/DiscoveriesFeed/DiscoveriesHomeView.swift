@@ -204,7 +204,7 @@ struct DiscoveriesHomeView: View {
                         onShowOptions: nil,
                         onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
                     )
-                    .ignoresSafeArea(edges: .top)
+                    .ignoresSafeArea(edges: [.top, .bottom])
                     .transition(.identity)
                     .simultaneousGesture(detailEdgeDragGesture, including: .gesture)
                     .zIndex(5)

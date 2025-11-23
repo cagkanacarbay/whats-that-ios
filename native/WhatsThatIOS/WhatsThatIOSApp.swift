@@ -20,4 +20,4 @@ struct WhatsThatIOSApp: App {
                 }
         }
     }
-}
+    }

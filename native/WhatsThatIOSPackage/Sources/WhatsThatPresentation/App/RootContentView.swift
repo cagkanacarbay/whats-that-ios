@@ -26,6 +26,9 @@ public struct RootContentView: View {
     private let makeNearbyCacheInspector: (() -> AnyView)?
     private let startLocationTracking: (() async -> Void)?
     private let stopLocationTracking: (() -> Void)?
+    private let loadVoiceoverPreferences: () async -> VoiceoverPreferences
+    private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
+    private let fetchVoiceOptions: () async -> [VoiceModelOption]
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -42,7 +45,10 @@ public struct RootContentView: View {
         clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) },
         makeNearbyCacheInspector: (() -> AnyView)? = nil,
         startLocationTracking: (() async -> Void)? = nil,
-        stopLocationTracking: (() -> Void)? = nil
+        stopLocationTracking: (() -> Void)? = nil,
+        loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
+        saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
+        fetchVoiceOptions: @escaping () async -> [VoiceModelOption]
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -54,6 +60,9 @@ public struct RootContentView: View {
         self.makeNearbyCacheInspector = makeNearbyCacheInspector
         self.startLocationTracking = startLocationTracking
         self.stopLocationTracking = stopLocationTracking
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
         _viewModel = StateObject(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -239,7 +248,10 @@ public struct RootContentView: View {
                 },
                 onClose: {
                     isSettingsPresented = false
-                }
+                },
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }

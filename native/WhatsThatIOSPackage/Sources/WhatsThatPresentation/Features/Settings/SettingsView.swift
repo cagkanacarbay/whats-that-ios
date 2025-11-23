@@ -6,8 +6,12 @@ struct SettingsView: View {
     private let makeCreditsView: (@escaping (Int?) -> Void) -> AnyView
     private let makeNearbyCacheInspector: () -> AnyView
     private let onClose: () -> Void
+    private let loadVoiceoverPreferences: () async -> VoiceoverPreferences
+    private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
+    private let fetchVoiceOptions: () async -> [VoiceModelOption]
 
     @StateObject private var viewModel: SettingsViewModel
+    @StateObject private var voiceoverViewModel: VoiceoverSettingsViewModel
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     @State private var isNearbyInspectorPresented = false
 
@@ -21,11 +25,17 @@ struct SettingsView: View {
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
-        onClose: @escaping () -> Void
+        onClose: @escaping () -> Void,
+        loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
+        saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
+        fetchVoiceOptions: @escaping () async -> [VoiceModelOption]
     ) {
         self.makeCreditsView = makeCreditsView
         self.makeNearbyCacheInspector = makeNearbyCacheInspector
         self.onClose = onClose
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
         _viewModel = StateObject(
             wrappedValue: SettingsViewModel(
                 userEmail: userEmail,
@@ -38,6 +48,19 @@ struct SettingsView: View {
                 onClose: onClose
             )
         )
+        _voiceoverViewModel = StateObject(
+            wrappedValue: VoiceoverSettingsViewModel(
+                initialPreferences: VoiceoverPreferences(
+                    autoEnabled: false,
+                    voiceModelId: "",
+                    ttsModel: "s1",
+                    prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+                ),
+                loadPreferences: loadVoiceoverPreferences,
+                savePreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions
+            )
+        )
     }
 
     var body: some View {
@@ -45,12 +68,14 @@ struct SettingsView: View {
             List {
                 creditsSection
                 themeSection
+                voiceoverSection
                 accountSection
                 onboardingSection
                 devSection
             }
             .task {
                 await viewModel.refreshCreditBalance()
+                await voiceoverViewModel.load()
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -107,6 +132,66 @@ struct SettingsView: View {
                         dismissButton: .default(Text("OK")) {
                             viewModel.dismissAlert()
                         }
+                    )
+                }
+            }
+        }
+    }
+
+    private var voiceoverSection: some View {
+        Section(header: Text("Voiceover")) {
+            Toggle("Auto-generate after analysis", isOn: $voiceoverViewModel.preferences.autoEnabled)
+                .onChange(of: voiceoverViewModel.preferences.autoEnabled) { _, newValue in
+                    Task { await voiceoverViewModel.updateAutoEnabled(newValue) }
+                }
+
+            if voiceoverViewModel.isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+            } else {
+                Picker("Voice", selection: $voiceoverViewModel.preferences.voiceModelId) {
+                    ForEach(voiceoverViewModel.voiceOptions, id: \.voiceModelId) { option in
+                        Text(option.displayName).tag(option.voiceModelId)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: voiceoverViewModel.preferences.voiceModelId) { _, newValue in
+                    Task { await voiceoverViewModel.selectVoice(withId: newValue) }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Speed")
+                        Spacer()
+                        Text(String(format: "%.1fx", voiceoverViewModel.preferences.prosody.speed ?? 1.0))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { voiceoverViewModel.preferences.prosody.speed ?? 1.0 },
+                            set: { newValue in
+                                Task { await voiceoverViewModel.updateSpeed(newValue) }
+                            }
+                        ),
+                        in: 0.5...2.0
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Volume")
+                        Spacer()
+                        Text(String(format: "%.0f dB", voiceoverViewModel.preferences.prosody.volume ?? 0))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { voiceoverViewModel.preferences.prosody.volume ?? 0 },
+                            set: { newValue in
+                                Task { await voiceoverViewModel.updateVolume(newValue) }
+                            }
+                        ),
+                        in: -20...20
                     )
                 }
             }

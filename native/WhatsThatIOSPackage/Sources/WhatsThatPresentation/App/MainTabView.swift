@@ -292,7 +292,7 @@ struct MainTabView: View {
 
         // Only when the player has something to show.
         switch voiceoverController.playbackState {
-        case .idle, .unavailable:
+        case .idle, .failed:
             return false
         default:
             return voiceoverController.currentDiscovery != nil

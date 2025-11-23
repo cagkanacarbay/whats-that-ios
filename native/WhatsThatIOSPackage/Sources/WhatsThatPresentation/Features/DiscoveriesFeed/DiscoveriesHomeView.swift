@@ -124,10 +124,12 @@ struct DiscoveriesHomeView: View {
                 .coordinateSpace(name: "discoveriesScroll")
                 .refreshable {
                     await viewModel.refresh()
+                    prefetchVoiceovers()
                 }
                 .task {
                     await viewModel.loadInitialIfNeeded()
                     presentPendingDiscoveryIfNeeded()
+                    prefetchVoiceovers()
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
@@ -136,6 +138,7 @@ struct DiscoveriesHomeView: View {
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
+                    prefetchVoiceovers()
                 }
                 .onChange(of: pendingDiscoveryId) {
                     presentPendingDiscoveryIfNeeded()
@@ -367,6 +370,11 @@ struct DiscoveriesHomeView: View {
                 }
             }
         }
+    }
+
+    private func prefetchVoiceovers() {
+        let ids = viewModel.discoveries.map(\.id)
+        voiceoverController.prefetch(for: ids)
     }
 
     private func updateSafeAreaBottomInsetIfNeeded(_ value: CGFloat) {

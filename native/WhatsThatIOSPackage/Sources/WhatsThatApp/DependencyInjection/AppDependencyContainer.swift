@@ -21,6 +21,8 @@ public struct AppDependencyContainer: Sendable {
 #if os(iOS)
     private let discoveryCreationProvider: DiscoveryCreationDependencyProvider
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
+    private let voiceInventoryRepository: VoiceInventoryRepository
+    private let voiceoverPreferencesStore: VoiceoverPreferencesStore
     private let creditsRepository: DiscoveryCreditsRepository
     private let creditsStore: any CreditsStore
     private let creditBalanceStore: CreditBalanceStore
@@ -35,6 +37,8 @@ public struct AppDependencyContainer: Sendable {
         onboardingRepository: OnboardingRepository,
         discoveryCreationProvider: DiscoveryCreationDependencyProvider,
         voiceoverRepository: any DiscoveryVoiceoverRepository,
+        voiceInventoryRepository: VoiceInventoryRepository,
+        voiceoverPreferencesStore: VoiceoverPreferencesStore,
         creditsRepository: DiscoveryCreditsRepository,
         creditsStore: any CreditsStore,
         creditBalanceStore: CreditBalanceStore,
@@ -48,6 +52,8 @@ public struct AppDependencyContainer: Sendable {
         self.flowResolver = AppFlowResolver()
         self.discoveryCreationProvider = discoveryCreationProvider
         self.voiceoverRepository = voiceoverRepository
+        self.voiceInventoryRepository = voiceInventoryRepository
+        self.voiceoverPreferencesStore = voiceoverPreferencesStore
         self.creditsRepository = creditsRepository
         self.creditsStore = creditsStore
         self.creditBalanceStore = creditBalanceStore
@@ -167,6 +173,13 @@ public extension AppDependencyContainer {
             nearbyPlacesFetcher: nearbyPlacesFetcher
         )
 
+        let voiceoverRepository = SupabaseVoiceoverRepository(
+            client: client,
+            configuration: configuration,
+            urlSession: session
+        )
+        let voiceInventoryRepository = VoiceInventoryRepository(client: client)
+        let voiceoverPreferencesStore = VoiceoverPreferencesStore()
         let discoveryCreationProvider = DiscoveryCreationDependencyProvider(
             maxImageDimension: 2048,
             recentHistoryLimit: 25,
@@ -178,9 +191,10 @@ public extension AppDependencyContainer {
             analysisClient: analysisClient,
             imageEncoder: imageEncoder,
             pushService: pushService,
-            locationService: locationService
+            locationService: locationService,
+            voiceoverRepository: voiceoverRepository,
+            voiceoverPreferencesStore: voiceoverPreferencesStore
         )
-        let voiceoverRepository = SupabaseVoiceoverRepository(client: client)
         #endif
 
         #if os(iOS)
@@ -191,6 +205,8 @@ public extension AppDependencyContainer {
             onboardingRepository: onboardingRepository,
             discoveryCreationProvider: discoveryCreationProvider,
             voiceoverRepository: voiceoverRepository,
+            voiceInventoryRepository: voiceInventoryRepository,
+            voiceoverPreferencesStore: voiceoverPreferencesStore,
             creditsRepository: creditsRepository,
             creditsStore: creditsStore,
             creditBalanceStore: creditBalanceStore,
@@ -226,7 +242,29 @@ public extension AppDependencyContainer {
 
     @MainActor
     func makeVoiceoverPlaybackController() -> VoiceoverPlaybackController {
-        VoiceoverPlaybackController(repository: voiceoverRepository)
+        let controller = VoiceoverPlaybackController(
+            repository: voiceoverRepository,
+            preferencesStore: voiceoverPreferencesStore
+        )
+        Task {
+            let preferences = await voiceoverPreferencesStore.load()
+            await MainActor.run {
+                controller.updatePreferences(preferences)
+            }
+        }
+        return controller
+    }
+
+    func loadVoiceoverPreferences() async -> VoiceoverPreferences {
+        await voiceoverPreferencesStore.load()
+    }
+
+    func saveVoiceoverPreferences(_ preferences: VoiceoverPreferences) async {
+        await voiceoverPreferencesStore.save(preferences)
+    }
+
+    func fetchVoiceOptions() async -> [VoiceModelOption] {
+        await voiceInventoryRepository.fetchVoiceOptions()
     }
 
     @MainActor

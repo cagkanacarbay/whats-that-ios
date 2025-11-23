@@ -1,8 +1,11 @@
-#if USE_REMOTE_DEPS && canImport(Supabase)
 import Foundation
+import WhatsThatDomain
+
+#if USE_REMOTE_DEPS && canImport(Supabase)
 import OSLog
 import Supabase
-import WhatsThatDomain
+import WhatsThatInfrastructure
+import WhatsThatShared
 
 private let supabaseVoiceoverLogger = Logger(
     subsystem: "com.example.whatsthatios",
@@ -12,291 +15,485 @@ private let supabaseVoiceoverLogger = Logger(
 public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     private struct CacheEntry {
         let asset: DiscoveryVoiceoverAsset
-        let expirationDate: Date
+        let updatedAt: Date?
+        let expiresAt: Date?
 
         var isValid: Bool {
-            Date() < expirationDate
+            if let expiresAt {
+                return Date() < expiresAt
+            }
+            return true
         }
     }
 
     private let client: SupabaseClient
-    private let bucketName: String
-    private let audioExtension: String
-    private let timingExtension: String
-    private let voiceoverModels: [String]
+    private let configuration: AppConfiguration
+    private let urlSession: URLSession
     private let signedURLTTL: TimeInterval
-    private let metadataCacheInterval: TimeInterval
-    private let minVoiceoverDiscoveryId: Int64
     private var cache: [Int64: CacheEntry] = [:]
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
 
     public init(
         client: SupabaseClient,
-        bucketName: String = "voiceovers",
-        audioExtension: String = ".wav",
-        timingExtension: String = ".json",
-        voiceoverModels: [String] = [
-            "kittentts-nano-0.2-expr-voice-3-m",
-            "kittentts-nano-0.1-expr-voice-3-m",
-            "kittentts-0.1.0-expr-voice-4-m"
-        ],
-        signedURLTTL: TimeInterval = 60 * 60 * 24 * 7,
-        metadataCacheInterval: TimeInterval = 60,
-        minVoiceoverDiscoveryId: Int64 = 868
+        configuration: AppConfiguration,
+        urlSession: URLSession = .shared,
+        signedURLTTL: TimeInterval = 60 * 60 * 24 * 7
     ) {
         self.client = client
-        self.bucketName = bucketName
-        self.audioExtension = audioExtension
-        self.timingExtension = timingExtension
-        self.voiceoverModels = voiceoverModels
+        self.configuration = configuration
+        self.urlSession = urlSession
         self.signedURLTTL = signedURLTTL
-        self.metadataCacheInterval = metadataCacheInterval
-        self.minVoiceoverDiscoveryId = minVoiceoverDiscoveryId
     }
 
-    public func ensureVoiceoverAsset(
+    // Backward-compatible initializer for existing call sites
+    public init(
+        client: SupabaseClient,
+        configuration: AppConfiguration,
+        urlSession: URLSession = .shared
+    ) {
+        self.init(client: client, configuration: configuration, urlSession: urlSession, signedURLTTL: 60 * 60 * 24 * 7)
+    }
+
+    public func fetchVoiceovers(for discoveryIds: [Int64]) async -> [DiscoveryVoiceoverAsset] {
+        guard !discoveryIds.isEmpty else { return [] }
+
+        do {
+            let response: PostgrestResponse<[VoiceoverTableRow]> = try await client
+                .from("discovery_voiceovers")
+                .select()
+                .in("discovery_id", values: discoveryIds.map { Int($0) })
+                .execute()
+            let rows = response.value
+
+            var mapped: [Int64: DiscoveryVoiceoverAsset] = [:]
+            for row in rows {
+                let audioURL = await signIfNeeded(
+                    discoveryId: row.discovery_id,
+                    fileName: row.file_name,
+                    status: row.status
+                )
+                let expiry = audioURL != nil ? Date().addingTimeInterval(signedURLTTL) : nil
+                let asset = mapAsset(
+                    discoveryId: row.discovery_id,
+                    status: row.status,
+                    audioURLString: audioURL?.absoluteString,
+                    provider: row.provider,
+                    ttsModel: row.tts_model,
+                    voiceModelId: row.voice_model_id,
+                    fileName: row.file_name,
+                    fileExtension: row.file_extension,
+                    requestedAt: date(from: row.requested_at),
+                    updatedAt: date(from: row.updated_at),
+                    errorReason: row.error_reason,
+                    wasExisting: true,
+                    wasRefunded: false
+                )
+                mapped[row.discovery_id] = asset
+                cache[row.discovery_id] = CacheEntry(asset: asset, updatedAt: asset.updatedAt, expiresAt: expiry)
+            }
+
+            return discoveryIds.map { id in
+                if let asset = mapped[id] {
+                    return asset
+                }
+                return DiscoveryVoiceoverAsset(
+                    discoveryId: id,
+                    status: .none,
+                    audioURL: nil,
+                    provider: nil,
+                    ttsModel: nil,
+                    voiceModelId: nil,
+                    fileName: nil,
+                    fileExtension: nil,
+                    requestedAt: nil,
+                    updatedAt: nil,
+                    errorReason: nil,
+                    wasExistingResponse: false,
+                    wasRefunded: false
+                )
+            }
+        } catch {
+            supabaseVoiceoverLogger.error("Failed to fetch voiceovers: \(error.localizedDescription, privacy: .public)")
+            return discoveryIds.map { id in
+                DiscoveryVoiceoverAsset(
+                    discoveryId: id,
+                    status: .missing,
+                    audioURL: nil,
+                    provider: nil,
+                    ttsModel: nil,
+                    voiceModelId: nil,
+                    fileName: nil,
+                    fileExtension: nil,
+                    requestedAt: nil,
+                    updatedAt: nil,
+                    errorReason: error.localizedDescription,
+                    wasExistingResponse: false,
+                    wasRefunded: false
+                )
+            }
+        }
+    }
+
+    public func requestVoiceover(
         for discoveryId: Int64,
-        options: DiscoveryVoiceoverRequestOptions
+        voiceModelId: String,
+        ttsModel: String,
+        prosody: VoiceoverProsody?
     ) async -> DiscoveryVoiceoverAsset {
-        if !options.forceRefresh,
-           let cached = cache[discoveryId],
-           cached.isValid {
-            return cached.asset
+        guard let supabaseURL = configuration.supabaseURL else {
+            return DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .failed,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: "Missing Supabase configuration",
+                wasExistingResponse: false,
+                wasRefunded: false
+            )
         }
 
-        if discoveryId < minVoiceoverDiscoveryId {
-            let asset = DiscoveryVoiceoverAsset(
+        guard let accessToken = client.auth.currentSession?.accessToken else {
+            return DiscoveryVoiceoverAsset(
                 discoveryId: discoveryId,
-                status: .missing,
+                status: .failed,
                 audioURL: nil,
-                modelIdentifier: nil,
-                fetchedAt: Date(),
-                errorDescription: nil
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: "Not authenticated",
+                wasExistingResponse: false,
+                wasRefunded: false
             )
-            cache[discoveryId] = CacheEntry(
-                asset: asset,
-                expirationDate: Date().addingTimeInterval(metadataCacheInterval)
+        }
+
+        let baseURL = SupabaseDiscoveryAnalysisClient.functionsBaseURL(from: supabaseURL)
+        let requestURL = baseURL.appendingPathComponent("generate-voiceover")
+
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let body = VoiceoverRequestBody(
+            discovery_id: discoveryId,
+            voice_model_id: voiceModelId,
+            tts_model: ttsModel,
+            prosody: prosody
+        )
+
+        do {
+            request.httpBody = try JSONEncoder().encode(body)
+        } catch {
+            return DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .failed,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: error.localizedDescription,
+                wasExistingResponse: false,
+                wasRefunded: false
             )
-            return asset
         }
 
         do {
-            let files = try await client.storage
-                .from(bucketName)
-                .list(
-                    path: "\(discoveryId)",
-                    options: SearchOptions(limit: 50)
-                )
+            let (data, response) = try await urlSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse)
+            }
 
-            let names = files.map(\.name)
-            let resolved = VoiceoverAssetResolver.resolve(
-                availableFileNames: names,
-                voiceoverModels: voiceoverModels,
-                audioExtension: audioExtension,
-                timingExtension: timingExtension
-            )
-
-            guard let audioFileName = resolved.audioFileName else {
-                let asset = DiscoveryVoiceoverAsset(
+            if httpResponse.statusCode == 402 {
+                return DiscoveryVoiceoverAsset(
                     discoveryId: discoveryId,
-                    status: .missing,
+                    status: .failed,
                     audioURL: nil,
-                    modelIdentifier: nil,
-                    fetchedAt: Date(),
-                    errorDescription: nil
+                    provider: nil,
+                    ttsModel: ttsModel,
+                    voiceModelId: voiceModelId,
+                    fileName: nil,
+                    fileExtension: nil,
+                    requestedAt: nil,
+                    updatedAt: nil,
+                    errorReason: "insufficient_credits",
+                    wasExistingResponse: false,
+                    wasRefunded: false
                 )
-                cache[discoveryId] = CacheEntry(
+            }
+
+            if (200..<300).contains(httpResponse.statusCode) {
+                let response = try Self.decoder.decode(VoiceoverEdgeResponse.self, from: data)
+                let asset = mapAsset(
+                    discoveryId: response.discoveryId,
+                    status: response.status,
+                    audioURLString: response.audioURL,
+                    provider: response.provider,
+                    ttsModel: response.ttsModel,
+                    voiceModelId: response.voiceModelId,
+                    fileName: response.fileName,
+                    fileExtension: response.fileExtension,
+                    requestedAt: response.requestedAt,
+                    updatedAt: response.updatedAt,
+                    errorReason: response.errorReason,
+                    wasExisting: response.wasExisting ?? false,
+                    wasRefunded: response.wasRefunded ?? false
+                )
+                cache[asset.discoveryId] = CacheEntry(
                     asset: asset,
-                    expirationDate: Date().addingTimeInterval(metadataCacheInterval)
+                    updatedAt: asset.updatedAt,
+                    expiresAt: response.audioURLExpiresAt
                 )
                 return asset
             }
 
-            let objectPath = "\(discoveryId)/\(audioFileName)"
-            do {
-                let signedURL = try await client.storage
-                    .from(bucketName)
-                    .createSignedURL(
-                        path: objectPath,
-                        expiresIn: Int(signedURLTTL)
-                    )
-
-                let asset = DiscoveryVoiceoverAsset(
-                    discoveryId: discoveryId,
-                    status: .available,
-                    audioURL: signedURL,
-                    modelIdentifier: resolved.modelIdentifier,
-                    fetchedAt: Date(),
-                    errorDescription: nil
-                )
-                cache[discoveryId] = CacheEntry(
-                    asset: asset,
-                    expirationDate: Date().addingTimeInterval(signedURLTTL * 0.9)
-                )
-                return asset
-            } catch {
-                if isNotFoundError(error) {
-                    supabaseVoiceoverLogger.debug(
-                        "Signed URL missing for \(objectPath, privacy: .public)"
-                    )
-                    let asset = DiscoveryVoiceoverAsset(
-                        discoveryId: discoveryId,
-                        status: .missing,
-                        audioURL: nil,
-                        modelIdentifier: resolved.modelIdentifier,
-                        fetchedAt: Date(),
-                        errorDescription: nil
-                    )
-                    cache[discoveryId] = CacheEntry(
-                        asset: asset,
-                        expirationDate: Date().addingTimeInterval(metadataCacheInterval)
-                    )
-                    return asset
-                }
-
-                supabaseVoiceoverLogger.error(
-                    "Failed to create signed URL for \(objectPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-                let asset = DiscoveryVoiceoverAsset(
-                    discoveryId: discoveryId,
-                    status: .error,
-                    audioURL: nil,
-                    modelIdentifier: resolved.modelIdentifier,
-                    fetchedAt: Date(),
-                    errorDescription: error.localizedDescription
-                )
-                cache[discoveryId] = CacheEntry(
-                    asset: asset,
-                    expirationDate: Date().addingTimeInterval(metadataCacheInterval)
-                )
-                return asset
-            }
-        } catch {
-            supabaseVoiceoverLogger.error(
-                "Failed to list voiceover assets for discovery \(discoveryId, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-            let asset = DiscoveryVoiceoverAsset(
+            let message = decodeErrorMessage(data: data) ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
+            return DiscoveryVoiceoverAsset(
                 discoveryId: discoveryId,
-                status: isNotFoundError(error) ? .missing : .error,
+                status: .failed,
                 audioURL: nil,
-                modelIdentifier: nil,
-                fetchedAt: Date(),
-                errorDescription: error.localizedDescription
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: message,
+                wasExistingResponse: false,
+                wasRefunded: false
             )
-            cache[discoveryId] = CacheEntry(
-                asset: asset,
-                expirationDate: Date().addingTimeInterval(metadataCacheInterval)
+        } catch {
+            supabaseVoiceoverLogger.error("Voiceover request failed: \(error.localizedDescription, privacy: .public)")
+            return DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .failed,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: error.localizedDescription,
+                wasExistingResponse: false,
+                wasRefunded: false
             )
-            return asset
         }
-    }
-
-    private func isNotFoundError(_ error: Error) -> Bool {
-        if let storageError = error as? StorageError {
-            return storageError.statusCode == "404"
-                || storageError.message.lowercased().contains("not found")
-        }
-
-        let description = error.localizedDescription.lowercased()
-        if description.contains("404") || description.contains("not found") {
-            return true
-        }
-
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return false
-        }
-
-        return nsError.code == 404
     }
 }
 
-@usableFromInline
-struct VoiceoverAssetResolver {
-    let availableFileNames: [String]
-    let voiceoverModels: [String]
-    let audioExtension: String
-    let timingExtension: String
+private func date(from string: String?) -> Date? {
+    guard let string else { return nil }
+    return ISO8601DateFormatter().date(from: string)
+}
 
-    init(
-        availableFileNames: [String],
-        voiceoverModels: [String],
-        audioExtension: String,
-        timingExtension: String
-    ) {
-        self.availableFileNames = availableFileNames
-        self.voiceoverModels = voiceoverModels
-        self.audioExtension = audioExtension
-        self.timingExtension = timingExtension
-    }
-
-    var audioFileName: String? {
-        for model in voiceoverModels {
-            let candidate = model + audioExtension
-            if availableFileNames.contains(candidate) {
-                return candidate
-            }
+private extension SupabaseVoiceoverRepository {
+    func signIfNeeded(discoveryId: Int64, fileName: String?, status: String) async -> URL? {
+        guard status.lowercased() == "ready",
+              let fileName,
+              !fileName.isEmpty else {
+            return nil
         }
 
-        return availableFileNames.first { $0.hasSuffix(audioExtension) }
-    }
-
-    var modelIdentifier: String? {
-        guard let audioFileName else { return nil }
-        let trimmed = audioFileName.replacingOccurrences(of: audioExtension, with: "")
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    var timingFileName: String? {
-        if let modelIdentifier {
-            let candidate = modelIdentifier + timingExtension
-            if availableFileNames.contains(candidate) {
-                return candidate
-            }
+        let path = "\(discoveryId)/\(fileName)"
+        do {
+            let signedURL = try await client.storage
+                .from("voiceovers")
+                .createSignedURL(
+                    path: path,
+                    expiresIn: Int(signedURLTTL)
+                )
+            return signedURL
+        } catch {
+            supabaseVoiceoverLogger.error("Failed to sign voiceover URL for \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
         }
-
-        guard let audioFileName else { return nil }
-        let base = audioFileName.replacingOccurrences(of: audioExtension, with: "")
-        let fallback = base + timingExtension
-        return availableFileNames.contains(fallback) ? fallback : nil
     }
 
-    static func resolve(
-        availableFileNames: [String],
-        voiceoverModels: [String],
-        audioExtension: String,
-        timingExtension: String
-    ) -> (audioFileName: String?, modelIdentifier: String?, timingFileName: String?) {
-        let resolver = VoiceoverAssetResolver(
-            availableFileNames: availableFileNames,
-            voiceoverModels: voiceoverModels,
-            audioExtension: audioExtension,
-            timingExtension: timingExtension
+    func mapAsset(
+        discoveryId: Int64,
+        status: String,
+        audioURLString: String?,
+        provider: String?,
+        ttsModel: String?,
+        voiceModelId: String?,
+        fileName: String?,
+        fileExtension: String?,
+        requestedAt: Date?,
+        updatedAt: Date?,
+        errorReason: String?,
+        wasExisting: Bool,
+        wasRefunded: Bool
+    ) -> DiscoveryVoiceoverAsset {
+        let resolvedStatus = Self.status(from: status)
+        let resolvedURL = audioURLString.flatMap { URL(string: $0) }
+
+        return DiscoveryVoiceoverAsset(
+            discoveryId: discoveryId,
+            status: resolvedURL == nil && resolvedStatus == .ready ? .processing : resolvedStatus,
+            audioURL: resolvedURL,
+            provider: provider,
+            ttsModel: ttsModel,
+            voiceModelId: voiceModelId,
+            fileName: fileName,
+            fileExtension: fileExtension,
+            requestedAt: requestedAt,
+            updatedAt: updatedAt,
+            errorReason: errorReason,
+            wasExistingResponse: wasExisting,
+            wasRefunded: wasRefunded
         )
-        return (
-            resolver.audioFileName,
-            resolver.modelIdentifier,
-            resolver.timingFileName
-        )
+    }
+
+    static func status(from rawValue: String?) -> DiscoveryVoiceoverStatus {
+        switch rawValue?.lowercased() {
+        case "ready":
+            return .ready
+        case "processing":
+            return .processing
+        case "failed":
+            return .failed
+        case "missing":
+            return .missing
+        default:
+            return .missing
+        }
+    }
+
+    func decodeErrorMessage(data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return nil
+        }
+        if let message = json["message"] as? String {
+            return message
+        }
+        if let error = json["error"] as? String {
+            return error
+        }
+        return nil
     }
 }
+
+private struct VoiceoverTableRow: Decodable {
+    let discovery_id: Int64
+    let provider: String?
+    let tts_model: String?
+    let voice_model_id: String?
+    let file_name: String?
+    let file_extension: String?
+    let status: String
+    let error_reason: String?
+    let requested_at: String?
+    let updated_at: String?
+}
+
+private struct VoiceoverRequestBody: Encodable {
+    let discovery_id: Int64
+    let voice_model_id: String
+    let tts_model: String
+    let prosody: VoiceoverProsody?
+}
+
+private struct VoiceoverEdgeResponse: Decodable {
+    let id: Int64
+    let discoveryId: Int64
+    let provider: String?
+    let ttsModel: String?
+    let voiceModelId: String?
+    let fileName: String?
+    let fileExtension: String?
+    let status: String
+    let errorReason: String?
+    let requestedAt: Date?
+    let updatedAt: Date?
+    let audioURL: String?
+    let audioURLExpiresAt: Date?
+    let wasRefunded: Bool?
+    let wasExisting: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case discoveryId = "discovery_id"
+        case provider
+        case ttsModel = "tts_model"
+        case voiceModelId = "voice_model_id"
+        case fileName = "file_name"
+        case fileExtension = "file_extension"
+        case status
+        case errorReason = "error_reason"
+        case requestedAt = "requested_at"
+        case updatedAt = "updated_at"
+        case audioURL = "audio_url"
+        case audioURLExpiresAt = "audio_url_expires_at"
+        case wasRefunded = "was_refunded"
+        case wasExisting = "was_existing"
+    }
+}
+
 #else
-import Foundation
-import WhatsThatDomain
-
 public struct SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     public init() {}
 
-    public func ensureVoiceoverAsset(
+    public func fetchVoiceovers(for discoveryIds: [Int64]) async -> [DiscoveryVoiceoverAsset] {
+        discoveryIds.map {
+            DiscoveryVoiceoverAsset(
+                discoveryId: $0,
+                status: .none,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: nil,
+                voiceModelId: nil,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: nil,
+                wasExistingResponse: false,
+                wasRefunded: false
+            )
+        }
+    }
+
+    public func requestVoiceover(
         for discoveryId: Int64,
-        options _: DiscoveryVoiceoverRequestOptions
+        voiceModelId: String,
+        ttsModel: String,
+        prosody: VoiceoverProsody?
     ) async -> DiscoveryVoiceoverAsset {
         DiscoveryVoiceoverAsset(
             discoveryId: discoveryId,
             status: .missing,
             audioURL: nil,
-            modelIdentifier: nil,
-            fetchedAt: Date(),
-            errorDescription: nil
+            provider: nil,
+            ttsModel: ttsModel,
+            voiceModelId: voiceModelId,
+            fileName: nil,
+            fileExtension: nil,
+            requestedAt: nil,
+            updatedAt: nil,
+            errorReason: "Voiceover unavailable",
+            wasExistingResponse: false,
+            wasRefunded: false
         )
     }
 }

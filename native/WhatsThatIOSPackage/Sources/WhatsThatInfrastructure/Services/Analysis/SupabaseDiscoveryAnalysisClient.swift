@@ -182,7 +182,7 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         return request
     }
 
-    private static func functionsBaseURL(from supabaseURL: URL) -> URL {
+    public static func functionsBaseURL(from supabaseURL: URL) -> URL {
         var components = URLComponents(url: supabaseURL, resolvingAgainstBaseURL: false)
         components?.host = supabaseURL
             .host?

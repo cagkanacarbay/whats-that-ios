@@ -433,7 +433,7 @@ private struct DiscoveryDetailContentView: View {
             updateGatedDistanceFromTop(distance: distanceFromTop)
         }
         .onAppear {
-            voiceoverController.ensureMetadata(for: discovery)
+            voiceoverController.prefetch(for: [discovery.id])
         }
         .onChange(of: discovery.id) { _, _ in
             scrollOffset = 0
@@ -452,17 +452,8 @@ private struct DiscoveryDetailContentView: View {
         if isPlaybackFailedForThisDiscovery {
             return true
         }
-        guard let status = voiceoverController.assetStates[discovery.id]?.status else {
-            return false // Unknown/loading: hide
-        }
-        switch status {
-        case .available:
-            return true
-        case .error:
-            return true
-        case .missing:
-            return false
-        }
+        // Always show to allow creating when nothing exists yet (missing/none)
+        return true
     }
 
     private var isPlaybackFailedForThisDiscovery: Bool {

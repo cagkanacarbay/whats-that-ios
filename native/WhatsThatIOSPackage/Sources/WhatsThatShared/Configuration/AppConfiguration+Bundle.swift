@@ -2,42 +2,35 @@ import Foundation
 
 public extension AppConfiguration {
     /// Loads configuration values from the provided bundle (defaults to `.main`).
-    /// Triggers a `preconditionFailure` when required keys are missing so misconfigured
-    /// environments surface immediately during development.
+    /// Crashes with a clear message if required keys are missing/invalid.
     static func fromBundle(_ bundle: Bundle = .main) -> AppConfiguration {
-        guard
-            let supabaseURLString = bundle.object(forInfoDictionaryKey: "SUPABASE_URL") as? String,
-            let supabaseURL = URL(string: supabaseURLString)
-        else {
-            preconditionFailure("Missing SUPABASE_URL in bundle. Check xcconfig environment configuration.")
+        func value(for key: String) -> String? {
+            (bundle.object(forInfoDictionaryKey: key) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        guard
-            let supabaseAnonKey = bundle.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String,
-            supabaseAnonKey.isEmpty == false
-        else {
-            preconditionFailure("Missing SUPABASE_ANON_KEY in bundle. Check xcconfig environment configuration.")
+        let supabaseURLString = value(for: "SUPABASE_URL")
+        let supabaseAnonKey = value(for: "SUPABASE_ANON_KEY")
+        let googleClientID = value(for: "GOOGLE_CLIENT_ID")
+        let googleReversedClientID = value(for: "GOOGLE_REVERSED_CLIENT_ID")
+        let redirectString = value(for: "SUPABASE_PASSWORD_RESET_REDIRECT_URL")
+
+        let missing: [String] = [
+            supabaseURLString == nil || supabaseURLString?.isEmpty == true ? "SUPABASE_URL" : nil,
+            supabaseAnonKey == nil || supabaseAnonKey?.isEmpty == true ? "SUPABASE_ANON_KEY" : nil,
+            googleClientID == nil || googleClientID?.isEmpty == true ? "GOOGLE_CLIENT_ID" : nil,
+            googleReversedClientID == nil || googleReversedClientID?.isEmpty == true ? "GOOGLE_REVERSED_CLIENT_ID" : nil
+        ].compactMap { $0 }
+
+        if !missing.isEmpty {
+            preconditionFailure("Missing Info.plist keys: \(missing.joined(separator: ", ")). Ensure xcconfig/Info.plist is configured.")
         }
 
-        guard
-            let googleClientID = bundle.object(forInfoDictionaryKey: "GOOGLE_CLIENT_ID") as? String,
-            googleClientID.isEmpty == false
-        else {
-            preconditionFailure("Missing GOOGLE_CLIENT_ID in bundle. Provide a configured Google client ID.")
-        }
-
-        guard
-            let googleReversedClientID = bundle.object(forInfoDictionaryKey: "GOOGLE_REVERSED_CLIENT_ID") as? String,
-            googleReversedClientID.isEmpty == false
-        else {
-            preconditionFailure("Missing GOOGLE_REVERSED_CLIENT_ID in bundle. Configure URL types for Google Sign-In.")
+        guard let supabaseURLString, let supabaseURL = URL(string: supabaseURLString) else {
+            preconditionFailure("Invalid SUPABASE_URL format. Ensure Info.plist contains a valid URL string.")
         }
 
         let passwordResetRedirectURL: URL?
-        if let redirectString = bundle.object(forInfoDictionaryKey: "SUPABASE_PASSWORD_RESET_REDIRECT_URL") as? String,
-           redirectString.isEmpty == false,
-           let redirectURL = URL(string: redirectString)
-        {
+        if let redirectString, !redirectString.isEmpty, let redirectURL = URL(string: redirectString) {
             passwordResetRedirectURL = redirectURL
         } else {
             passwordResetRedirectURL = nil
@@ -45,7 +38,7 @@ public extension AppConfiguration {
 
         return AppConfiguration(
             supabaseURL: supabaseURL,
-            supabaseAnonKey: supabaseAnonKey,
+            supabaseAnonKey: supabaseAnonKey ?? "",
             googleClientID: googleClientID,
             googleReversedClientID: googleReversedClientID,
             passwordResetRedirectURL: passwordResetRedirectURL

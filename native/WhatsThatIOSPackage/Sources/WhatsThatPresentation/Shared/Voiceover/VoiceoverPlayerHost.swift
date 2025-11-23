@@ -64,7 +64,7 @@ struct VoiceoverPlayerHost: View {
 
         // Show for active or loading/failed states that have a discovery.
         switch controller.playbackState {
-        case .idle, .unavailable:
+        case .idle, .failed:
             return false
         default:
             return controller.currentDiscovery != nil

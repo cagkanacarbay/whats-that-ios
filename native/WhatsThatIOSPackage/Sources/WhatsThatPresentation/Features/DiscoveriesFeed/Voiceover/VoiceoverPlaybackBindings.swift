@@ -53,7 +53,7 @@ struct VoiceoverPlaybackBindings {
 
     var subtitleText: String? {
         switch controller.playbackState {
-        case let .loading(id) where id == discovery.id:
+        case let .preparing(id) where id == discovery.id:
             return "Preparing narration..."
         case let .paused(id) where id == discovery.id:
             return "Paused"
@@ -62,8 +62,8 @@ struct VoiceoverPlaybackBindings {
         case let .failed(id, _) where id == discovery.id:
             return "Playback error"
         default:
-            if let model = controller.assetStates[discovery.id]?.modelIdentifier {
-                return model
+            if let voice = controller.assetStates[discovery.id]?.voiceModelId {
+                return voice
             }
             return nil
         }

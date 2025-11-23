@@ -73,6 +73,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private let imageEncoder: DiscoveryImageEncodingService
     private let pushService: DiscoveryPushService
     private let locationService: DiscoveryLocationService
+    private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
+    private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
     private let analysisParser = DiscoveryAnalysisParser()
     #if DEBUG
     private let debugLoggingEnabled = true
@@ -100,7 +102,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         analysisClient: DiscoveryAnalysisClient,
         imageEncoder: DiscoveryImageEncodingService,
         pushService: DiscoveryPushService,
-        locationService: DiscoveryLocationService
+        locationService: DiscoveryLocationService,
+        voiceoverRepository: (any DiscoveryVoiceoverRepository)? = nil,
+        voiceoverPreferencesStore: VoiceoverPreferencesStore? = nil
     ) {
         self.configuration = configuration
         self.captureService = captureService
@@ -112,6 +116,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         self.imageEncoder = imageEncoder
         self.pushService = pushService
         self.locationService = locationService
+        self.voiceoverRepository = voiceoverRepository
+        self.voiceoverPreferencesStore = voiceoverPreferencesStore
     }
 
     func startFlow(retake: Bool = false) {
@@ -711,6 +717,19 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 await MainActor.run {
                     self.creditBalance = updated
                 }
+            }
+            Task { [weak self] in
+                guard let self,
+                      let voiceoverRepository,
+                      let preferencesStore = voiceoverPreferencesStore else { return }
+                let preferences = await preferencesStore.load()
+                guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
+                _ = await voiceoverRepository.requestVoiceover(
+                    for: discoveryId,
+                    voiceModelId: preferences.voiceModelId,
+                    ttsModel: preferences.ttsModel,
+                    prosody: preferences.prosody
+                )
             }
         case let .error(message, status):
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {

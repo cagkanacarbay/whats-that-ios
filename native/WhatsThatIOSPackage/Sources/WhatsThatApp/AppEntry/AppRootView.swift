@@ -45,6 +45,15 @@ public struct AppRootView: View {
         let clearAppStoreLocal: () async -> Result<Void, Error> = {
             await container.clearAppStoreLocalState()
         }
+        let loadVoiceoverPreferences: () async -> VoiceoverPreferences = {
+            await container.loadVoiceoverPreferences()
+        }
+        let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void = { prefs in
+            await container.saveVoiceoverPreferences(prefs)
+        }
+        let fetchVoiceOptions: () async -> [VoiceModelOption] = {
+            await container.fetchVoiceOptions()
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
@@ -54,6 +63,16 @@ public struct AppRootView: View {
         let clearAppStoreLocal: () async -> Result<Void, Error> = {
             .failure(AuthError.unknown)
         }
+        let loadVoiceoverPreferences: () async -> VoiceoverPreferences = {
+            VoiceoverPreferences(
+                autoEnabled: false,
+                voiceModelId: "",
+                ttsModel: "s1",
+                prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+            )
+        }
+        let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void = { _ in }
+        let fetchVoiceOptions: () async -> [VoiceModelOption] = { [] }
         #endif
 
         let nearbyInspectorFactory: (() -> AnyView)? = {
@@ -83,7 +102,10 @@ public struct AppRootView: View {
             },
             stopLocationTracking: {
                 container.stopAppLocationTracking()
-            }
+            },
+            loadVoiceoverPreferences: loadVoiceoverPreferences,
+            saveVoiceoverPreferences: saveVoiceoverPreferences,
+            fetchVoiceOptions: fetchVoiceOptions
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

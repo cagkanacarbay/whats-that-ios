@@ -7,22 +7,18 @@ import WhatsThatDomain
 public final class VoiceoverPlaybackController: ObservableObject {
     public enum PlaybackState: Equatable {
         case idle
-        case loading(discoveryId: Int64)
+        case preparing(discoveryId: Int64)
         case playing(discoveryId: Int64)
         case paused(discoveryId: Int64)
-        case unavailable(discoveryId: Int64)
         case failed(discoveryId: Int64, message: String?)
 
         public var discoveryId: Int64? {
             switch self {
-            case .idle:
-                return nil
-            case let .loading(id),
+            case .idle: return nil
+            case let .preparing(id),
                  let .playing(id),
                  let .paused(id),
-                 let .unavailable(id):
-                return id
-            case let .failed(id, _):
+                 let .failed(id, _):
                 return id
             }
         }
@@ -31,7 +27,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
             switch self {
             case .playing, .paused:
                 return true
-            case .loading, .unavailable, .failed, .idle:
+            case .idle, .preparing, .failed:
                 return false
             }
         }
@@ -43,10 +39,12 @@ public final class VoiceoverPlaybackController: ObservableObject {
     @Published public private(set) var duration: TimeInterval?
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var assetStates: [Int64: DiscoveryVoiceoverAsset] = [:]
+    @Published public private(set) var activePreferences: VoiceoverPreferences
     @Published public var isDetailOverlayActive: Bool = false
     @Published public var suppressProgressUpdates: Bool = false
 
     private let repository: any DiscoveryVoiceoverRepository
+    private let preferencesStore: VoiceoverPreferencesStore?
     private let audioSession: AVAudioSession
     private let player: AVPlayer
     private var timeObserverToken: Any?
@@ -54,28 +52,35 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var endPlaybackObserver: NSObjectProtocol?
     private var playTask: Task<Void, Never>?
     private var isSeeking = false
+    private var downloadedIds: Set<Int64> = []
+    private let failedExpiry: TimeInterval = 60 * 60
+    private let processingStaleThreshold: TimeInterval = 60 * 5
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
+        preferences: VoiceoverPreferences = VoiceoverPreferences(
+            autoEnabled: false,
+            voiceModelId: "",
+            ttsModel: "s1",
+            prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+        ),
+        preferencesStore: VoiceoverPreferencesStore? = nil,
         audioSession: AVAudioSession = .sharedInstance(),
         player: AVPlayer = AVPlayer()
     ) {
         self.repository = repository
+        self.activePreferences = preferences
+        self.preferencesStore = preferencesStore
         self.audioSession = audioSession
         self.player = player
     }
 
     deinit {
-        let player = player
-        let token = timeObserverToken
-        let observation = playerItemStatusObservation
-        let observer = endPlaybackObserver
-
-        if let token {
+        if let token = timeObserverToken {
             player.removeTimeObserver(token)
         }
-        observation?.invalidate()
-        if let observer {
+        playerItemStatusObservation?.invalidate()
+        if let observer = endPlaybackObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -84,75 +89,135 @@ public final class VoiceoverPlaybackController: ObservableObject {
 // MARK: - Public API
 
 public extension VoiceoverPlaybackController {
-    func ensureMetadata(for discovery: DiscoverySummary, force: Bool = false) {
+    func prefetch(for discoveryIds: [Int64]) {
+        guard !discoveryIds.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
-            let asset = await self.repository.ensureVoiceoverAsset(
-                for: discovery.id,
-                options: DiscoveryVoiceoverRequestOptions(forceRefresh: force)
-            )
+            let assets = await self.repository.fetchVoiceovers(for: discoveryIds)
             await MainActor.run {
-                self.assetStates[discovery.id] = asset
-            }
-        }
-    }
-
-    func togglePlayback(for discovery: DiscoverySummary) {
-        switch playbackState {
-        case let .playing(currentId) where currentId == discovery.id:
-            pause()
-        case let .paused(currentId) where currentId == discovery.id:
-            resume()
-        default:
-            play(discovery: discovery, forceRefresh: false)
-        }
-    }
-
-    func play(discovery: DiscoverySummary, forceRefresh: Bool) {
-        playTask?.cancel()
-        playTask = Task { [weak self] in
-            guard let self else { return }
-            await MainActor.run {
-                self.playbackState = .loading(discoveryId: discovery.id)
-                self.currentDiscovery = discovery
-                self.errorMessage = nil
-                self.position = 0
-                self.duration = nil
-            }
-
-            if forceRefresh {
-                await MainActor.run {
-                    self.assetStates[discovery.id] = nil
+                for asset in assets {
+                    let normalized = self.normalize(asset)
+                    if let existing = self.assetStates[asset.discoveryId] {
+                        // Keep a ready asset if the incoming one is older or not ready.
+                        if existing.status == .ready {
+                            if normalized.status != .ready || normalized.audioURL == nil {
+                                continue
+                            }
+                            if let existingUpdated = existing.updatedAt,
+                               let incomingUpdated = normalized.updatedAt,
+                               incomingUpdated < existingUpdated {
+                                continue
+                            }
+                        }
+                    }
+                    self.assetStates[asset.discoveryId] = normalized
                 }
             }
+        }
+    }
 
-            let asset = await self.repository.ensureVoiceoverAsset(
-                for: discovery.id,
-                options: DiscoveryVoiceoverRequestOptions(forceRefresh: forceRefresh)
-            )
+    func togglePlayback(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
+        let asset = normalizedAsset(for: discovery.id)
+        let resolvedPreferences = preferences ?? activePreferences
 
-            await MainActor.run {
-                self.assetStates[discovery.id] = asset
+        switch asset?.status {
+        case .ready?:
+            if case let .playing(id) = playbackState, id == discovery.id {
+                pause()
+                return
+            }
+            if case let .paused(id) = playbackState, id == discovery.id {
+                resume()
+                return
+            }
+            guard let readyAsset = asset else { return }
+            play(discovery: discovery, asset: readyAsset)
+        case .processing?:
+            playbackState = .preparing(discoveryId: discovery.id)
+        case .failed?, .none?, .missing?:
+            requestVoiceover(for: discovery, preferences: resolvedPreferences)
+        case nil:
+            requestVoiceover(for: discovery, preferences: resolvedPreferences)
+        }
+    }
+
+    func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
+        Task { [weak self] in
+            guard let self else { return }
+            let resolvedPreferences: VoiceoverPreferences
+            if let preferences {
+                resolvedPreferences = preferences
+                await self.preferencesStore?.save(preferences)
+                await MainActor.run {
+                    self.activePreferences = preferences
+                }
+            } else if let store = self.preferencesStore {
+                let loaded = await store.load(
+                    defaultVoiceModelId: self.activePreferences.voiceModelId,
+                    defaultTtsModel: self.activePreferences.ttsModel
+                )
+                resolvedPreferences = loaded
+                await MainActor.run {
+                    self.activePreferences = loaded
+                }
+            } else {
+                resolvedPreferences = self.activePreferences
             }
 
-            guard asset.status == .available, let audioURL = asset.audioURL else {
+            guard !resolvedPreferences.voiceModelId.isEmpty else {
                 await MainActor.run {
-                    switch asset.status {
-                    case .missing:
-                        self.playbackState = .unavailable(discoveryId: discovery.id)
-                        self.errorMessage = "Narration is not available yet."
-                    case .error:
-                        self.playbackState = .failed(discoveryId: discovery.id, message: asset.errorDescription)
-                        self.errorMessage = asset.errorDescription ?? "Failed to load narration."
-                    default:
-                        self.playbackState = .unavailable(discoveryId: discovery.id)
-                    }
+                    self.errorMessage = "Choose a voice to generate audio."
                 }
                 return
             }
+            await MainActor.run {
+                self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                    discoveryId: discovery.id,
+                    status: .processing,
+                    audioURL: nil,
+                    provider: nil,
+                    ttsModel: resolvedPreferences.ttsModel,
+                    voiceModelId: resolvedPreferences.voiceModelId,
+                    fileName: nil,
+                    fileExtension: nil,
+                    requestedAt: Date(),
+                    updatedAt: Date(),
+                    errorReason: nil,
+                    wasExistingResponse: false,
+                    wasRefunded: false
+                )
+                self.playbackState = .preparing(discoveryId: discovery.id)
+            }
 
-            await self.prepareAudioSession()
-            await self.configurePlayer(with: audioURL, discovery: discovery)
+            let asset = await self.repository.requestVoiceover(
+                for: discovery.id,
+                voiceModelId: resolvedPreferences.voiceModelId,
+                ttsModel: resolvedPreferences.ttsModel,
+                prosody: resolvedPreferences.prosody
+            )
+
+            let normalized = normalize(asset)
+            await MainActor.run {
+                self.assetStates[discovery.id] = normalized
+            }
+
+            if normalized.status == .failed && normalized.wasExistingResponse {
+                self.prefetch(for: [discovery.id])
+            }
+
+            if normalized.status == .ready, let audioURL = normalized.audioURL {
+                await prepareAudioSession()
+                await configurePlayer(with: audioURL, discovery: discovery)
+            } else if normalized.status == .failed {
+                await MainActor.run {
+                    self.playbackState = .failed(discoveryId: discovery.id, message: normalized.errorReason)
+                    self.errorMessage = normalized.errorReason
+                }
+            } else {
+                await MainActor.run {
+                    self.playbackState = .idle
+                }
+            }
         }
     }
 
@@ -164,10 +229,7 @@ public extension VoiceoverPlaybackController {
     }
 
     func resume() {
-        guard case let .paused(id) = playbackState else {
-            return
-        }
-
+        guard case let .paused(id) = playbackState else { return }
         player.play()
         playbackState = .playing(discoveryId: id)
     }
@@ -203,32 +265,113 @@ public extension VoiceoverPlaybackController {
     }
 
     func isLoading(discoveryId: Int64) -> Bool {
-        if case let .loading(id) = playbackState, id == discoveryId {
+        if case let .preparing(id) = playbackState, id == discoveryId {
             return true
         }
         return false
     }
 
     func isActive(discoveryId: Int64) -> Bool {
-        if case let .playing(id) = playbackState, id == discoveryId {
-            return true
-        }
-        if case let .paused(id) = playbackState, id == discoveryId {
-            return true
-        }
+        if case let .playing(id) = playbackState, id == discoveryId { return true }
+        if case let .paused(id) = playbackState, id == discoveryId { return true }
         return false
+    }
+
+    func isDownloadPending(for discoveryId: Int64) -> Bool {
+        guard let asset = assetStates[discoveryId] else { return false }
+        return asset.status == .ready && !downloadedIds.contains(discoveryId)
+    }
+
+    func updatePreferences(_ preferences: VoiceoverPreferences) {
+        activePreferences = preferences
     }
 }
 
 // MARK: - Private helpers
 
 private extension VoiceoverPlaybackController {
+    func normalizedAsset(for discoveryId: Int64) -> DiscoveryVoiceoverAsset? {
+        guard let asset = assetStates[discoveryId] else { return nil }
+        return normalize(asset)
+    }
+
+    func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
+        if asset.status == .processing {
+            let lastUpdate = asset.updatedAt ?? asset.requestedAt
+            if let lastUpdate, Date().timeIntervalSince(lastUpdate) > processingStaleThreshold {
+                return DiscoveryVoiceoverAsset(
+                    discoveryId: asset.discoveryId,
+                    status: .failed,
+                    audioURL: nil,
+                    provider: asset.provider,
+                    ttsModel: asset.ttsModel,
+                    voiceModelId: asset.voiceModelId,
+                    fileName: asset.fileName,
+                    fileExtension: asset.fileExtension,
+                    requestedAt: asset.requestedAt,
+                    updatedAt: asset.updatedAt,
+                    errorReason: asset.errorReason ?? "Audio generation timed out.",
+                    wasExistingResponse: asset.wasExistingResponse,
+                    wasRefunded: asset.wasRefunded
+                )
+            }
+        }
+
+        if asset.status == .failed,
+           let updatedAt = asset.updatedAt,
+           Date().timeIntervalSince(updatedAt) > failedExpiry {
+            return DiscoveryVoiceoverAsset(
+                discoveryId: asset.discoveryId,
+                status: .none,
+                audioURL: nil,
+                provider: asset.provider,
+                ttsModel: asset.ttsModel,
+                voiceModelId: asset.voiceModelId,
+                fileName: asset.fileName,
+                fileExtension: asset.fileExtension,
+                requestedAt: asset.requestedAt,
+                updatedAt: asset.updatedAt,
+                errorReason: nil,
+                wasExistingResponse: asset.wasExistingResponse,
+                wasRefunded: asset.wasRefunded
+            )
+        }
+        return asset
+    }
+
+    func play(discovery: DiscoverySummary, asset: DiscoveryVoiceoverAsset) {
+        playTask?.cancel()
+        playTask = Task { [weak self] in
+            guard let self else { return }
+            guard let audioURL = asset.audioURL else {
+                await MainActor.run {
+                    self.playbackState = .failed(discoveryId: discovery.id, message: "Audio unavailable.")
+                    self.errorMessage = "Audio unavailable."
+                }
+                return
+            }
+
+            await MainActor.run {
+                self.playbackState = .preparing(discoveryId: discovery.id)
+                self.currentDiscovery = discovery
+                self.errorMessage = nil
+                self.position = 0
+                self.duration = nil
+            }
+
+            await self.prepareAudioSession()
+            await self.configurePlayer(with: audioURL, discovery: discovery)
+            _ = await MainActor.run {
+                self.downloadedIds.insert(discovery.id)
+            }
+        }
+    }
+
     func prepareAudioSession() async {
         do {
             try audioSession.setCategory(.playback, mode: .default, options: [.interruptSpokenAudioAndMixWithOthers])
             try audioSession.setActive(true)
         } catch {
-            // Session failures should not block playback; surface as warning.
             errorMessage = "Audio session unavailable."
         }
     }
@@ -288,7 +431,21 @@ private extension VoiceoverPlaybackController {
         player.replaceCurrentItem(with: nil)
 
         if !attemptedRefresh {
-            play(discovery: discovery, forceRefresh: true)
+            play(discovery: discovery, asset: normalizedAsset(for: discovery.id) ?? DiscoveryVoiceoverAsset(
+                discoveryId: discovery.id,
+                status: .ready,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: nil,
+                voiceModelId: nil,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: nil,
+                errorReason: error?.localizedDescription,
+                wasExistingResponse: true,
+                wasRefunded: false
+            ))
             return
         }
 
@@ -354,24 +511,3 @@ private extension CMTime {
         return seconds.isFinite ? seconds : nil
     }
 }
-
-    public func seek(to _: TimeInterval) {}
-    public func isLoading(discoveryId _: Int64) -> Bool { false }
-    public func isActive(discoveryId _: Int64) -> Bool { false }
-
-    public struct StubRepository: DiscoveryVoiceoverRepository {
-        public init() {}
-
-        public func ensureVoiceoverAsset(
-            for discoveryId: Int64,
-            options _: DiscoveryVoiceoverRequestOptions
-        ) async -> DiscoveryVoiceoverAsset {
-            DiscoveryVoiceoverAsset(
-                discoveryId: discoveryId,
-                status: .missing,
-                audioURL: nil,
-                modelIdentifier: nil,
-                fetchedAt: Date()
-            )
-        }
-    }

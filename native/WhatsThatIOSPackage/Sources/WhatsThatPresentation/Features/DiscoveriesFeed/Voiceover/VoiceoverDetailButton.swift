@@ -6,6 +6,7 @@ struct VoiceoverDetailButton: View {
     let discovery: DiscoverySummary
     @ObservedObject private var controller: VoiceoverPlaybackController
     let palette: BrandTheme.Palette
+    @State private var showCreditsAlert = false
 
     init(
         discovery: DiscoverySummary,
@@ -19,9 +20,8 @@ struct VoiceoverDetailButton: View {
 
     var body: some View {
         Button(action: {
-            // Do nothing when narration is unavailable
-            guard canPlay else { return }
-            controller.togglePlayback(for: discovery)
+            guard canTap else { return }
+            handleTap()
         }) {
             HStack(spacing: BrandSpacing.small) {
                 if isLoading {
@@ -46,7 +46,22 @@ struct VoiceoverDetailButton: View {
             .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!canPlay)
+        .disabled(!canTap)
+        .alert(
+            "Not enough credits",
+            isPresented: $showCreditsAlert,
+            actions: {
+                Button("OK", role: .cancel) { showCreditsAlert = false }
+            },
+            message: {
+                Text("Add more credits to generate audio.")
+            }
+        )
+        .onChange(of: asset?.errorReason) { _, newValue in
+            if newValue == "insufficient_credits" {
+                showCreditsAlert = true
+            }
+        }
     }
 
     private var asset: DiscoveryVoiceoverAsset? {
@@ -54,23 +69,19 @@ struct VoiceoverDetailButton: View {
     }
 
     private var isLoading: Bool {
-        controller.isLoading(discoveryId: discovery.id) && asset == nil
+        asset?.status == .processing
     }
 
-    private var isUnavailable: Bool {
-        asset?.status == .missing
-    }
-
-    private var isAssetError: Bool {
-        asset?.status == .error
-    }
-
-    private var canPlay: Bool {
-        // Only allow taps if not loading and narration is available/unknown
-        !isLoading && !isUnavailable
+    private var canTap: Bool {
+        guard let status = asset?.status else { return true }
+        return status != .processing
     }
 
     private var playbackIconName: String {
+        if downloadNeeded {
+            return "arrow.down.circle.fill"
+        }
+
         switch controller.playbackState {
         case let .playing(id) where id == discovery.id:
             return "pause.fill"
@@ -85,7 +96,7 @@ struct VoiceoverDetailButton: View {
 
     private var buttonTitle: String {
         if isLoading {
-            return "Loading narration..."
+            return "Generating…"
         }
 
         if let playback = controller.playbackState.discoveryId,
@@ -102,31 +113,47 @@ struct VoiceoverDetailButton: View {
             }
         }
 
-        if isAssetError {
-            return "Retry Audio"
+        switch asset?.status {
+        case .processing:
+            return "Generating…"
+        case .failed:
+            return "Retry audio"
+        case .ready where downloadNeeded:
+            return "Download & play"
+        case .ready:
+            return "Play audio"
+        default:
+            return "Create audio"
         }
-
-        if isUnavailable {
-            return "Narration unavailable"
-        }
-
-        if case let .failed(id, _) = controller.playbackState, id == discovery.id {
-            return "Retry Audio"
-        }
-
-        return "Play Audio Narration"
     }
 
     private var buttonBackground: some View {
         palette.primaryAction
-            .opacity(isUnavailable ? 0.55 : 1.0)
+            .opacity(isLoading ? 0.6 : 1.0)
     }
 
     private var iconOpacity: Double {
-        isUnavailable ? 0.7 : 1.0
+        isLoading ? 0.7 : 1.0
     }
 
     private var titleOpacity: Double {
-        isUnavailable ? 0.75 : 1.0
+        isLoading ? 0.8 : 1.0
+    }
+
+    private var downloadNeeded: Bool {
+        controller.isDownloadPending(for: discovery.id)
+    }
+
+    private func handleTap() {
+        guard let status = asset?.status else {
+            controller.requestVoiceover(for: discovery)
+            return
+        }
+
+        if status == .failed || status == .missing || status == .none {
+            controller.requestVoiceover(for: discovery)
+        } else {
+            controller.togglePlayback(for: discovery)
+        }
     }
 }

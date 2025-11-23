@@ -7,7 +7,13 @@ struct VoiceoverPersistentPlayerView: View {
     @ObservedObject private var controller: VoiceoverPlaybackController
     let discovery: DiscoverySummary
     let imageURL: URL?
+    let onNextDiscovery: (() -> Void)?
+    let onPreviousDiscovery: (() -> Void)?
     private let artworkSize: CGFloat = 72
+    private let primaryButtonSize: CGFloat = 36
+    private let skipButtonSize: CGFloat = 28
+    private let primaryActionAreaWidth: CGFloat = 120
+    private let closeButtonSize: CGFloat = 26
     private var artworkShape: some Shape {
         UnevenRoundedRectangle(
             topLeadingRadius: 0,
@@ -25,11 +31,15 @@ struct VoiceoverPersistentPlayerView: View {
     init(
         controller: VoiceoverPlaybackController,
         discovery: DiscoverySummary,
-        imageURL: URL?
+        imageURL: URL?,
+        onNextDiscovery: (() -> Void)? = nil,
+        onPreviousDiscovery: (() -> Void)? = nil
     ) {
         _controller = ObservedObject(initialValue: controller)
         self.discovery = discovery
         self.imageURL = imageURL
+        self.onNextDiscovery = onNextDiscovery
+        self.onPreviousDiscovery = onPreviousDiscovery
     }
 
     private var playbackBindings: VoiceoverPlaybackBindings {
@@ -41,52 +51,57 @@ struct VoiceoverPersistentPlayerView: View {
     }
 
     var body: some View {
-        HStack(spacing: BrandSpacing.medium) {
-            artwork
+        ZStack(alignment: .topTrailing) {
+            HStack(alignment: .top, spacing: BrandSpacing.small) {
+                artwork
 
-            VStack(spacing: 2) {
-                scrubber
-
-                HStack {
-                    Text(formatTime(playbackBindings.currentSliderValue))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                VStack {
                     Spacer()
-                    Text(formatTime(controller.duration ?? 0))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: BrandSpacing.small * 0.75) {
+                        previousButton
+                        primaryActionButton
+                        nextButton
+                    }
+                    Spacer()
                 }
+                .frame(width: primaryActionAreaWidth, height: artworkSize, alignment: .center)
+
+                VStack(alignment: .leading, spacing: BrandSpacing.small * 0.5) {
+                    Text(discovery.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.top, BrandSpacing.small * 0.5)
+
+                    scrubber
+                        .frame(height: 20)
+                        .padding(.trailing, BrandSpacing.small)
+
+                    HStack {
+                        Text(formatTime(playbackBindings.currentSliderValue))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatTime(controller.duration ?? 0))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.trailing, BrandSpacing.small)
+
+                    Spacer(minLength: BrandSpacing.small * 0.5)
+                }
+                .frame(height: artworkSize, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 0)
+            .padding(.vertical, 0)
+            .background(tabBarMatchedBackground)
+            .animation(.easeInOut, value: controller.playbackState)
 
-            HStack(spacing: BrandSpacing.small) {
-                Button(action: handlePrimaryAction) {
-                    Image(systemName: playbackBindings.primaryActionIcon)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color.white)
-                        .frame(width: 36, height: 36)
-                        .background(BrandColors.Dark.primaryAction)
-                        .clipShape(Circle())
-                        .accessibilityLabel(primaryActionAccessibilityLabel)
-                }
-                .buttonStyle(.plain)
-
-                Button(action: { controller.stop() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.18))
-                        .clipShape(Circle())
-                        .accessibilityLabel("Close player")
-                }
-                .buttonStyle(.plain)
-            }
+            closeButton
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.horizontal, 0)
-        .padding(.vertical, 0)
-        .background(tabBarMatchedBackground)
-        .animation(.easeInOut, value: controller.playbackState)
     }
 
     private var artwork: some View {
@@ -113,10 +128,10 @@ struct VoiceoverPersistentPlayerView: View {
                     }
                 }
                 .clipShape(artworkShape)
-        } else {
-            fallbackIcon
+            } else {
+                fallbackIcon
+            }
         }
-    }
         .frame(width: artworkSize, height: artworkSize)
         .clipShape(artworkShape)
         .accessibilityHidden(true)
@@ -126,6 +141,57 @@ struct VoiceoverPersistentPlayerView: View {
         Image(systemName: "waveform")
             .font(.system(size: 14))
             .foregroundStyle(Color.secondary)
+    }
+
+    private var primaryActionButton: some View {
+        Button(action: handlePrimaryAction) {
+            Image(systemName: playbackBindings.primaryActionIcon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Color.white)
+                .frame(width: primaryButtonSize, height: primaryButtonSize)
+                .background(BrandColors.Dark.primaryAction)
+                .clipShape(Circle())
+                .accessibilityLabel(primaryActionAccessibilityLabel)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var previousButton: some View {
+        Button(action: handlePreviousDiscovery) {
+            Image(systemName: "backward.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: skipButtonSize, height: skipButtonSize)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(Circle())
+                .accessibilityLabel("Rewind")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var nextButton: some View {
+        Button(action: handleNextDiscovery) {
+            Image(systemName: "forward.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: skipButtonSize, height: skipButtonSize)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(Circle())
+                .accessibilityLabel("Fast forward")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var closeButton: some View {
+        Button(action: { controller.stop() }) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .bold))
+                .frame(width: closeButtonSize, height: closeButtonSize)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .accessibilityLabel("Close player")
+        }
+        .buttonStyle(.plain)
     }
 
     private var scrubber: some View {
@@ -177,7 +243,7 @@ struct VoiceoverPersistentPlayerView: View {
                     }
             )
         }
-        .frame(height: 32)
+        .frame(height: 20)
     }
 
     private var tabBarMatchedBackground: Color {
@@ -223,6 +289,14 @@ struct VoiceoverPersistentPlayerView: View {
         default:
             controller.togglePlayback(for: discovery)
         }
+    }
+
+    private func handlePreviousDiscovery() {
+        onPreviousDiscovery?()
+    }
+
+    private func handleNextDiscovery() {
+        onNextDiscovery?()
     }
 
     private var primaryActionAccessibilityLabel: String {

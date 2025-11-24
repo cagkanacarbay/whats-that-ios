@@ -64,8 +64,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
         preferences: VoiceoverPreferences = VoiceoverPreferences(
             autoEnabled: false,
             voiceModelId: "",
-            ttsModel: "s1",
-            prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+            ttsModel: "s1"
         ),
         voiceoverCache: VoiceoverFileCache = .shared,
         preferencesStore: VoiceoverPreferencesStore? = nil,
@@ -207,8 +206,7 @@ public extension VoiceoverPlaybackController {
             let asset = await self.repository.requestVoiceover(
                 for: discovery.id,
                 voiceModelId: resolvedPreferences.voiceModelId,
-                ttsModel: resolvedPreferences.ttsModel,
-                prosody: resolvedPreferences.prosody
+                ttsModel: resolvedPreferences.ttsModel
             )
 
             let normalized = normalize(asset)

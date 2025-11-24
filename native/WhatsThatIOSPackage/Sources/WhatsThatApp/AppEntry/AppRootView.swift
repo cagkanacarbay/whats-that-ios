@@ -67,8 +67,7 @@ public struct AppRootView: View {
             VoiceoverPreferences(
                 autoEnabled: false,
                 voiceModelId: "",
-                ttsModel: "s1",
-                prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+                ttsModel: "s1"
             )
         }
         let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void = { _ in }

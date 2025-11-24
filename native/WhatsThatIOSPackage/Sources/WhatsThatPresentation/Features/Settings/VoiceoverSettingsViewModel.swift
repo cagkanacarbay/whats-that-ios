@@ -47,16 +47,6 @@ final class VoiceoverSettingsViewModel: ObservableObject {
         await persist()
     }
 
-    func updateSpeed(_ speed: Double) async {
-        preferences.prosody.speed = min(max(speed, 0.5), 2.0)
-        await persist()
-    }
-
-    func updateVolume(_ volume: Double) async {
-        preferences.prosody.volume = min(max(volume, -20), 20)
-        await persist()
-    }
-
     func updateAutoEnabled(_ enabled: Bool) async {
         preferences.autoEnabled = enabled
         await persist()

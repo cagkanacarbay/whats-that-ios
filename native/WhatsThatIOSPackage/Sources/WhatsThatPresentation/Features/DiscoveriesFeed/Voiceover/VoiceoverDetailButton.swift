@@ -100,18 +100,15 @@ struct VoiceoverDetailButton: View {
                 if isCached {
                     return .readyToPlay
                 }
-                if isOtherDiscoveryActive {
-                    return .switchToThisDiscovery
-                }
                 return .downloading
             case .missing, .none:
-                return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
+                return .create
             @unknown default:
-                return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
+                return .create
             }
         }
 
-        return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
+        return .create
     }
 
     private var buttonTitle: String {
@@ -170,13 +167,6 @@ struct VoiceoverDetailButton: View {
     private var isCurrentDiscoveryPlaying: Bool {
         if case let .playing(id) = controller.playbackState, id == discovery.id {
             return true
-        }
-        return false
-    }
-
-    private var isOtherDiscoveryActive: Bool {
-        if let activeId = controller.playbackState.discoveryId {
-            return activeId != discovery.id
         }
         return false
     }

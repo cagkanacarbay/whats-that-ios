@@ -3,7 +3,7 @@
 ## Goals
 - Replace the current webhook + server-hosted TTS model with Fish Audio for all discovery audio generation.
 - Trigger TTS via a new Voiceover Edge Function called by the client: auto-generate right after Ask AI v7 returns text when the user has auto enabled (2 credits total), or on-demand later (1 credit).
-- Allow per-user defaults and per-discovery override for auto-TTS and preferred voice/model/prosody settings supplied in each call (stored client-side).
+- Allow per-user defaults and per-discovery override for auto-TTS and preferred voice/model settings supplied in each call (stored client-side); no prosody controls (always Fish defaults speed 1.0, volume 0 dB).
 - Persist audio and metadata in Supabase storage/DB so the app can stream via signed URLs, expose pending/error states, and respect credit/refund rules aligned with existing analysis flows.
 
 ## Current State (app + backend)
@@ -11,7 +11,7 @@
 - Discoveries table no longer stores voiceover columns; playback moves to `discovery_voiceovers` + storage with signed URLs.
 - App shows a voiceover button only when an asset exists or an error occurred; missing assets hide the control (no pending state today). New UI will surface processing/ready/download/failed-with-retry on the same button.
 - Credits: discovery analysis decrements 1 credit on completion; voiceover credit will be 1 (auto/manual) via the Edge Function with refund on failure.
-- No user setting for TTS yet; will add a settings sheet for auto toggle + voice/prosody selection.
+- No user setting for TTS yet; will add a settings sheet for auto toggle + voice selection (no prosody controls).
 
 ## Fish Audio API (baseline we will use)
 - Endpoint: `POST https://api.fish.audio/v1/tts`
@@ -23,7 +23,6 @@
   - `format`: `mp3` (Fish defaults; mp3 bitrates 64/128/192 are available—see bitrate notes)
   - `chunk_length`: 100–300 (default 200) optional
   - `normalize`: default true
-  - `prosody`: `{ speed: 0.5–2.0, volume: -20..20 }`
   - Advanced controls (temperature/top_p/references/emotion markers) are out of scope for v1.
 - Response: binary audio stream in requested format. We upload to storage.
 - Streaming/WebSocket exists but out of scope for this flow.
@@ -39,7 +38,7 @@
   - Persist the exact stored `file_name` (with extension) and `file_extension` in `discovery_voiceovers` so the client can fetch deterministically.
   - Once a voiceover exists for a `discovery_id`, never create or overwrite another object; the Edge Function must return the existing row/object for all future calls regardless of requested voice/model.
 - **Triggers / orchestration**
-  - Auto path: after Ask AI v7 emits the `complete` event, the mobile app calls the Voiceover Edge Function (authenticated user JWT) with the chosen voice and prosody; function charges 1 credit, generates audio, refunds on failure. The very first request locks in the stored `tts_model`/`voice_model_id`; later requests return the existing row even if they ask for a different voice/model.
+  - Auto path: after Ask AI v7 emits the `complete` event, the mobile app calls the Voiceover Edge Function (authenticated user JWT) with the chosen voice; function charges 1 credit, generates audio, refunds on failure. The very first request locks in the stored `tts_model`/`voice_model_id`; later requests return the existing row even if they ask for a different voice/model.
   - Manual path: user taps the existing detail button; same Voiceover Edge Function and payload; function enforces one row per discovery (ignoring voice/model on subsequent calls).
   - Dedup/state: enforce a single row per `discovery_id` (DB unique index plus Edge check). Edge logic: if `ready`, return; if `processing` and `updated_at` ≤1m, return; if `processing` stale (>1m), re-run Fish using the stored voice/model without charging another credit; if `failed`, charge a new credit (previous attempt already refunded) and re-run Fish with the stored voice/model.
   - Function fetches discovery `description` only by `discovery_id` (no client-supplied text, no title/short description).
@@ -53,13 +52,13 @@
   - Credit RPC should mirror `consume_credit_for_discovery` semantics (guard missing `user_credits`, raise `insufficient_credits` consistently) and use a matching refund helper for failures.
   - If the Edge Function reports insufficient credits, the client surfaces an alert after completion (not silent).
 - **API surface (supabase RPC or Edge Function)**
-- `POST /generate-voiceover`: `{ discovery_id, voice_model_id, tts_model? (default s1), prosody? }` → validates ownership/credits, runs Fish Audio once if no row exists for the discovery, uploads audio, writes `discovery_voiceovers`, and returns the row payload **plus signed URLs**. No `force` flag; if a row already exists for the discovery, return it and do not create/overwrite anything (ignore new voice/model inputs).
+- `POST /generate-voiceover`: `{ discovery_id, voice_model_id, tts_model? (default s1) }` → validates ownership/credits, runs Fish Audio once if no row exists for the discovery, uploads audio, writes `discovery_voiceovers`, and returns the row payload **plus signed URLs**. No `force` flag; if a row already exists for the discovery, return it and do not create/overwrite anything (ignore new voice/model inputs).
   - `GET /voice-options`: returns available models/voices/options from `voice_inventory` (no fallback; the table must be seeded).
 - `GET /discovery-voiceovers`: dedicated RPC to fetch rows for a list of `discovery_id`s (called after each `get_discoveries_with_location`, scoped to currently visible discoveries and any known-failed ones); mirrors the pattern of `get_discoveries_with_location` in structure/ownership checks. For non-ready rows, signed URLs are `null`.
 - If an ID has no row, the RPC returns no record; client maps that to status `none`.
 - **Client integration**
-  - Settings screen: add a new section (under Theme) opening a sheet with auto-toggle, model/voice picker (sourced from `voice_inventory`), prosody speed/volume sliders; stored client-side. Post-onboarding: add a third slide (after the second slide, before location request) with the same voice model picker so every user selects an initial voice.
-  - Auto flow: after `complete` event, app calls Voiceover Edge Function with selected `reference_id`, `prosody`, `format: mp3`; blocks additional requests while status is generating.
+  - Settings screen: add a new section (under Theme) opening a sheet with auto-toggle and model/voice picker (sourced from `voice_inventory`); stored client-side. Post-onboarding: add a third slide (after the second slide, before location request) with the same voice model picker so every user selects an initial voice.
+  - Auto flow: after `complete` event, app calls Voiceover Edge Function with selected `reference_id`, `format: mp3`; blocks additional requests while status is generating.
   - Manual flow: reuse the existing detail button; UI shows states “Create audio” (`none`), “Generating…” (`processing` spinner/disabled), “Download & play” (row ready, not cached), “Play audio” (`ready`), and a softer retry copy for `failed`.
   - Discovery fetch: after each `get_discoveries_with_location`, call `get_discovery_voiceovers` for currently visible discoveries and any known-failed ones to refresh cache. Cache includes `updated_at`; `audio_url` is `null` unless status is `ready`.
   - Failure expiry: if status is `failed` and `updated_at` is older than 1 hour, surface the default “Create audio” state (stop showing failed).
@@ -67,7 +66,7 @@
   - Playback: only support `.mp3` with naming `fish-{modelId}-{voiceId}.mp3`. Remove WAV/legacy kitten support and the min-ID guard. Signed URLs come from the Edge Function response (happy path) or the voiceovers RPC.
   - Legacy timing artifacts existed but were unused; with Fish we do not create or look for any timing assets. Client needs to stop attempting to load timings entirely.
 - **Content generation**
-- Text: discovery `description` only. Input is assumed clean as provided (we do not reformat beyond what the client already supplies). Send with `normalize=true`, `chunk_length=200`, `format=mp3`, `tts_model=s1`.
+- Text: discovery `description` only. Input is assumed clean as provided (we do not reformat beyond what the client already supplies). Send with `normalize=true`, `chunk_length=200`, `format=mp3`, `tts_model=s1`, relying on Fish defaults for speed/volume (no overrides sent).
 - **Resilience & observability**
   - Timeouts and retries on Fish Audio calls with exponential backoff (up to ~5 attempts within ~30 seconds); keep total runtime within the Supabase Edge Function request budget (≈60s). If cumulative backoff plus Fish latency approaches the limit, abort, mark failed, refund.
   - Logging/alerting for auth/quota/text failures using the existing Edge Function logger (no Logflare forwarding).
@@ -86,7 +85,7 @@
 3) Build Voiceover Edge Function: charges/refunds credits, fetches discovery description by id, validates voice/model against `voice_inventory`, calls Fish, retries per policy (failed or stale processing >1m), uploads audio, writes row, returns row + signed URLs.  
 4) Add `GET /discovery-voiceovers` RPC and client integration after `get_discoveries_with_location` (visible + known-failed IDs).  
 5) Replace storage-listing client path with table-driven repo; add status-aware single button + player, failure expiry (1h), mp3-only; include `none` state for never-requested items; ensure client no longer expects timings assets.  
-6) Settings sheet: auto toggle, voice/prosody selection; onboarding includes initial default voice model picker; fetch options from `voice_inventory` (no fallback seed).  
+6) Settings sheet: auto toggle, voice selection; onboarding includes initial default voice model picker; fetch options from `voice_inventory` (no fallback seed).  
 7) QA: credit flows (auto 2 credits total with analysis, manual 1), refunds on failure; single RPC check after timeout/network errors; offline handling.  
 8) Remove legacy WAV/kitten support and min-ID guard; no backfill; stop looking for timing assets.
 
@@ -117,10 +116,10 @@
 
 ## Edge Function Contract (draft)
 - `POST /generate-voiceover` (auth required, same credit flow as ask-ai-v7):
-  - Body: `{ discovery_id: number, voice_model_id: string, tts_model?: string, prosody?: { speed?: number, volume?: number } }`
+  - Body: `{ discovery_id: number, voice_model_id: string, tts_model?: string }`
   - Success 200: row fields plus `audio_url`, `audio_url_expires_at` (TTL 7d; `audio_url = null` unless status is `ready`), and the current `credit_balance`. Dedup/retry rules: single row per `discovery_id` enforced by DB unique index. If row is `ready`, return; if `processing` and `updated_at` ≤1m, return; if `processing` stale (>1m), mark `processing` and re-run Fish (no new credit); if `failed`, mark `processing`, charge a new credit, and re-run Fish using stored voice/model; reuse existing storage key.
   - Errors: 401/403 auth failure; 402 insufficient credits (match ask-ai-v7 handling/message); 404 discovery not found/unauthorized; 422 invalid voice/model; 429 upstream throttle; 500 generic; 502/503 upstream Fish failure.
-  - Logging: use shared logger; mask IDs; include Fish error bodies in masked logs only.
+  - Logging: use shared logger; mask IDs; include Fish error bodies in masked logs only; no prosody inputs accepted.
 - Response signals: include `credit_balance` so the client can refresh credits without `existing/was_refunded`. Keep `was_refunded` only when a refund occurred in this call (else false) for clarity; `existing` is no longer required.
 
 ## RPC: get_discovery_voiceovers (mirror get_discoveries_with_location pattern)
@@ -140,12 +139,12 @@
 ## Text Normalization & Best Practices (Fish)
 - Always send `normalize: true`, `chunk_length: 200`, `format: mp3`, `tts_model: s1`.
 - No extra length/emptiness checks; discovery descriptions are already ~300 words and treated as valid.
-- Strip emojis before sending to Fish; otherwise pass text through unchanged. Prosody is not persisted server-side and does not affect the storage path.
+- Strip emojis before sending to Fish; otherwise pass text through unchanged. No prosody input is accepted; Fish defaults apply.
 - Advanced controls (emotions/temperature/top_p) are not used in v1.
 
 ## Settings Storage
-- Store auto-toggle, selected voice/model, and prosody ranges in `UserDefaults` under a namespaced key (non-sensitive; aligns with existing onboarding/credits caching pattern). Seed defaults via onboarding voice picker.
-  - Keys: `voiceover.autoEnabled` (Bool, default false), `voiceover.voiceModelId` (String, default first from inventory/onboarding pick), `voiceover.ttsModel` (String, default `s1`), `voiceover.prosody.speed` (Double, default 1.0), `voiceover.prosody.volume` (Double, default 0). Prefix `voiceover.` to avoid collisions.
+- Store auto-toggle and selected voice/model in `UserDefaults` under a namespaced key (non-sensitive; aligns with existing onboarding/credits caching pattern). Seed defaults via onboarding voice picker.
+  - Keys: `voiceover.autoEnabled` (Bool, default false), `voiceover.voiceModelId` (String, default first from inventory/onboarding pick), `voiceover.ttsModel` (String, default `s1`). Prefix `voiceover.` to avoid collisions. Prosody is fixed to Fish defaults (speed 1.0, volume 0 dB) and not configurable.
 
 ## SQL Sketch
 ```sql

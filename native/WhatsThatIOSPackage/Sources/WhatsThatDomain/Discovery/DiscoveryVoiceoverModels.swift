@@ -59,18 +59,7 @@ public protocol DiscoveryVoiceoverRepository: Sendable {
     func fetchVoiceovers(for discoveryIds: [Int64]) async -> [DiscoveryVoiceoverAsset]
     func requestVoiceover(for discoveryId: Int64,
                          voiceModelId: String,
-                         ttsModel: String,
-                         prosody: VoiceoverProsody?) async -> DiscoveryVoiceoverAsset
-}
-
-public struct VoiceoverProsody: Equatable, Sendable, Codable {
-    public var speed: Double?
-    public var volume: Double?
-
-    public init(speed: Double? = nil, volume: Double? = nil) {
-        self.speed = speed
-        self.volume = volume
-    }
+                         ttsModel: String) async -> DiscoveryVoiceoverAsset
 }
 
 public struct VoiceModelOption: Equatable, Sendable {
@@ -89,17 +78,14 @@ public struct VoiceoverPreferences: Equatable, Sendable {
     public var autoEnabled: Bool
     public var voiceModelId: String
     public var ttsModel: String
-    public var prosody: VoiceoverProsody
 
     public init(
         autoEnabled: Bool,
         voiceModelId: String,
-        ttsModel: String,
-        prosody: VoiceoverProsody
+        ttsModel: String
     ) {
         self.autoEnabled = autoEnabled
         self.voiceModelId = voiceModelId
         self.ttsModel = ttsModel
-        self.prosody = prosody
     }
 }

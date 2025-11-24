@@ -11,7 +11,8 @@ const FISH_TTS_URL = 'https://api.fish.audio/v1/tts';
 const STORAGE_BUCKET = 'voiceovers';
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7; // 7d
 const PROCESSING_STALE_MS = 60_000;
-const EDGE_BUDGET_MS = 50_000;
+// Keep within the 150s idle timeout; leave a small buffer.
+const EDGE_BUDGET_MS = 145_000;
 const BACKOFF_STEPS_MS = [0, 1000, 2000, 4000, 8000];
 
 type VoiceoverStatus = 'processing' | 'ready' | 'failed';
@@ -36,11 +37,6 @@ interface VoiceOption {
   tts_model: string;
   voice_model_id: string;
   display_name: string;
-}
-
-interface ProsodyInput {
-  speed?: number;
-  volume?: number;
 }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -107,7 +103,6 @@ serve(async req => {
     const discoveryId = Number(payload?.discovery_id);
     const voiceModelId = payload?.voice_model_id ? String(payload.voice_model_id) : '';
     const ttsModel = payload?.tts_model ? String(payload.tts_model) : 's1';
-    const prosody: ProsodyInput | undefined = payload?.prosody;
 
     if (!Number.isFinite(discoveryId) || discoveryId <= 0) {
       return jsonResponse(baseHeaders, { error: 'invalid_payload', message: 'discovery_id is required.' }, 422);
@@ -135,7 +130,10 @@ serve(async req => {
       return jsonResponse(baseHeaders, { error: 'not_found', message: 'Discovery not found.' }, 404);
     }
 
-    const sanitizedText = stripEmojis(applyHeaderBreaks(discoveryText)).trim();
+    const sanitizedText = stripEmojis(applyHeaderBreaks(discoveryText))
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     logger.debug('Normalized discovery text', {
       normalizedText: sanitizedText,
       length: sanitizedText.length,
@@ -290,7 +288,6 @@ serve(async req => {
       sanitizedText,
       row.voice_model_id,
       row.tts_model,
-      prosody,
       logger
     );
     if (!audioBuffer) {
@@ -517,7 +514,6 @@ async function callFishAudio(
   text: string,
   voiceModelId: string,
   ttsModel: string,
-  prosody: ProsodyInput | undefined,
   logger: Logger
 ): Promise<{ audioBuffer: Uint8Array | null; upstreamStatus?: number; upstreamError?: string }> {
   const startedAt = Date.now();
@@ -550,9 +546,6 @@ async function callFishAudio(
         chunk_length: 200,
         tts_model: ttsModel,
       };
-      if (prosody && (prosody.speed !== undefined || prosody.volume !== undefined)) {
-        payload.prosody = prosody;
-      }
 
       const response = await fetch(FISH_TTS_URL, {
         method: 'POST',

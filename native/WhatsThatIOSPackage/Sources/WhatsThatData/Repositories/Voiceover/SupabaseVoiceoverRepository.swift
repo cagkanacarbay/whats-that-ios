@@ -169,8 +169,7 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     public func requestVoiceover(
         for discoveryId: Int64,
         voiceModelId: String,
-        ttsModel: String,
-        prosody: VoiceoverProsody?
+        ttsModel: String
     ) async -> DiscoveryVoiceoverAsset {
         guard let supabaseURL = configuration.supabaseURL else {
             return DiscoveryVoiceoverAsset(
@@ -219,8 +218,7 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
         let body = VoiceoverRequestBody(
             discovery_id: discoveryId,
             voice_model_id: voiceModelId,
-            tts_model: ttsModel,
-            prosody: prosody
+            tts_model: ttsModel
         )
 
         do {
@@ -461,7 +459,6 @@ private struct VoiceoverRequestBody: Encodable {
     let discovery_id: Int64
     let voice_model_id: String
     let tts_model: String
-    let prosody: VoiceoverProsody?
 }
 
 private struct VoiceoverEdgeResponse: Decodable {
@@ -527,8 +524,7 @@ public struct SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     public func requestVoiceover(
         for discoveryId: Int64,
         voiceModelId: String,
-        ttsModel: String,
-        prosody: VoiceoverProsody?
+        ttsModel: String
     ) async -> DiscoveryVoiceoverAsset {
         DiscoveryVoiceoverAsset(
             discoveryId: discoveryId,

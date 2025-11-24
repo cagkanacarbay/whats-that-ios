@@ -53,8 +53,7 @@ struct SettingsView: View {
                 initialPreferences: VoiceoverPreferences(
                     autoEnabled: false,
                     voiceModelId: "",
-                    ttsModel: "s1",
-                    prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
+                    ttsModel: "s1"
                 ),
                 loadPreferences: loadVoiceoverPreferences,
                 savePreferences: saveVoiceoverPreferences,
@@ -157,42 +156,6 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
                 .onChange(of: voiceoverViewModel.preferences.voiceModelId) { _, newValue in
                     Task { await voiceoverViewModel.selectVoice(withId: newValue) }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Speed")
-                        Spacer()
-                        Text(String(format: "%.1fx", voiceoverViewModel.preferences.prosody.speed ?? 1.0))
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(
-                        value: Binding(
-                            get: { voiceoverViewModel.preferences.prosody.speed ?? 1.0 },
-                            set: { newValue in
-                                Task { await voiceoverViewModel.updateSpeed(newValue) }
-                            }
-                        ),
-                        in: 0.5...2.0
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Volume")
-                        Spacer()
-                        Text(String(format: "%.0f dB", voiceoverViewModel.preferences.prosody.volume ?? 0))
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(
-                        value: Binding(
-                            get: { voiceoverViewModel.preferences.prosody.volume ?? 0 },
-                            set: { newValue in
-                                Task { await voiceoverViewModel.updateVolume(newValue) }
-                            }
-                        ),
-                        in: -20...20
-                    )
                 }
             }
         }

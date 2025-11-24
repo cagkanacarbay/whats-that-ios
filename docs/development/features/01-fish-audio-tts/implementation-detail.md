@@ -2,7 +2,7 @@
 
 Concrete, no-more-decisions instructions aligned with the updated plan:
 - Single canonical asset per `discovery_id` (first request wins voice/model); retries reuse the stored voice/model only.
-- No prosody stored in the DB; prosody only lives client-side and is sent in the request body.
+- No prosody controls anywhere; Fish defaults are always used (speed 1.0, volume 0 dB) and nothing is stored or sent.
 - Edge Function must return existing rows immediately when ready or processing <1m; re-run Fish for `processing` rows older than 1 minute (no extra credit) and charge a new credit to re-run `failed` rows (prior attempt already refunded).
 - Voice inventory must be seeded (no client fallback).
 - Credit ordering is transactionally safe: insert the `processing` row first, then consume credit; failures roll back the insert. Unique constraint + transaction prevent double-spend; the client also blocks concurrent requests per discovery while a call is in flight.
@@ -303,13 +303,11 @@ public protocol DiscoveryVoiceoverRepository: Sendable {
     func fetchVoiceovers(for discoveryIds: [Int64]) async -> [DiscoveryVoiceoverAsset]
     func requestVoiceover(for discoveryId: Int64,
                          voiceModelId: String,
-                         ttsModel: String,
-                         prosody: VoiceoverProsody?) async -> DiscoveryVoiceoverAsset
+                         ttsModel: String) async -> DiscoveryVoiceoverAsset
 }
 
-public struct VoiceoverProsody: Equatable, Sendable { public var speed: Double?; public var volume: Double? }
 public struct VoiceModelOption: Equatable, Sendable { public let voiceModelId: String; public let displayName: String; public let ttsModel: String }
-public struct VoiceoverPreferences: Equatable, Sendable { public var autoEnabled: Bool; public var voiceModelId: String; public var ttsModel: String; public var prosody: VoiceoverProsody }
+public struct VoiceoverPreferences: Equatable, Sendable { public var autoEnabled: Bool; public var voiceModelId: String; public var ttsModel: String }
 ```
 
 ## 4) Data layer: Supabase voiceover repository
@@ -318,14 +316,14 @@ File `native/WhatsThatIOSPackage/Sources/WhatsThatData/Repositories/Voiceover/Su
   - Uses the functions base URL helper from `SupabaseDiscoveryAnalysisClient.functionsBaseURL` to build `generate-voiceover` URL.
   - Removes storage listing, timing files, min-ID guard, kitten model arrays.
   - `fetchVoiceovers(for:)` calls RPC `get_discovery_voiceovers` and maps rows → `DiscoveryVoiceoverAsset` with `audioURL` only when not null; set `status` from `status` string (`ready`, `processing`, `failed` → `.ready/.processing/.failed`, otherwise `.missing`), `wasExistingResponse = true`, `wasRefunded = false`. If the RPC returns no row for an ID, emit `.none` for that discovery.
-  - `requestVoiceover` POSTs JSON `{ discovery_id, voice_model_id, tts_model, prosody }` to `generate-voiceover` with bearer token; maps HTTP 402 to `status = .failed` and `errorReason = "insufficient_credits"` (so UI can surface the credit alert); sets `wasExistingResponse` and `wasRefunded` flags from response; if `audio_url` is null, keep `status` from payload.
+  - `requestVoiceover` POSTs JSON `{ discovery_id, voice_model_id, tts_model }` to `generate-voiceover` with bearer token; maps HTTP 402 to `status = .failed` and `errorReason = "insufficient_credits"` (so UI can surface the credit alert); sets `wasExistingResponse` and `wasRefunded` flags from response; if `audio_url` is null, keep `status` from payload.
   - Caches by `(discoveryId, updatedAt)`; signed URL TTL from response `audio_url_expires_at`.
 Update tests in `native/WhatsThatIOSPackage/Tests/WhatsThatDataTests/SupabaseVoiceoverRepositoryTests.swift` to drop WAV/timing cases and assert mapping of `audio_url = null` → `.processing/.failed`.
 
 ## 5) Voice inventory + preferences
 - Add `VoiceInventoryRepository` (new file under `WhatsThatData`) that calls `get_voice_options` and returns `[VoiceModelOption]`; no fallback seed or bundled resource.
-- Add `VoiceoverPreferencesStore` (UserDefaults) storing: `autoEnabled` (Bool), `voiceModelId`, `ttsModel` (default `s1`), `prosody.speed` (0.5–2.0), `prosody.volume` (-20…20). Provide `load/save/reset` APIs.
-  - Keys (namespaced): `voiceover.autoEnabled`, `voiceover.voiceModelId`, `voiceover.ttsModel`, `voiceover.prosody.speed`, `voiceover.prosody.volume`. Defaults: auto off, ttsModel `s1`, prosody speed 1.0, volume 0, voice seeded from onboarding/first inventory option.
+- Add `VoiceoverPreferencesStore` (UserDefaults) storing: `autoEnabled` (Bool), `voiceModelId`, `ttsModel` (default `s1`). Provide `load/save/reset` APIs; prosody is fixed to Fish defaults and not stored.
+  - Keys (namespaced): `voiceover.autoEnabled`, `voiceover.voiceModelId`, `voiceover.ttsModel`. Defaults: auto off, ttsModel `s1`, voice seeded from onboarding/first inventory option.
 
 ## 6) Playback controller
 File `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Shared/Controllers/VoiceoverPlaybackController.swift`:
@@ -354,7 +352,7 @@ File `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Shared/Controller
   - Construct `VoiceInventoryRepository` and `VoiceoverPreferencesStore` alongside `SupabaseVoiceoverRepository`.
   - Pass the preferences store and voiceover repository into `VoiceoverPlaybackController` factory (`makeVoiceoverPlaybackController`).
   - Inject the same dependencies into `DiscoveryCreationDependencyProvider` so creation flow can auto-request TTS.
-- `SettingsView.swift`: add a “Voiceover” section under Theme that shows current voice model, prosody sliders, and auto-toggle. Use `VoiceInventoryRepository` data (no fallback).
+- `SettingsView.swift`: add a “Voiceover” section under Theme that shows current voice model and auto-toggle (no prosody sliders). Use `VoiceInventoryRepository` data (no fallback).
 
 ## 9) Auto-TTS after analysis
 - In `DiscoveryCreationFlowViewModel.handle(event:)` when handling `.complete` (current lines ~675–705): after optimistic credit decrement, if `VoiceoverPreferences.autoEnabled` is true, call `voiceoverPlaybackController.requestVoiceover` with the new discovery id and preferences.

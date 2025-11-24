@@ -727,8 +727,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 _ = await voiceoverRepository.requestVoiceover(
                     for: discoveryId,
                     voiceModelId: preferences.voiceModelId,
-                    ttsModel: preferences.ttsModel,
-                    prosody: preferences.prosody
+                    ttsModel: preferences.ttsModel
                 )
             }
         case let .error(message, status):

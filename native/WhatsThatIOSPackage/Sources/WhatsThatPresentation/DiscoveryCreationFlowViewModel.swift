@@ -840,7 +840,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     private func debugLog(_ message: String) {
         guard debugLoggingEnabled else { return }
-        print("[DiscoveryCreationFlowViewModel] \(message)")
+        // print("[DiscoveryCreationFlowViewModel] \(message)")
     }
 
     private func flowStateSummary(_ state: DiscoveryCreationFlowState) -> String {

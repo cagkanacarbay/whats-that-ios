@@ -288,13 +288,13 @@ public extension AppDependencyContainer {
     // MARK: - App-wide Location Lifecycle
     @MainActor
     func startAppLocationTracking() async {
-        print("[App][LocationLifecycle] startAppLocationTracking() -> startTrackingIfNeeded + one-shot fresh")
+        // print("[App][LocationLifecycle] startAppLocationTracking() -> startTrackingIfNeeded + one-shot fresh")
         await locationService.startTrackingIfNeeded()
         _ = await locationService.currentLocation(requireFresh: true)
     }
 
     func stopAppLocationTracking() {
-        print("[App][LocationLifecycle] stopAppLocationTracking() -> stopTracking")
+        // print("[App][LocationLifecycle] stopAppLocationTracking() -> stopTracking")
         locationService.stopTracking()
     }
 

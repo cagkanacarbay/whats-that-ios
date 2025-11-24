@@ -286,14 +286,14 @@ public struct RootContentView: View {
             // Start/resume tracking when authenticated and app is active; stop when leaving main state
             if case .main = current, scenePhase == .active {
                 if let startLocationTracking {
-                    print("[App][Flow] -> main (scene=active) starting location tracking")
+                    // print("[App][Flow] -> main (scene=active) starting location tracking")
                     Task { await startLocationTracking() }
                 }
             }
             if case .main = previous, case .main = current {
                 // still main -> no-op
             } else if case .main = previous {
-                print("[App][Flow] leaving main -> stopping location tracking")
+                // print("[App][Flow] leaving main -> stopping location tracking")
                 stopLocationTracking?()
             }
         }
@@ -306,16 +306,16 @@ public struct RootContentView: View {
             case .active:
                 if case .main = viewModel.flowState {
                     if let startLocationTracking {
-                        print("[App][ScenePhase] -> active (flow=main) starting location tracking")
+                        // print("[App][ScenePhase] -> active (flow=main) starting location tracking")
                         Task { await startLocationTracking() }
                     } else {
-                        print("[App][ScenePhase] -> active (flow=main) but no startLocationTracking")
+                        // print("[App][ScenePhase] -> active (flow=main) but no startLocationTracking")
                     }
                 } else {
-                    print("[App][ScenePhase] -> active (flow=\(String(describing: viewModel.flowState))) not starting tracking")
+                    // print("[App][ScenePhase] -> active (flow=\(String(describing: viewModel.flowState))) not starting tracking")
                 }
             case .background, .inactive:
-                print("[App][ScenePhase] -> \(newPhase == .background ? "background" : "inactive") stopping location tracking")
+                // print("[App][ScenePhase] -> \(newPhase == .background ? "background" : "inactive") stopping location tracking")
                 stopLocationTracking?()
             @unknown default:
                 break

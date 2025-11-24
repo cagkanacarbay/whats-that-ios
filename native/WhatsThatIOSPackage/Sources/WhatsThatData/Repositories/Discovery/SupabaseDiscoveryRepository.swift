@@ -54,9 +54,9 @@ public struct SupabaseDiscoveryRepository: DiscoveryRepository, DiscoveryHistory
             throw DiscoveryFeedError.unauthorized
         }
 
-        supabaseDiscoveryLogger.debug(
-            "fetchDiscoveries start limit=\(limit, privacy: .public) cursor=\(String(describing: discoveryId), privacy: .public) taskCancelled=\(Task.isCancelled, privacy: .public)"
-        )
+        // supabaseDiscoveryLogger.debug(
+        //     "fetchDiscoveries start limit=\(limit, privacy: .public) cursor=\(String(describing: discoveryId), privacy: .public) taskCancelled=\(Task.isCancelled, privacy: .public)"
+        // )
 
         do {
             let params = GetDiscoveriesParams(

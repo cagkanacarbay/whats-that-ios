@@ -250,12 +250,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
                   !self.snapshot.isInteracting
             else { return }
 
-            let progressValue = Double(self.snapshot.progress)
-            let phaseDescription = String(describing: self.snapshot.phase)
-            discoveryDetailHeroLogger.debug(
-                "[Transition] chrome-ready triggered progress=\(progressValue, privacy: .public) opacity=\(self.snapshot.contentOpacity, privacy: .public) phase=\(phaseDescription, privacy: .public)"
-            )
-
             if !self.snapshot.isContentReady {
                 self.snapshot.isContentReady = true
                 self.snapshot.phase = .presented
@@ -264,8 +258,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         }
         settleWorkItem = workItem
         let revealDelay = heroAnimator.openDuration * chromeRevealFraction
-        let currentPhaseDescription = String(describing: snapshot.phase)
-        discoveryDetailHeroLogger.debug("[Transition] scheduleDetailSettled delay=\(revealDelay, privacy: .public) phase=\(currentPhaseDescription, privacy: .public)")
         DispatchQueue.main.asyncAfter(
             deadline: .now() + revealDelay,
             execute: workItem

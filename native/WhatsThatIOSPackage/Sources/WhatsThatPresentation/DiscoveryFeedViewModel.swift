@@ -82,7 +82,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
         }
 
         self.isFetchingPage = true
-        discoveryFeedLogger.info("fetchPage start mode=\(mode.logDescription, privacy: .public) force=\(force, privacy: .public)")
+        // discoveryFeedLogger.info("fetchPage start mode=\(mode.logDescription, privacy: .public) force=\(force, privacy: .public)")
         if Task.isCancelled {
             discoveryFeedLogger.warning("fetchPage invoked with cancelled task mode=\(mode.logDescription, privacy: .public)")
         }
@@ -107,7 +107,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             }
 
             self.isFetchingPage = false
-            discoveryFeedLogger.info("fetchPage finished mode=\(mode.logDescription, privacy: .public) isRefreshing=\(self.isRefreshing, privacy: .public) isPaginating=\(self.isPaginating, privacy: .public)")
+            // discoveryFeedLogger.info("fetchPage finished mode=\(mode.logDescription, privacy: .public) isRefreshing=\(self.isRefreshing, privacy: .public) isPaginating=\(self.isPaginating, privacy: .public)")
         }
 
         let cursor: Int64?
@@ -132,7 +132,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
 
             self.hasMore = page.count == self.pageSize
             self.loadState = self.discoveries.isEmpty ? .idle : .loaded
-            discoveryFeedLogger.debug("fetchPage succeeded mode=\(mode.logDescription, privacy: .public) received=\(page.count, privacy: .public) total=\(self.discoveries.count, privacy: .public) hasMore=\(self.hasMore, privacy: .public)")
+            // discoveryFeedLogger.debug("fetchPage succeeded mode=\(mode.logDescription, privacy: .public) received=\(page.count, privacy: .public) total=\(self.discoveries.count, privacy: .public) hasMore=\(self.hasMore, privacy: .public)")
         } catch {
             let resolvedError: Error
             let resolvedMessage: String
@@ -167,7 +167,7 @@ public final class DiscoveryFeedViewModel: ObservableObject {
             deduplicated = self.discoveries + filtered
         }
 
-        discoveryFeedLogger.debug("applyNewPage replaceExisting=\(replaceExisting, privacy: .public) incoming=\(page.count, privacy: .public) previous=\(self.discoveries.count, privacy: .public) resulting=\(deduplicated.count, privacy: .public)")
+        // discoveryFeedLogger.debug("applyNewPage replaceExisting=\(replaceExisting, privacy: .public) incoming=\(page.count, privacy: .public) previous=\(self.discoveries.count, privacy: .public) resulting=\(deduplicated.count, privacy: .public)")
         self.discoveries = deduplicated
     }
 }

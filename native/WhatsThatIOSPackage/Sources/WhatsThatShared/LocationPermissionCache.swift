@@ -30,9 +30,8 @@ public final class LocationPermissionCache: ObservableObject {
             isGranted = false
         }
         #if DEBUG
-        print("[PermissionCache] Refreshed location permission: \(isGranted == true ? "granted" : "not granted")")
+        // print("[PermissionCache] Refreshed location permission: \(isGranted == true ? "granted" : "not granted")")
         #endif
     }
     #endif
 }
-

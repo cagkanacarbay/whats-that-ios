@@ -412,7 +412,7 @@ extension CoreLocationDiscoveryLocationService {
 
     private func log(_ message: String) {
         #if DEBUG
-        print("[LocationService] \(message)")
+        // print("[LocationService] \(message)")
         #endif
     }
 }

@@ -32,10 +32,37 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     private let signedURLTTL: TimeInterval
     private var cache: [Int64: CacheEntry] = [:]
 
-    private static let decoder: JSONDecoder = {
+    private static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            if let date = Self.iso8601FractionalFormatter.date(from: string) {
+                return date
+            }
+            if let date = ISO8601DateFormatter().date(from: string) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid date format: \(string)"
+            )
+        }
         return decoder
+    }
+
+    private static let decoder = SupabaseVoiceoverRepository.makeDecoder()
+
+    static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
     }()
 
     public init(
@@ -241,28 +268,48 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             }
 
             if (200..<300).contains(httpResponse.statusCode) {
-                let response = try Self.decoder.decode(VoiceoverEdgeResponse.self, from: data)
-                let asset = mapAsset(
-                    discoveryId: response.discoveryId,
-                    status: response.status,
-                    audioURLString: response.audioURL,
-                    provider: response.provider,
-                    ttsModel: response.ttsModel,
-                    voiceModelId: response.voiceModelId,
-                    fileName: response.fileName,
-                    fileExtension: response.fileExtension,
-                    requestedAt: response.requestedAt,
-                    updatedAt: response.updatedAt,
-                    errorReason: response.errorReason,
-                    wasExisting: response.wasExisting ?? false,
-                    wasRefunded: response.wasRefunded ?? false
-                )
-                cache[asset.discoveryId] = CacheEntry(
-                    asset: asset,
-                    updatedAt: asset.updatedAt,
-                    expiresAt: response.audioURLExpiresAt
-                )
-                return asset
+                do {
+                    let response = try Self.decoder.decode(VoiceoverEdgeResponse.self, from: data)
+                    let asset = mapAsset(
+                        discoveryId: response.discoveryId,
+                        status: response.status,
+                        audioURLString: response.audioURL,
+                        provider: response.provider,
+                        ttsModel: response.ttsModel,
+                        voiceModelId: response.voiceModelId,
+                        fileName: response.fileName,
+                        fileExtension: response.fileExtension,
+                        requestedAt: response.requestedAt,
+                        updatedAt: response.updatedAt,
+                        errorReason: response.errorReason,
+                        wasExisting: response.wasExisting ?? false,
+                        wasRefunded: response.wasRefunded ?? false
+                    )
+                    cache[asset.discoveryId] = CacheEntry(
+                        asset: asset,
+                        updatedAt: asset.updatedAt,
+                        expiresAt: response.audioURLExpiresAt
+                    )
+                    return asset
+                } catch {
+                    let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8-body>"
+                    supabaseVoiceoverLogger.error("Voiceover decode failed: \(error.localizedDescription, privacy: .public) body=\(rawBody, privacy: .public)")
+                    return DiscoveryVoiceoverAsset(
+                        discoveryId: discoveryId,
+                        status: .failed,
+                        audioURL: nil,
+                        provider: nil,
+                        ttsModel: ttsModel,
+                        voiceModelId: voiceModelId,
+                        fileName: nil,
+                        fileExtension: nil,
+                        requestedAt: nil,
+                        updatedAt: nil,
+                        errorReason: "decode_error",
+                        wasExistingResponse: false,
+                        wasRefunded: false
+                    )
+                }
             }
 
             let message = decodeErrorMessage(data: data) ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
@@ -304,7 +351,10 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
 
 private func date(from string: String?) -> Date? {
     guard let string else { return nil }
-    return ISO8601DateFormatter().date(from: string)
+    if let date = SupabaseVoiceoverRepository.iso8601FractionalFormatter.date(from: string) {
+        return date
+    }
+    return SupabaseVoiceoverRepository.iso8601Formatter.date(from: string)
 }
 
 private extension SupabaseVoiceoverRepository {

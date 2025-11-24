@@ -65,7 +65,7 @@ struct VoiceoverDetailButton: View {
     }
 
     private var asset: DiscoveryVoiceoverAsset? {
-        controller.assetStates[discovery.id]
+        controller.normalizedAsset(for: discovery.id)
     }
 
     private var isLoading: Bool {
@@ -146,13 +146,16 @@ struct VoiceoverDetailButton: View {
 
     private func handleTap() {
         guard let status = asset?.status else {
+            controller.setCurrentDiscovery(discovery)
             controller.requestVoiceover(for: discovery)
             return
         }
 
         if status == .failed || status == .missing || status == .none {
+            controller.setCurrentDiscovery(discovery)
             controller.requestVoiceover(for: discovery)
         } else {
+            controller.setCurrentDiscovery(discovery)
             controller.togglePlayback(for: discovery)
         }
     }

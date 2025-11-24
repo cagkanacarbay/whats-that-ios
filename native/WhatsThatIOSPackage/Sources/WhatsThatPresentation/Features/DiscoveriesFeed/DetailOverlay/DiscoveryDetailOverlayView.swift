@@ -262,6 +262,13 @@ struct DiscoveryDetailOverlayView: View {
 
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VoiceoverPlayerHost(
+                controller: voiceoverController,
+                overlayPhase: nil,
+                imageURLResolver: { _ in snapshot.context?.imageURL }
+            )
+        }
         .onChange(of: snapshot.isClosing) { _, closing in
             if closing {
                 dismissFullscreen()

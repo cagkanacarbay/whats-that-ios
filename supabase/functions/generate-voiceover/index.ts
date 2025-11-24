@@ -145,13 +145,6 @@ serve(async req => {
       );
     }
 
-    logger.info('Starting voiceover request', {
-      userId: maskId(userId),
-      discoveryId,
-      voiceModelId,
-      ttsModel,
-    });
-
     const startResult = await supabaseAdmin.rpc('start_voiceover_request', {
       p_user_id: userId,
       p_discovery_id: discoveryId,
@@ -189,9 +182,18 @@ serve(async req => {
     let wasExistingResponse = !isFreshInsert;
     let creditBalance: number | null = null;
 
+    logger.info('Voiceover row ready for processing', {
+      discoveryId,
+      voiceoverId: row.id,
+      status: row.status,
+      isFreshInsert,
+      updatedAt: row.updated_at,
+      requestedAt: row.requested_at,
+    });
+
     if (row.status === 'ready') {
       const { audioUrl, expiresAt } = await signAudioUrl(supabaseAdmin, row, logger);
-       logger.info('Returning ready voiceover', { discoveryId, voiceoverId: row.id });
+      logger.info('Returning existing ready voiceover', { discoveryId, voiceoverId: row.id, audioUrlPresent: Boolean(audioUrl) });
       creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
       return jsonResponse(
         baseHeaders,
@@ -207,8 +209,12 @@ serve(async req => {
       );
     }
 
-    if (row.status === 'processing' && now - updatedAtMs <= PROCESSING_STALE_MS) {
-      logger.info('Returning fresh processing row', { discoveryId, voiceoverId: row.id, updatedAt: row.updated_at });
+    if (
+      row.status === 'processing' &&
+      now - updatedAtMs <= PROCESSING_STALE_MS &&
+      !isFreshInsert
+    ) {
+      logger.info('Processing already in-flight (<1m); returning as-is', { discoveryId, voiceoverId: row.id, updatedAt: row.updated_at });
       creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
       return jsonResponse(
         baseHeaders,
@@ -226,7 +232,16 @@ serve(async req => {
 
     const wasFailedStatus = row.status === 'failed';
     if (row.status === 'failed' || row.status === 'processing') {
-      logger.info('Restarting processing', { discoveryId, voiceoverId: row.id, previousStatus: row.status, wasFailedStatus });
+      const reason =
+        wasFailedStatus ? 'retry_failed' : isFreshInsert ? 'new_row_continues' : 'stale_processing_retry';
+      logger.info('Setting status=processing in DB', {
+        discoveryId,
+        voiceoverId: row.id,
+        previousStatus: row.status,
+        reason,
+        wasFailedStatus,
+        wasPreviouslyProcessing: row.status === 'processing',
+      });
       const { data: updatedRow, error: updateError } = await supabaseAdmin
         .from('discovery_voiceovers')
         .update({ status: 'processing', error_reason: null, updated_at: new Date().toISOString() })
@@ -242,7 +257,7 @@ serve(async req => {
     }
 
     if (wasFailedStatus) {
-      logger.info('Recharging credit for failed row', { discoveryId, voiceoverId: row.id });
+      logger.info('Charging credit for retry of failed row', { discoveryId, voiceoverId: row.id });
       const balanceResult = await supabaseAdmin.rpc('consume_credit_for_voiceover', {
         p_user_id: userId,
         p_credits_to_consume: 1,
@@ -261,6 +276,7 @@ serve(async req => {
         return jsonResponse(baseHeaders, { error: 'server_error', message: 'Unable to consume credit.' }, 500);
       }
       creditBalance = (balanceResult.data as number) ?? null;
+      logger.info('Credit charged for retry', { discoveryId, voiceoverId: row.id, creditBalance });
       wasExistingResponse = true;
     } else if (isFreshInsert) {
       creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
@@ -274,14 +290,14 @@ serve(async req => {
       logger
     );
     if (!audioBuffer) {
-      logger.error('Fish Audio call failed', {
+      logger.error('Fish Audio returned failure', {
         discoveryId,
         voiceoverId: row.id,
         upstreamStatus,
         upstreamError,
       });
     } else {
-      logger.info('Fish Audio call succeeded', { discoveryId, voiceoverId: row.id, bytes: audioBuffer.byteLength });
+      logger.info('Fish Audio returned successfully', { discoveryId, voiceoverId: row.id, bytes: audioBuffer.byteLength });
     }
 
     if (!audioBuffer) {
@@ -316,7 +332,7 @@ serve(async req => {
       audioBuffer,
       logger
     );
-    logger.info('Upload result', { discoveryId, voiceoverId: row.id, success: uploadResult.success, error: uploadResult.error });
+    logger.info('Uploaded audio to storage', { discoveryId, voiceoverId: row.id, success: uploadResult.success, error: uploadResult.error, path: `${row.discovery_id}/${row.file_name}` });
     if (!uploadResult.success) {
       await handleFailure(
         supabaseAdmin,
@@ -360,7 +376,12 @@ serve(async req => {
     const { audioUrl, expiresAt } = await signAudioUrl(supabaseAdmin, readyRow as VoiceoverRow, logger);
     creditBalance = creditBalance ?? await fetchCreditBalance(supabaseAdmin, userId, logger);
 
-    logger.info('Voiceover ready', { discoveryId, voiceoverId: row.id, audioUrlPresent: Boolean(audioUrl) });
+    logger.info('Voiceover marked ready and signed URL issued', {
+      discoveryId,
+      voiceoverId: row.id,
+      audioUrlPresent: Boolean(audioUrl),
+      expiresAt,
+    });
 
     return jsonResponse(
       baseHeaders,

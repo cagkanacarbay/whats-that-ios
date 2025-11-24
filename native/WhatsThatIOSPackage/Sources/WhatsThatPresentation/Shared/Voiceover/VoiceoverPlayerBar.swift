@@ -22,7 +22,9 @@ struct VoiceoverPlayerBar: View {
         VoiceoverPersistentPlayerView(
             controller: controller,
             discovery: discovery,
-            imageURL: imageURL
+            imageURL: imageURL,
+            onNextDiscovery: nil,
+            onPreviousDiscovery: nil
         )
         .frame(maxWidth: .infinity)
         // Cancel parent horizontal padding so the bar spans full width.

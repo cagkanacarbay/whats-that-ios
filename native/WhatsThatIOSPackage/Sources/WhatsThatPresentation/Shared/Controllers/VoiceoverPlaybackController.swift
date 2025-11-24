@@ -141,6 +141,10 @@ public extension VoiceoverPlaybackController {
         }
     }
 
+    func setCurrentDiscovery(_ discovery: DiscoverySummary) {
+        currentDiscovery = discovery
+    }
+
     func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
         Task { [weak self] in
             guard let self else { return }
@@ -186,6 +190,7 @@ public extension VoiceoverPlaybackController {
                     wasExistingResponse: false,
                     wasRefunded: false
                 )
+                self.currentDiscovery = discovery
                 self.playbackState = .preparing(discoveryId: discovery.id)
             }
 
@@ -289,19 +294,25 @@ public extension VoiceoverPlaybackController {
 
 // MARK: - Private helpers
 
-private extension VoiceoverPlaybackController {
-    func normalizedAsset(for discoveryId: Int64) -> DiscoveryVoiceoverAsset? {
+extension VoiceoverPlaybackController {
+    public func normalizedAsset(for discoveryId: Int64) -> DiscoveryVoiceoverAsset? {
         guard let asset = assetStates[discoveryId] else { return nil }
         return normalize(asset)
     }
 
-    func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
+    public func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
         if asset.status == .processing {
             let lastUpdate = asset.updatedAt ?? asset.requestedAt
+            if let lastUpdate {
+                let age = Date().timeIntervalSince(lastUpdate)
+                print("Voiceover normalize: processing age=\(age) discoveryId=\(asset.discoveryId)")
+            } else {
+                print("Voiceover normalize: processing with missing timestamps discoveryId=\(asset.discoveryId)")
+            }
             if let lastUpdate, Date().timeIntervalSince(lastUpdate) > processingStaleThreshold {
                 return DiscoveryVoiceoverAsset(
                     discoveryId: asset.discoveryId,
-                    status: .failed,
+                    status: .none,
                     audioURL: nil,
                     provider: asset.provider,
                     ttsModel: asset.ttsModel,
@@ -310,7 +321,7 @@ private extension VoiceoverPlaybackController {
                     fileExtension: asset.fileExtension,
                     requestedAt: asset.requestedAt,
                     updatedAt: asset.updatedAt,
-                    errorReason: asset.errorReason ?? "Audio generation timed out.",
+                    errorReason: nil,
                     wasExistingResponse: asset.wasExistingResponse,
                     wasRefunded: asset.wasRefunded
                 )

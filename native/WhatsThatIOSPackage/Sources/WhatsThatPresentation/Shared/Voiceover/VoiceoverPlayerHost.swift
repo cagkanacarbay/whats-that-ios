@@ -24,7 +24,9 @@ struct VoiceoverPlayerHost: View {
                 VoiceoverPersistentPlayerView(
                     controller: controller,
                     discovery: discovery,
-                    imageURL: imageURLResolver(discovery)
+                    imageURL: imageURLResolver(discovery),
+                    onNextDiscovery: nil,
+                    onPreviousDiscovery: nil
                 )
                 .frame(maxWidth: .infinity)
                 .background(

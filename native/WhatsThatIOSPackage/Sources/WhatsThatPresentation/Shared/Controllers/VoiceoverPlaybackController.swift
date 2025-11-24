@@ -44,6 +44,9 @@ public final class VoiceoverPlaybackController: ObservableObject {
     @Published public var isDetailOverlayActive: Bool = false
     @Published public var suppressProgressUpdates: Bool = false
     @Published private var downloadedIds: Set<Int64> = []
+    private var pendingIds: Set<Int64> = []
+    private var pollingTask: Task<Void, Never>?
+    private let pollIntervals: [TimeInterval] = [1, 3, 5]
 
     private let repository: any DiscoveryVoiceoverRepository
     private let voiceoverCache: VoiceoverFileCache
@@ -51,6 +54,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private let preferencesStore: VoiceoverPreferencesStore?
     private let audioSession: AVAudioSession
     private let player: AVPlayer
+    private let pendingStore: VoiceoverPendingStore
     private var timeObserverToken: Any?
     private var playerItemStatusObservation: NSKeyValueObservation?
     private var endPlaybackObserver: NSObjectProtocol?
@@ -70,7 +74,8 @@ public final class VoiceoverPlaybackController: ObservableObject {
         preferencesStore: VoiceoverPreferencesStore? = nil,
         audioSession: AVAudioSession = .sharedInstance(),
         player: AVPlayer = AVPlayer(),
-        urlSession: URLSession = .shared
+        urlSession: URLSession = .shared,
+        pendingStore: VoiceoverPendingStore = .shared
     ) {
         self.repository = repository
         self.voiceoverCache = voiceoverCache
@@ -79,6 +84,11 @@ public final class VoiceoverPlaybackController: ObservableObject {
         self.audioSession = audioSession
         self.player = player
         self.urlSession = urlSession
+        self.pendingStore = pendingStore
+
+        Task { [weak self] in
+            await self?.restorePendingRequests()
+        }
     }
 
     deinit {
@@ -89,6 +99,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
         if let observer = endPlaybackObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        pollingTask?.cancel()
     }
 }
 
@@ -103,24 +114,9 @@ public extension VoiceoverPlaybackController {
             await MainActor.run {
                 for asset in assets {
                     let normalized = self.normalize(asset)
-                    if let existing = self.assetStates[asset.discoveryId] {
-                        // Keep a ready asset if the incoming one is older or not ready.
-                        if existing.status == .ready {
-                            if normalized.status != .ready || normalized.audioURL == nil {
-                                continue
-                            }
-                            if let existingUpdated = existing.updatedAt,
-                               let incomingUpdated = normalized.updatedAt,
-                               incomingUpdated < existingUpdated {
-                                continue
-                            }
-                        }
-                    }
-                    self.assetStates[asset.discoveryId] = normalized
-                    Task { [weak self] in
-                        await self?.refreshCacheFlag(for: normalized)
-                    }
+                    self.applyFetchedAsset(normalized)
                 }
+                self.startPollingIfNeeded()
             }
         }
     }
@@ -202,6 +198,8 @@ public extension VoiceoverPlaybackController {
                 self.currentDiscovery = discovery
                 self.playbackState = .preparing(discoveryId: discovery.id)
             }
+            markPending(discovery.id)
+            startPollingIfNeeded()
 
             let asset = await self.repository.requestVoiceover(
                 for: discovery.id,
@@ -211,7 +209,7 @@ public extension VoiceoverPlaybackController {
 
             let normalized = normalize(asset)
             await MainActor.run {
-                self.assetStates[discovery.id] = normalized
+                self.applyFetchedAsset(normalized)
             }
             Task { [weak self] in
                 await self?.refreshCacheFlag(for: normalized)
@@ -222,9 +220,11 @@ public extension VoiceoverPlaybackController {
             }
 
             if normalized.status == .ready, let audioURL = normalized.audioURL {
+                clearPending(discovery.id)
                 await prepareAudioSession()
                 await configurePlayer(with: audioURL, discovery: discovery)
             } else if normalized.status == .failed {
+                clearPending(discovery.id)
                 await MainActor.run {
                     self.playbackState = .failed(discoveryId: discovery.id, message: normalized.errorReason)
                     self.errorMessage = normalized.errorReason
@@ -309,6 +309,38 @@ extension VoiceoverPlaybackController {
     public func normalizedAsset(for discoveryId: Int64) -> DiscoveryVoiceoverAsset? {
         guard let asset = assetStates[discoveryId] else { return nil }
         return normalize(asset)
+    }
+
+    func applyFetchedAsset(_ asset: DiscoveryVoiceoverAsset) {
+        let normalized = normalize(asset)
+
+        if let existing = assetStates[asset.discoveryId] {
+            if existing.status == .ready {
+                if normalized.status != .ready || normalized.audioURL == nil {
+                    return
+                }
+                if let existingUpdated = existing.updatedAt,
+                   let incomingUpdated = normalized.updatedAt,
+                   incomingUpdated < existingUpdated {
+                    return
+                }
+            }
+        }
+
+        assetStates[asset.discoveryId] = normalized
+        if normalized.status == .processing {
+            markPending(asset.discoveryId)
+        } else {
+            clearPending(asset.discoveryId)
+        }
+        Task { [weak self] in
+            await self?.refreshCacheFlag(for: normalized)
+        }
+        if normalized.status == .ready {
+            Task { [weak self] in
+                await self?.cacheReadyAssetIfNeeded(for: normalized)
+            }
+        }
     }
 
     public func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
@@ -561,6 +593,121 @@ extension VoiceoverPlaybackController {
         } else {
             _ = await MainActor.run {
                 downloadedIds.remove(discoveryId)
+            }
+        }
+    }
+
+    func cacheReadyAssetIfNeeded(for asset: DiscoveryVoiceoverAsset) async {
+        guard asset.status == .ready,
+              let fileName = asset.fileName,
+              let url = asset.audioURL else { return }
+
+        if let _ = await voiceoverCache.cachedFileURL(discoveryId: asset.discoveryId, fileName: fileName) {
+            _ = await MainActor.run {
+                downloadedIds.insert(asset.discoveryId)
+            }
+            return
+        }
+
+        do {
+            let (data, _) = try await urlSession.data(from: url)
+            if let _ = try? await voiceoverCache.store(
+                data: data,
+                discoveryId: asset.discoveryId,
+                fileName: fileName
+            ) {
+                _ = await MainActor.run {
+                    downloadedIds.insert(asset.discoveryId)
+                }
+            }
+        } catch {
+            // Silent failure; playback flow will retry download if needed.
+        }
+    }
+
+    func markPending(_ discoveryId: Int64) {
+        if pendingIds.insert(discoveryId).inserted {
+            Task { [pendingStore] in
+                await pendingStore.add(discoveryId)
+            }
+        }
+    }
+
+    func clearPending(_ discoveryId: Int64) {
+        if pendingIds.remove(discoveryId) != nil {
+            Task { [pendingStore] in
+                await pendingStore.remove(discoveryId)
+            }
+        }
+        stopPollingIfIdle()
+    }
+
+    func restorePendingRequests() async {
+        let stored = await pendingStore.load()
+        await MainActor.run {
+            pendingIds.formUnion(stored)
+        }
+        guard !stored.isEmpty else { return }
+        await pollVoiceovers(for: Array(stored))
+        await MainActor.run {
+            startPollingIfNeeded()
+        }
+    }
+
+    func startPollingIfNeeded() {
+        guard pollingTask == nil, !pendingProcessingIds.isEmpty else { return }
+
+        pollingTask = Task { [weak self] in
+            guard let self else { return }
+            var delayIndex = 0
+
+            while !Task.isCancelled {
+                let ids = await MainActor.run { self.pendingProcessingIds }
+                if ids.isEmpty { break }
+
+                await self.pollVoiceovers(for: ids)
+
+                let delay: TimeInterval
+                if delayIndex < pollIntervals.count {
+                    delay = pollIntervals[delayIndex]
+                    delayIndex += 1
+                } else {
+                    delay = 5
+                }
+
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    break
+                }
+            }
+
+            await MainActor.run {
+                self.pollingTask = nil
+            }
+        }
+    }
+
+    func stopPollingIfIdle() {
+        if pendingProcessingIds.isEmpty {
+            pollingTask?.cancel()
+            pollingTask = nil
+        }
+    }
+
+    var pendingProcessingIds: [Int64] {
+        let processing = assetStates
+            .filter { $0.value.status == .processing }
+            .map(\.key)
+        return Array(Set(processing).union(pendingIds))
+    }
+
+    func pollVoiceovers(for ids: [Int64]) async {
+        guard !ids.isEmpty else { return }
+        let assets = await repository.fetchVoiceovers(for: ids)
+        await MainActor.run {
+            for asset in assets {
+                self.applyFetchedAsset(asset)
             }
         }
     }

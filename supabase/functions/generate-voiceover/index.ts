@@ -136,6 +136,10 @@ serve(async req => {
     }
 
     const sanitizedText = stripEmojis(applyHeaderBreaks(discoveryText)).trim();
+    logger.debug('Normalized discovery text', {
+      normalizedText: sanitizedText,
+      length: sanitizedText.length,
+    });
     if (!sanitizedText) {
       logger.warn('Empty discovery description', { discoveryId });
       return jsonResponse(

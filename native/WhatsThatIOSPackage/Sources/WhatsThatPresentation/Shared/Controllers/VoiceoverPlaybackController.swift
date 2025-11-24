@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import SwiftUI
 import WhatsThatDomain
+import WhatsThatShared
 
 @MainActor
 public final class VoiceoverPlaybackController: ObservableObject {
@@ -42,8 +43,11 @@ public final class VoiceoverPlaybackController: ObservableObject {
     @Published public private(set) var activePreferences: VoiceoverPreferences
     @Published public var isDetailOverlayActive: Bool = false
     @Published public var suppressProgressUpdates: Bool = false
+    @Published private var downloadedIds: Set<Int64> = []
 
     private let repository: any DiscoveryVoiceoverRepository
+    private let voiceoverCache: VoiceoverFileCache
+    private let urlSession: URLSession
     private let preferencesStore: VoiceoverPreferencesStore?
     private let audioSession: AVAudioSession
     private let player: AVPlayer
@@ -52,7 +56,6 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var endPlaybackObserver: NSObjectProtocol?
     private var playTask: Task<Void, Never>?
     private var isSeeking = false
-    private var downloadedIds: Set<Int64> = []
     private let failedExpiry: TimeInterval = 60 * 60
     private let processingStaleThreshold: TimeInterval = 60 * 5
 
@@ -64,15 +67,19 @@ public final class VoiceoverPlaybackController: ObservableObject {
             ttsModel: "s1",
             prosody: VoiceoverProsody(speed: 1.0, volume: 0.0)
         ),
+        voiceoverCache: VoiceoverFileCache = .shared,
         preferencesStore: VoiceoverPreferencesStore? = nil,
         audioSession: AVAudioSession = .sharedInstance(),
-        player: AVPlayer = AVPlayer()
+        player: AVPlayer = AVPlayer(),
+        urlSession: URLSession = .shared
     ) {
         self.repository = repository
+        self.voiceoverCache = voiceoverCache
         self.activePreferences = preferences
         self.preferencesStore = preferencesStore
         self.audioSession = audioSession
         self.player = player
+        self.urlSession = urlSession
     }
 
     deinit {
@@ -111,6 +118,9 @@ public extension VoiceoverPlaybackController {
                         }
                     }
                     self.assetStates[asset.discoveryId] = normalized
+                    Task { [weak self] in
+                        await self?.refreshCacheFlag(for: normalized)
+                    }
                 }
             }
         }
@@ -204,6 +214,9 @@ public extension VoiceoverPlaybackController {
             let normalized = normalize(asset)
             await MainActor.run {
                 self.assetStates[discovery.id] = normalized
+            }
+            Task { [weak self] in
+                await self?.refreshCacheFlag(for: normalized)
             }
 
             if normalized.status == .failed && normalized.wasExistingResponse {
@@ -303,12 +316,6 @@ extension VoiceoverPlaybackController {
     public func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
         if asset.status == .processing {
             let lastUpdate = asset.updatedAt ?? asset.requestedAt
-            if let lastUpdate {
-                let age = Date().timeIntervalSince(lastUpdate)
-                print("Voiceover normalize: processing age=\(age) discoveryId=\(asset.discoveryId)")
-            } else {
-                print("Voiceover normalize: processing with missing timestamps discoveryId=\(asset.discoveryId)")
-            }
             if let lastUpdate, Date().timeIntervalSince(lastUpdate) > processingStaleThreshold {
                 return DiscoveryVoiceoverAsset(
                     discoveryId: asset.discoveryId,
@@ -354,7 +361,7 @@ extension VoiceoverPlaybackController {
         playTask?.cancel()
         playTask = Task { [weak self] in
             guard let self else { return }
-            guard let audioURL = asset.audioURL else {
+            guard let audioURL = await self.resolvePlayableURL(for: asset) else {
                 await MainActor.run {
                     self.playbackState = .failed(discoveryId: discovery.id, message: "Audio unavailable.")
                     self.errorMessage = "Audio unavailable."
@@ -508,6 +515,55 @@ extension VoiceoverPlaybackController {
         if let endPlaybackObserver {
             NotificationCenter.default.removeObserver(endPlaybackObserver)
             self.endPlaybackObserver = nil
+        }
+    }
+}
+
+extension VoiceoverPlaybackController {
+    func resolvePlayableURL(for asset: DiscoveryVoiceoverAsset) async -> URL? {
+        if let fileName = asset.fileName,
+           let local = await voiceoverCache.cachedFileURL(discoveryId: asset.discoveryId, fileName: fileName) {
+            _ = await MainActor.run {
+                downloadedIds.insert(asset.discoveryId)
+            }
+            return local
+        }
+
+        guard let remoteURL = asset.audioURL else { return nil }
+
+        do {
+            let (data, _) = try await urlSession.data(from: remoteURL)
+            let targetFileName = asset.fileName ?? remoteURL.lastPathComponent
+            if let storedURL = try? await voiceoverCache.store(
+                data: data,
+                discoveryId: asset.discoveryId,
+                fileName: targetFileName
+            ) {
+                _ = await MainActor.run {
+                    downloadedIds.insert(asset.discoveryId)
+                }
+                return storedURL
+            }
+        } catch {
+            _ = await MainActor.run {
+                self.errorMessage = "Download failed."
+            }
+        }
+
+        return remoteURL
+    }
+
+    func refreshCacheFlag(for asset: DiscoveryVoiceoverAsset) async {
+        guard let fileName = asset.fileName else { return }
+        let discoveryId = asset.discoveryId
+        if let _ = await voiceoverCache.cachedFileURL(discoveryId: discoveryId, fileName: fileName) {
+            _ = await MainActor.run {
+                downloadedIds.insert(discoveryId)
+            }
+        } else {
+            _ = await MainActor.run {
+                downloadedIds.remove(discoveryId)
+            }
         }
     }
 }

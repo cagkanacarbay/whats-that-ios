@@ -102,6 +102,13 @@ struct VoiceoverPersistentPlayerView: View {
 
             closeButton
         }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(tabBarSeparatorColor)
+                .frame(height: hairlineWidth)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .allowsHitTesting(false)
+        }
     }
 
     private var artwork: some View {
@@ -255,6 +262,21 @@ struct VoiceoverPersistentPlayerView: View {
             return Color(uiColor: scrollEdgeColor)
         }
         return Color(uiColor: .systemBackground)
+    }
+
+    private var tabBarSeparatorColor: Color {
+        let appearance = UITabBar.appearance()
+        if let standardShadow = appearance.standardAppearance.shadowColor {
+            return Color(uiColor: standardShadow)
+        }
+        if let scrollEdgeShadow = appearance.scrollEdgeAppearance?.shadowColor {
+            return Color(uiColor: scrollEdgeShadow)
+        }
+        return Color(uiColor: .separator)
+    }
+
+    private var hairlineWidth: CGFloat {
+        1 / UIScreen.main.scale
     }
 
     private func handleSliderEditingChanged(_ isEditing: Bool) {

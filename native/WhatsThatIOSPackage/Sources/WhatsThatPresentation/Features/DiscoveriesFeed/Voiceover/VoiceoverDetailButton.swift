@@ -8,6 +8,17 @@ struct VoiceoverDetailButton: View {
     let palette: BrandTheme.Palette
     @State private var showCreditsAlert = false
 
+    private enum ButtonState {
+        case generating
+        case downloading
+        case playing
+        case paused
+        case readyToPlay
+        case retry
+        case create
+        case switchToThisDiscovery
+    }
+
     init(
         discovery: DiscoverySummary,
         controller: VoiceoverPlaybackController,
@@ -20,18 +31,17 @@ struct VoiceoverDetailButton: View {
 
     var body: some View {
         Button(action: {
-            guard canTap else { return }
             handleTap()
         }) {
             HStack(spacing: BrandSpacing.small) {
-                if isLoading {
+                if let iconName = iconName {
+                    Image(systemName: iconName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(palette.overlayButtonForeground.opacity(iconOpacity))
+                } else {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .tint(palette.overlayButtonForeground)
-                } else {
-                    Image(systemName: playbackIconName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(palette.overlayButtonForeground.opacity(iconOpacity))
                 }
 
                 Text(buttonTitle)
@@ -68,71 +78,75 @@ struct VoiceoverDetailButton: View {
         controller.normalizedAsset(for: discovery.id)
     }
 
-    private var isLoading: Bool {
-        asset?.status == .processing
-    }
-
-    private var canTap: Bool {
-        guard let status = asset?.status else { return true }
-        return status != .processing
-    }
-
-    private var playbackIconName: String {
-        if downloadNeeded {
-            return "arrow.down.circle.fill"
+    private var state: ButtonState {
+        // Treat "preparing" as loading for this discovery.
+        if case let .preparing(id) = controller.playbackState, id == discovery.id {
+            return .generating
         }
 
-        if let status = asset?.status {
-            switch status {
+        if let asset {
+            switch asset.status {
+            case .processing:
+                return .generating
+            case .failed:
+                return .retry
             case .ready:
                 if isCurrentDiscoveryPlaying {
-                    return "pause.fill"
+                    return .playing
                 }
-                return "play.fill"
-            case .failed:
-                return "arrow.clockwise"
-            case .none, .missing:
-                return "plus.circle.fill"
-            default:
-                break
+                if controller.isActive(discoveryId: discovery.id) {
+                    return .paused
+                }
+                if isCached {
+                    return .readyToPlay
+                }
+                if isOtherDiscoveryActive {
+                    return .switchToThisDiscovery
+                }
+                return .downloading
+            case .missing, .none:
+                return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
+            @unknown default:
+                return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
             }
         }
 
-        if isCurrentDiscoveryPlaying {
-            return "pause.fill"
-        }
-        if controller.isActive(discoveryId: discovery.id) {
-            return "play.fill"
-        }
-        return "play.fill"
+        return isOtherDiscoveryActive ? .switchToThisDiscovery : .create
     }
 
     private var buttonTitle: String {
-        if isLoading {
+        switch state {
+        case .generating:
             return "Generating…"
-        }
-
-        if isCurrentDiscoveryPlaying {
+        case .downloading:
+            return "Download & play"
+        case .playing:
             return "Pause discovery"
-        }
-
-        if controller.playbackState.discoveryId != nil,
-           controller.playbackState.discoveryId != discovery.id,
-           asset?.status == .ready {
+        case .paused, .readyToPlay:
+            return "Play audio"
+        case .retry:
+            return "Retry audio"
+        case .create:
+            return "Create audio (one credit)"
+        case .switchToThisDiscovery:
             return "Play this discovery"
         }
+    }
 
-        switch asset?.status {
-        case .processing:
-            return "Generating…"
-        case .failed:
-            return "Retry audio"
-        case .ready where downloadNeeded:
-            return "Download & play"
-        case .ready:
-            return "Play audio"
-        default:
-            return "Create audio (one credit)"
+    private var iconName: String? {
+        switch state {
+        case .generating:
+            return nil
+        case .downloading:
+            return "arrow.down.circle.fill"
+        case .playing:
+            return "pause.fill"
+        case .paused, .readyToPlay, .switchToThisDiscovery:
+            return "play.fill"
+        case .retry:
+            return "arrow.clockwise"
+        case .create:
+            return "plus.circle.fill"
         }
     }
 
@@ -160,19 +174,37 @@ struct VoiceoverDetailButton: View {
         return false
     }
 
-    private func handleTap() {
-        guard let status = asset?.status else {
-            controller.setCurrentDiscovery(discovery)
-            controller.requestVoiceover(for: discovery)
-            return
+    private var isOtherDiscoveryActive: Bool {
+        if let activeId = controller.playbackState.discoveryId {
+            return activeId != discovery.id
         }
+        return false
+    }
 
-        if status == .failed || status == .missing || status == .none {
+    private var isLoading: Bool {
+        state == .generating
+    }
+
+    private var canTap: Bool {
+        state != .generating
+    }
+
+    private var isCached: Bool {
+        !downloadNeeded
+    }
+
+    private func handleTap() {
+        guard canTap else { return }
+
+        switch state {
+        case .retry, .create:
             controller.setCurrentDiscovery(discovery)
             controller.requestVoiceover(for: discovery)
-        } else {
+        case .downloading, .playing, .paused, .readyToPlay, .switchToThisDiscovery:
             controller.setCurrentDiscovery(discovery)
             controller.togglePlayback(for: discovery)
+        case .generating:
+            break
         }
     }
 }

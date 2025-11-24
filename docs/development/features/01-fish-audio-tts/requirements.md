@@ -89,7 +89,16 @@
 - [ ] Format: mp3 only with naming `fish-{modelId}-{voiceId}.mp3`; remove WAV, kitten models, min-ID guard, timing asset lookups, and timing metadata expectations. (partial)
   - [x] mp3-only path and naming are used via file_name from server.
   - [ ] Legacy kitten/timing artifacts remain in tests; removal not completed.
+- [ ] Cache downloaded audio locally for reuse; avoid re-downloading ready assets once cached.
+- [ ] Playback UX while generating another voiceover:
+  - [ ] If a new voiceover finishes while a different one is playing, do not auto-switch playback; keep the current audio playing.
+  - [ ] When user switches, audio player UI must reflect the currently playing discovery/voiceover (titles/state/icons) and not show stale state from the previous asset.
 - [x] Dependency wiring: `AppDependencyContainer` builds voice inventory repository and preferences store with the voiceover repository, feeds them into `VoiceoverPlaybackController` factories, and injects voiceover dependencies into `DiscoveryCreationDependencyProvider` so creation flow can auto-request TTS.
+- [ ] Confirm image selection stage shows an auto-voiceover toggle with credit awareness:
+  - [ ] Visual toggle present at confirm stage to enable/disable auto voiceover.
+  - [ ] UI copy indicates voiceover consumes 1 credit in addition to discovery creation.
+  - [ ] If user has only 1 credit (needed for discovery), disable toggle and on attempt show an alert: “You only have one credit; it will be used for discovery creation. Purchase more credits to enable auto voiceover.”
+  - [ ] Alert action navigates to/presents the credits sheet/section so user can buy more credits.
 
 ## Credit & Auto-TTS Client Handling
 - [x] Auto-TTS runs after Ask AI v7 completes; total cost 2 credits (analysis + voice). Manual TTS costs 1 credit. Rerunning failed consumes a new credit; rerunning stale processing does not.

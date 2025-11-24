@@ -277,7 +277,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         }
         closeWorkItem = workItem
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + additionalDelay + heroAnimator.closeDuration + 0.1,
+            deadline: .now() + additionalDelay + heroAnimator.closeDuration,
             execute: workItem
         )
     }

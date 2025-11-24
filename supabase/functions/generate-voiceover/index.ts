@@ -135,7 +135,7 @@ serve(async req => {
       return jsonResponse(baseHeaders, { error: 'not_found', message: 'Discovery not found.' }, 404);
     }
 
-    const sanitizedText = stripEmojis(discoveryText).trim();
+    const sanitizedText = stripEmojis(applyHeaderBreaks(discoveryText)).trim();
     if (!sanitizedText) {
       logger.warn('Empty discovery description', { discoveryId });
       return jsonResponse(
@@ -413,6 +413,28 @@ const maskId = (value: string) => {
 
 const stripEmojis = (input: string): string => {
   return input.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+};
+
+const applyHeaderBreaks = (input: string): string => {
+  let headerCount = 0;
+  return input
+    .split(/\r?\n/)
+    .map(line => {
+      const match = line.match(/^\s*##\s*(.*)$/);
+      if (!match) {
+        return line;
+      }
+      headerCount += 1;
+      const rawContent = match[1] ?? '';
+      const content = rawContent.trim() || rawContent;
+      if (!content.trim()) {
+        // Header marker with no visible text; leave it untouched to avoid losing content unexpectedly.
+        return line;
+      }
+      const prefix = headerCount === 1 ? '' : '(long-break) ';
+      return `${prefix}${content.trim()} (break)`;
+    })
+    .join('\n');
 };
 
 const jsonResponse = (headers: HeadersInit, body: Record<string, unknown>, status = 200) =>

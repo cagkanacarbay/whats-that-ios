@@ -82,16 +82,29 @@ struct VoiceoverDetailButton: View {
             return "arrow.down.circle.fill"
         }
 
-        switch controller.playbackState {
-        case let .playing(id) where id == discovery.id:
+        if let status = asset?.status {
+            switch status {
+            case .ready:
+                if isCurrentDiscoveryPlaying {
+                    return "pause.fill"
+                }
+                return "play.fill"
+            case .failed:
+                return "arrow.clockwise"
+            case .none, .missing:
+                return "plus.circle.fill"
+            default:
+                break
+            }
+        }
+
+        if isCurrentDiscoveryPlaying {
             return "pause.fill"
-        case let .paused(id) where id == discovery.id:
-            return "play.fill"
-        case let .failed(id, _) where id == discovery.id:
-            return "arrow.clockwise"
-        default:
+        }
+        if controller.isActive(discoveryId: discovery.id) {
             return "play.fill"
         }
+        return "play.fill"
     }
 
     private var buttonTitle: String {
@@ -99,18 +112,14 @@ struct VoiceoverDetailButton: View {
             return "Generating…"
         }
 
-        if let playback = controller.playbackState.discoveryId,
-           playback == discovery.id {
-            switch controller.playbackState {
-            case .playing:
-                return "Pause Audio"
-            case .paused:
-                return "Resume Audio"
-            case .failed:
-                return "Retry Audio"
-            default:
-                break
-            }
+        if isCurrentDiscoveryPlaying {
+            return "Pause discovery"
+        }
+
+        if controller.playbackState.discoveryId != nil,
+           controller.playbackState.discoveryId != discovery.id,
+           asset?.status == .ready {
+            return "Play this discovery"
         }
 
         switch asset?.status {
@@ -123,7 +132,7 @@ struct VoiceoverDetailButton: View {
         case .ready:
             return "Play audio"
         default:
-            return "Create audio"
+            return "Create audio (one credit)"
         }
     }
 
@@ -142,6 +151,13 @@ struct VoiceoverDetailButton: View {
 
     private var downloadNeeded: Bool {
         controller.isDownloadPending(for: discovery.id)
+    }
+
+    private var isCurrentDiscoveryPlaying: Bool {
+        if case let .playing(id) = controller.playbackState, id == discovery.id {
+            return true
+        }
+        return false
     }
 
     private func handleTap() {

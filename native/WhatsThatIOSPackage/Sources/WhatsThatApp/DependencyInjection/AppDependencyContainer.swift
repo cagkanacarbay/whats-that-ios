@@ -267,6 +267,10 @@ public extension AppDependencyContainer {
         await voiceInventoryRepository.fetchVoiceOptions()
     }
 
+    func fetchVoiceSampleURL(voiceName: String) async -> URL? {
+        await voiceInventoryRepository.fetchVoiceSampleURL(voiceName: voiceName)
+    }
+
     @MainActor
     func makeCreditsViewModel() -> CreditsViewModel {
         CreditsViewModel(

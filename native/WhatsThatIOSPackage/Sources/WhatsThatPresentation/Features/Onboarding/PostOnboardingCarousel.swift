@@ -2,10 +2,12 @@ import SwiftUI
 import UIKit
 import CoreLocation
 import WhatsThatShared
+import WhatsThatDomain
 
 struct PostOnboardingCarousel: View {
     enum SlideKind {
         case overview
+        case voicePicker
         case locationPermission
         case actions
     }
@@ -14,13 +16,17 @@ struct PostOnboardingCarousel: View {
         let id = UUID()
         let title: String
         let message: String
-        let imageName: String
+        let imageName: String?
         let kind: SlideKind
     }
 
     let onComplete: () -> Void
     let onLaunchCamera: () -> Void
     let onLaunchUpload: () -> Void
+    let loadVoiceoverPreferences: () async -> VoiceoverPreferences
+    let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
+    let fetchVoiceOptions: () async -> [VoiceModelOption]
+    let fetchVoiceSampleURL: (String) async -> URL?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var index: Int = 0
@@ -32,7 +38,7 @@ struct PostOnboardingCarousel: View {
     private let slides: [Slide] = [
         Slide(
             title: "Welcome aboard!",
-            message: "You’ve got 3 free credits. Each credit explains one photo with quick, personalized insights—no typing.",
+            message: "You’ve got 3 free credits. Each credit explains one photo with quick, personalized insights.",
             imageName: "post1",
             kind: .overview
         ),
@@ -43,14 +49,20 @@ struct PostOnboardingCarousel: View {
             kind: .overview
         ),
         Slide(
+            title: "Choose your narrator.",
+            message: "Select the voice you like best. You can change anytime.",
+            imageName: nil,
+            kind: .voicePicker
+        ),
+        Slide(
             title: "Unlock local insights.",
-            message: "With location permissions, discoveries include nearby places and meaningful context. Used only to improve results—never sold.",
+            message: "With location permissions, discoveries will be attuned to where you are. Used only to improve your experience—never sold.",
             imageName: "post3",
             kind: .locationPermission
         ),
         Slide(
             title: "Make your first discovery.",
-            message: "Use your 3 free credits now—try Camera take a picture or Upload a photo from your gallery.",
+            message: "Use your free credits now—take a picture or use a photo from your gallery.",
             imageName: "post4",
             kind: .actions
         )
@@ -110,16 +122,35 @@ struct PostOnboardingCarousel: View {
     private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
         TabView(selection: $index) {
             ForEach(slides.indices, id: \.self) { idx in
-                OnboardingSlidePage(
-                    imageName: slides[idx].imageName,
-                    title: slides[idx].title,
-                    message: slides[idx].message,
-                    titleColor: titleColor,
-                    bodyColor: bodyColor,
-                    containerWidth: width,
-                    topInset: topInset
-                )
-                .tag(idx)
+                switch slides[idx].kind {
+                case .voicePicker:
+                    OnboardingVoicePickerSlide(
+                        title: slides[idx].title,
+                        message: slides[idx].message,
+                        titleColor: titleColor,
+                        bodyColor: bodyColor,
+                        containerWidth: width,
+                        topInset: topInset,
+                        loadVoiceoverPreferences: loadVoiceoverPreferences,
+                        saveVoiceoverPreferences: saveVoiceoverPreferences,
+                        fetchVoiceOptions: fetchVoiceOptions,
+                        fetchVoiceSampleURL: fetchVoiceSampleURL
+                    )
+                    .tag(idx)
+                default:
+                    if let imageName = slides[idx].imageName {
+                        OnboardingSlidePage(
+                            imageName: imageName,
+                            title: slides[idx].title,
+                            message: slides[idx].message,
+                            titleColor: titleColor,
+                            bodyColor: bodyColor,
+                            containerWidth: width,
+                            topInset: topInset
+                        )
+                        .tag(idx)
+                    }
+                }
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -140,11 +171,11 @@ struct PostOnboardingCarousel: View {
                     BrandPrimaryButton(title: "Camera") {
                         onLaunchCamera()
                     }
-                    BrandSecondaryButton(title: "Upload") {
+                    BrandSecondaryButton(title: "Gallery") {
                         onLaunchUpload()
                     }
                 }
-            case .overview, .locationPermission:
+            case .overview, .locationPermission, .voicePicker:
                 if index == 0 {
                     BrandPrimaryButton(title: "Next") {
                         goToNextSlide()

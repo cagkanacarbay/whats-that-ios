@@ -70,6 +70,8 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var isSeeking = false
     private let failedExpiry: TimeInterval = 60 * 60
     private let processingStaleThreshold: TimeInterval = 60 * 5
+    private let artworkTargetSide: CGFloat = 800
+    private var lastNowPlayingInfo: [String: Any]?
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -106,7 +108,6 @@ public final class VoiceoverPlaybackController: ObservableObject {
 
         UIApplication.shared.beginReceivingRemoteControlEvents()
         configureRemoteCommands()
-        print("[VoiceoverPlaybackController] Init completed. Remote events registered.")
 
         Task { [weak self] in
             await self?.restorePendingRequests()
@@ -121,10 +122,13 @@ public final class VoiceoverPlaybackController: ObservableObject {
         if let observer = endPlaybackObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        UIApplication.shared.endReceivingRemoteControlEvents()
+        Task { @MainActor in
+            UIApplication.shared.endReceivingRemoteControlEvents()
+        }
         pollingTask?.cancel()
         nowPlayingInfoCenter.nowPlayingInfo = nil
         nowPlayingInfoCenter.playbackState = .stopped
+        lastNowPlayingInfo = nil
         
         // Clean up specific targets we added
         // Note: The MPRemoteCommand API requires removing the target from the *specific* command.
@@ -321,6 +325,7 @@ public extension VoiceoverPlaybackController {
         errorMessage = nil
         teardownObservers()
         nowPlayingInfoCenter.nowPlayingInfo = nil
+        lastNowPlayingInfo = nil
         updateNowPlayingPlaybackState()
     }
 
@@ -451,7 +456,6 @@ extension VoiceoverPlaybackController {
     }
 
     func play(discovery: DiscoverySummary, asset: DiscoveryVoiceoverAsset) {
-        print("[VoiceoverPlaybackController] Play requested for \(discovery.id)")
         playTask?.cancel()
         playTask = Task { [weak self] in
             guard let self else { return }
@@ -480,7 +484,6 @@ extension VoiceoverPlaybackController {
     }
 
     func prepareAudioSession() async {
-        print("[VoiceoverPlaybackController] Preparing Audio Session")
         do {
             try audioSession.setCategory(.playback, mode: .default)
             try audioSession.setActive(true)
@@ -572,6 +575,7 @@ extension VoiceoverPlaybackController {
         )
         errorMessage = error?.localizedDescription ?? "Playback failed."
         nowPlayingInfoCenter.nowPlayingInfo = nil
+        lastNowPlayingInfo = nil
     }
 
     func handlePlaybackEnded() {
@@ -625,8 +629,6 @@ extension VoiceoverPlaybackController {
 
 extension VoiceoverPlaybackController {
     func configureRemoteCommands() {
-        print("[VoiceoverPlaybackController] Configuring remote commands")
-        
         // Do not clear existing targets globally with removeTarget(nil) as it kills other instances.
         // Instead, we just add our new handlers.
         
@@ -635,7 +637,6 @@ extension VoiceoverPlaybackController {
         remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
         remoteCommandCenter.nextTrackCommand.isEnabled = true
         remoteCommandCenter.previousTrackCommand.isEnabled = true
-        remoteCommandCenter.stopCommand.isEnabled = true
         remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
 
         remoteCommandTargets.append(remoteCommandCenter.playCommand.addTarget { [weak self] _ in
@@ -673,12 +674,6 @@ extension VoiceoverPlaybackController {
             return self.skipToPreviousDiscovery() != nil ? .success : .noSuchContent
         })
 
-        remoteCommandTargets.append(remoteCommandCenter.stopCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.stop()
-            return .success
-        })
-
         remoteCommandTargets.append(remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard
                 let self,
@@ -690,9 +685,10 @@ extension VoiceoverPlaybackController {
     }
 
     func refreshNowPlayingInfo() {
-        print("[VoiceoverPlaybackController] Refreshing NowPlayingInfo. Discovery: \(currentDiscovery?.title ?? "nil"), State: \(playbackState)")
         guard let discovery = currentDiscovery else {
-            nowPlayingInfoCenter.nowPlayingInfo = nil
+            if let lastNowPlayingInfo {
+                nowPlayingInfoCenter.nowPlayingInfo = lastNowPlayingInfo
+            }
             return
         }
 
@@ -738,6 +734,7 @@ extension VoiceoverPlaybackController {
         }
 
         nowPlayingInfoCenter.nowPlayingInfo = info
+        lastNowPlayingInfo = info
     }
 
     func artwork(for discovery: DiscoverySummary) -> MPMediaItemArtwork? {
@@ -762,7 +759,8 @@ extension VoiceoverPlaybackController {
                 }
 
                 guard let image = UIImage(data: data) else { return nil }
-                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                let preparedImage = prepareArtworkImage(image)
+                let artwork = MPMediaItemArtwork(boundsSize: preparedImage.size) { _ in preparedImage }
                 await MainActor.run {
                     self.artworkCache[discovery.id] = artwork
                     self.refreshNowPlayingInfo()
@@ -782,6 +780,43 @@ extension VoiceoverPlaybackController {
             return url
         } else {
             return URL(fileURLWithPath: path)
+        }
+    }
+
+    private func prepareArtworkImage(_ image: UIImage) -> UIImage {
+        let orientedImage: UIImage
+        if image.imageOrientation == .up {
+            orientedImage = image
+        } else {
+            let format = UIGraphicsImageRendererFormat.preferred()
+            format.scale = image.scale
+            format.opaque = true
+            orientedImage = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+        }
+
+        guard orientedImage.size.width > 0, orientedImage.size.height > 0 else {
+            return orientedImage
+        }
+
+        let side = min(artworkTargetSide, min(orientedImage.size.width, orientedImage.size.height))
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = UIScreen.main.scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+
+        return renderer.image { _ in
+            let scale = max(side / orientedImage.size.width, side / orientedImage.size.height)
+            let scaledSize = CGSize(
+                width: orientedImage.size.width * scale,
+                height: orientedImage.size.height * scale
+            )
+            let origin = CGPoint(
+                x: (side - scaledSize.width) / 2.0,
+                y: (side - scaledSize.height) / 2.0
+            )
+            orientedImage.draw(in: CGRect(origin: origin, size: scaledSize))
         }
     }
 }

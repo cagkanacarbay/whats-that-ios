@@ -54,6 +54,9 @@ public struct AppRootView: View {
         let fetchVoiceOptions: () async -> [VoiceModelOption] = {
             await container.fetchVoiceOptions()
         }
+        let fetchVoiceSampleURL: (String) async -> URL? = {
+            await container.fetchVoiceSampleURL(voiceName: $0)
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
@@ -72,6 +75,7 @@ public struct AppRootView: View {
         }
         let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void = { _ in }
         let fetchVoiceOptions: () async -> [VoiceModelOption] = { [] }
+        let fetchVoiceSampleURL: (String) async -> URL? = { _ in nil }
         #endif
 
         let nearbyInspectorFactory: (() -> AnyView)? = {
@@ -104,7 +108,8 @@ public struct AppRootView: View {
             },
             loadVoiceoverPreferences: loadVoiceoverPreferences,
             saveVoiceoverPreferences: saveVoiceoverPreferences,
-            fetchVoiceOptions: fetchVoiceOptions
+            fetchVoiceOptions: fetchVoiceOptions,
+            fetchVoiceSampleURL: fetchVoiceSampleURL
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

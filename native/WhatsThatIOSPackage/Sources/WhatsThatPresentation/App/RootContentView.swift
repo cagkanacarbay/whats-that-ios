@@ -29,6 +29,7 @@ public struct RootContentView: View {
     private let loadVoiceoverPreferences: () async -> VoiceoverPreferences
     private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
     private let fetchVoiceOptions: () async -> [VoiceModelOption]
+    private let fetchVoiceSampleURL: (String) async -> URL?
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -48,7 +49,8 @@ public struct RootContentView: View {
         stopLocationTracking: (() -> Void)? = nil,
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
-        fetchVoiceOptions: @escaping () async -> [VoiceModelOption]
+        fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
+        fetchVoiceSampleURL: @escaping (String) async -> URL?
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -63,7 +65,8 @@ public struct RootContentView: View {
         self.loadVoiceoverPreferences = loadVoiceoverPreferences
         self.saveVoiceoverPreferences = saveVoiceoverPreferences
         self.fetchVoiceOptions = fetchVoiceOptions
-        _viewModel = StateObject(
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        _viewModel = StateObject<AppRootViewModel>(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
                 onboardingUseCase: onboardingUseCase,
@@ -77,129 +80,10 @@ public struct RootContentView: View {
             backgroundColor
                 .ignoresSafeArea()
 
-            Group {
-                switch viewModel.flowState {
-                case .loading:
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                case .preOnboarding:
-                    PreOnboardingCarousel {
-                        Task { await viewModel.completePreOnboarding() }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                case .authentication:
-                    AuthenticationFlowView(
-                        isPerformingAction: viewModel.isPerformingAuthAction,
-                        initialMode: authStartMode,
-                        onSignIn: { email, password in
-                            try await handleAuthOperation {
-                                try await viewModel.signIn(email: email, password: password)
-                            }
-                        },
-                        onSignUp: { email, password in
-                            try await handleAuthOperation {
-                                try await viewModel.signUp(email: email, password: password)
-                            }
-                        },
-                        onForgotPassword: { email in
-                            do {
-                                try await viewModel.requestPasswordReset(email: email)
-                                return .success
-                            } catch let error as AuthError {
-                                return .failure(error)
-                            } catch {
-                                return .failure(.unknown)
-                            }
-                        },
-                        onGoogle: {
-                            try await handleAuthOperation {
-                                try await viewModel.signInWithGoogle()
-                            }
-                        },
-                        onApple: {
-                            try await handleAuthOperation {
-                                try await viewModel.signInWithApple()
-                            }
-                        }
-                    )
-                    .id(authStartMode)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                case .postOnboarding(_):
-                    PostOnboardingCarousel(
-                        onComplete: {
-                            mainTabDestination = .discoveries
-                            Task { await viewModel.completePostOnboarding() }
-                        },
-                        onLaunchCamera: {
-                            mainTabDestination = .camera
-                            Task { await viewModel.completePostOnboarding() }
-                        },
-                        onLaunchUpload: {
-                            mainTabDestination = .upload
-                            Task { await viewModel.completePostOnboarding() }
-                        }
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                case .main:
-                    if let makeVoiceoverController {
-                        MainTabView(
-                            feedUseCase: feedUseCase,
-                            deletionUseCase: deletionUseCase,
-                            cameraViewModel: makeCreationViewModel(.camera),
-                            uploadViewModel: makeCreationViewModel(.upload),
-                            voiceoverControllerFactory: makeVoiceoverController,
-                            initialTab: mainTabDestination,
-                            onSignOut: {
-                                Task { try? await viewModel.signOut() }
-                            },
-                            onSettings: {
-                                isSettingsPresented = true
-                            },
-                            makeCreditsViewModel: makeCreditsViewModel
-                        )
-                        .onAppear {
-                            mainTabDestination = .discoveries
-                        }
-                    } else {
-                        Text("Voiceover playback is available on iOS builds only.")
-                            .font(.headline)
-                    }
-            }
-            if let user = viewModel.passwordResetUser {
-                PasswordResetView(
-                    email: user.email,
-                    onSubmit: { newPassword in
-                        if let error = await viewModel.completePasswordReset(newPassword: newPassword) {
-                            return .failure(error)
-                        } else {
-                            return .success(())
-                        }
-                    },
-                    onComplete: {
-                        processedPasswordResetTokens.removeAll()
-                        Task {
-                            await viewModel.cancelPasswordResetFlow()
-                            await MainActor.run {
-                                authStartMode = .signIn
-                            }
-                        }
-                    },
-                    onCancel: {
-                        processedPasswordResetTokens.removeAll()
-                        Task {
-                            await viewModel.cancelPasswordResetFlow()
-                            await MainActor.run {
-                                authStartMode = .signIn
-                            }
-                        }
-                    }
-                )
-                .transition(.opacity)
-                .zIndex(1)
-            }
+            mainContent
+            passwordResetOverlay
         }
-            .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
-        }
+        .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         .animation(.easeInOut, value: viewModel.flowState)
         .sheet(isPresented: $isSettingsPresented, onDismiss: {
             settingsSheetDetent = .fraction(0.8)
@@ -415,6 +299,137 @@ public struct RootContentView: View {
         } catch {
             await MainActor.run { self.authError = .unknown }
             throw AuthError.unknown
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        switch viewModel.flowState {
+        case .loading:
+            ProgressView()
+                .progressViewStyle(.circular)
+        case .preOnboarding:
+            PreOnboardingCarousel {
+                _ = Task { await viewModel.completePreOnboarding() }
+            }
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        case .authentication:
+            AuthenticationFlowView(
+                isPerformingAction: viewModel.isPerformingAuthAction,
+                initialMode: authStartMode,
+                onSignIn: { email, password in
+                    try await handleAuthOperation {
+                        try await viewModel.signIn(email: email, password: password)
+                    }
+                },
+                onSignUp: { email, password in
+                    try await handleAuthOperation {
+                        try await viewModel.signUp(email: email, password: password)
+                    }
+                },
+                onForgotPassword: { email in
+                    do {
+                        try await viewModel.requestPasswordReset(email: email)
+                        return .success
+                    } catch let error as AuthError {
+                        return .failure(error)
+                    } catch {
+                        return .failure(.unknown)
+                    }
+                },
+                onGoogle: {
+                    try await handleAuthOperation {
+                        try await viewModel.signInWithGoogle()
+                    }
+                },
+                onApple: {
+                    try await handleAuthOperation {
+                        try await viewModel.signInWithApple()
+                    }
+                }
+            )
+            .id(authStartMode)
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .postOnboarding(_):
+            PostOnboardingCarousel(
+                onComplete: {
+                    mainTabDestination = .discoveries
+                    _ = Task { await viewModel.completePostOnboarding() }
+                },
+                onLaunchCamera: {
+                    mainTabDestination = .camera
+                    _ = Task { await viewModel.completePostOnboarding() }
+                },
+                onLaunchUpload: {
+                    mainTabDestination = .upload
+                    _ = Task { await viewModel.completePostOnboarding() }
+                },
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL
+            )
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        case .main:
+            if let makeVoiceoverController {
+                MainTabView(
+                    feedUseCase: feedUseCase,
+                    deletionUseCase: deletionUseCase,
+                    cameraViewModel: makeCreationViewModel(.camera),
+                    uploadViewModel: makeCreationViewModel(.upload),
+                    voiceoverControllerFactory: makeVoiceoverController,
+                    initialTab: mainTabDestination,
+                    onSignOut: {
+                        Task { try? await viewModel.signOut() }
+                    },
+                    onSettings: {
+                        isSettingsPresented = true
+                    },
+                    makeCreditsViewModel: makeCreditsViewModel
+                )
+                .onAppear {
+                    mainTabDestination = .discoveries
+                }
+            } else {
+                Text("Voiceover playback is available on iOS builds only.")
+                    .font(.headline)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var passwordResetOverlay: some View {
+        if let user = viewModel.passwordResetUser {
+            PasswordResetView(
+                email: user.email,
+                onSubmit: { newPassword in
+                    if let error = await viewModel.completePasswordReset(newPassword: newPassword) {
+                        return .failure(error)
+                    } else {
+                        return .success(())
+                    }
+                },
+                onComplete: {
+                    processedPasswordResetTokens.removeAll()
+                    Task {
+                        await viewModel.cancelPasswordResetFlow()
+                        await MainActor.run {
+                            authStartMode = .signIn
+                        }
+                    }
+                },
+                onCancel: {
+                    processedPasswordResetTokens.removeAll()
+                    Task {
+                        await viewModel.cancelPasswordResetFlow()
+                        await MainActor.run {
+                            authStartMode = .signIn
+                        }
+                    }
+                }
+            )
+            .transition(.opacity)
+            .zIndex(1)
         }
     }
 

@@ -10,7 +10,7 @@ private let voiceInventoryLogger = Logger(
     category: "VoiceInventoryRepository"
 )
 
-public actor VoiceInventoryRepository {
+public actor VoiceInventoryRepository: VoiceInventoryService {
     private let client: SupabaseClient
 
     public init(client: SupabaseClient) {
@@ -33,6 +33,21 @@ public actor VoiceInventoryRepository {
             return []
         }
     }
+
+    public func fetchVoiceSampleURL(voiceName: String) async -> URL? {
+        do {
+            // Path: onboarding/<DisplayName>.mp3
+            // e.g. onboarding/Adrian.mp3
+            let path = "onboarding/\(voiceName.capitalized).mp3"
+            let url = try await client.storage
+                .from("voiceovers")
+                .createSignedURL(path: path, expiresIn: 3600)
+            return url
+        } catch {
+            voiceInventoryLogger.error("Failed to sign sample URL for \(voiceName): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
 }
 
 private struct EmptyParams: Encodable {}
@@ -44,8 +59,9 @@ private struct VoiceInventoryRow: Decodable {
 }
 
 #else
-public actor VoiceInventoryRepository {
+public actor VoiceInventoryRepository: VoiceInventoryService {
     public init() {}
     public func fetchVoiceOptions() async -> [VoiceModelOption] { [] }
+    public func fetchVoiceSampleURL(voiceName: String) async -> URL? { nil }
 }
 #endif

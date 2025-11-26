@@ -83,7 +83,7 @@ public class VoicePickerViewModel: ObservableObject {
         await startPlaybackFlow(for: selectedVoiceId)
     }
     
-    public func handleVoiceTap(id: String) {
+    public func handleVoiceTap(id: String, persistSelection: Bool = true) {
         if selectedVoiceId == id {
             if isPlaying {
                 stop()
@@ -92,16 +92,27 @@ public class VoicePickerViewModel: ObservableObject {
             }
             return
         }
-        
+
         selectedVoiceId = id
         Task {
-            await saveCurrentPreferences()
+            if persistSelection {
+                await saveCurrentPreferences()
+            }
             await startPlaybackFlow(for: id)
         }
     }
-    
+
     public func toggleAutoPlay() {
-        isAutoEnabled.toggle()
+        setAutoEnabled(!isAutoEnabled)
+    }
+
+    public func persistCurrentSelection() async {
+        await saveCurrentPreferences()
+    }
+
+    public func setAutoEnabled(_ enabled: Bool) {
+        guard enabled != isAutoEnabled else { return }
+        isAutoEnabled = enabled
         Task {
             await saveCurrentPreferences()
         }

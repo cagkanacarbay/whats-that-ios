@@ -135,7 +135,8 @@ public struct RootContentView: View {
                 },
                 loadVoiceoverPreferences: loadVoiceoverPreferences,
                 saveVoiceoverPreferences: saveVoiceoverPreferences,
-                fetchVoiceOptions: fetchVoiceOptions
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }

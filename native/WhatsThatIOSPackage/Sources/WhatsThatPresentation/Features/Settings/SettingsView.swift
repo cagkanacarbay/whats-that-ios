@@ -9,11 +9,15 @@ struct SettingsView: View {
     private let loadVoiceoverPreferences: () async -> VoiceoverPreferences
     private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
     private let fetchVoiceOptions: () async -> [VoiceModelOption]
+    private let fetchVoiceSampleURL: (String) async -> URL?
 
     @StateObject private var viewModel: SettingsViewModel
-    @StateObject private var voiceoverViewModel: VoiceoverSettingsViewModel
+    @StateObject private var voicePickerViewModel: VoicePickerViewModel
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     @State private var isNearbyInspectorPresented = false
+    @State private var isVoicePickerPresented = false
+    @State private var initialVoiceModelId: String?
+    @State private var committedVoiceModelId: String?
 
     init(
         userEmail: String?,
@@ -28,7 +32,8 @@ struct SettingsView: View {
         onClose: @escaping () -> Void,
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
-        fetchVoiceOptions: @escaping () async -> [VoiceModelOption]
+        fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
+        fetchVoiceSampleURL: @escaping (String) async -> URL?
     ) {
         self.makeCreditsView = makeCreditsView
         self.makeNearbyCacheInspector = makeNearbyCacheInspector
@@ -36,6 +41,7 @@ struct SettingsView: View {
         self.loadVoiceoverPreferences = loadVoiceoverPreferences
         self.saveVoiceoverPreferences = saveVoiceoverPreferences
         self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
         _viewModel = StateObject(
             wrappedValue: SettingsViewModel(
                 userEmail: userEmail,
@@ -48,16 +54,12 @@ struct SettingsView: View {
                 onClose: onClose
             )
         )
-        _voiceoverViewModel = StateObject(
-            wrappedValue: VoiceoverSettingsViewModel(
-                initialPreferences: VoiceoverPreferences(
-                    autoEnabled: false,
-                    voiceModelId: "",
-                    ttsModel: "s1"
-                ),
-                loadPreferences: loadVoiceoverPreferences,
-                savePreferences: saveVoiceoverPreferences,
-                fetchVoiceOptions: fetchVoiceOptions
+        _voicePickerViewModel = StateObject(
+            wrappedValue: VoicePickerViewModel(
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL
             )
         )
     }
@@ -67,20 +69,30 @@ struct SettingsView: View {
             List {
                 creditsSection
                 themeSection
-                voiceoverSection
+                audioGuidesSection
                 accountSection
                 onboardingSection
                 devSection
             }
             .task {
                 await viewModel.refreshCreditBalance()
-                await voiceoverViewModel.load()
+                await voicePickerViewModel.ensureLoadedForDisplay()
+                if committedVoiceModelId == nil {
+                    committedVoiceModelId = voicePickerViewModel.selectedVoiceId
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
                 }
+            }
+            .sheet(isPresented: $isVoicePickerPresented) {
+                AudioGuidePickerSheet(
+                    viewModel: voicePickerViewModel,
+                    onConfirm: confirmVoiceSelection,
+                    onCancel: revertVoiceSelection
+                )
             }
             .alert(item: alertBinding) { state in
                 switch state {
@@ -137,27 +149,57 @@ struct SettingsView: View {
         }
     }
 
-    private var voiceoverSection: some View {
-        Section(header: Text("Voiceover")) {
-            Toggle("Auto-generate after analysis", isOn: $voiceoverViewModel.preferences.autoEnabled)
-                .onChange(of: voiceoverViewModel.preferences.autoEnabled) { _, newValue in
-                    Task { await voiceoverViewModel.updateAutoEnabled(newValue) }
-                }
+    private var audioGuidesSection: some View {
+        Section(header: Text("Audio guides")) {
+            Toggle("Auto-generate audio guides after analysis (1 credit)", isOn: autoGenerateAudioGuideBinding)
 
-            if voiceoverViewModel.isLoading {
-                ProgressView()
-                    .progressViewStyle(.circular)
-            } else {
-                Picker("Voice", selection: $voiceoverViewModel.preferences.voiceModelId) {
-                    ForEach(voiceoverViewModel.voiceOptions, id: \.voiceModelId) { option in
-                        Text(option.displayName).tag(option.voiceModelId)
+            Button {
+                initialVoiceModelId = committedVoiceModelId ?? voicePickerViewModel.selectedVoiceId
+                if let initialVoiceModelId {
+                    voicePickerViewModel.selectedVoiceId = initialVoiceModelId
+                }
+                isVoicePickerPresented = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform.and.mic")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.accentColor)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Voice model")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+
+                        if let selectedVoiceName {
+                            Text(selectedVoiceName)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else if voicePickerViewModel.voices.isEmpty {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                Text("Loading voices")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Choose a voice")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
                 }
-                .pickerStyle(.menu)
-                .onChange(of: voiceoverViewModel.preferences.voiceModelId) { _, newValue in
-                    Task { await voiceoverViewModel.selectVoice(withId: newValue) }
-                }
+                .padding(.vertical, 4)
             }
+            .disabled(voicePickerViewModel.voices.isEmpty)
+            .accessibilityIdentifier("settings.audioGuides.voicePicker")
         }
     }
 
@@ -353,5 +395,71 @@ struct SettingsView: View {
 
     private func signOut() {
         Task { await viewModel.performSignOut() }
+    }
+
+    private var selectedVoiceName: String? {
+        guard let selectedId = committedVoiceModelId else { return nil }
+        return voicePickerViewModel.voices.first(where: { $0.voiceModelId == selectedId })?.displayName
+    }
+
+    private var autoGenerateAudioGuideBinding: Binding<Bool> {
+        Binding(
+            get: { voicePickerViewModel.isAutoEnabled },
+            set: { newValue in voicePickerViewModel.setAutoEnabled(newValue) }
+        )
+    }
+
+    private func confirmVoiceSelection() {
+        Task {
+            committedVoiceModelId = voicePickerViewModel.selectedVoiceId
+            await voicePickerViewModel.persistCurrentSelection()
+            isVoicePickerPresented = false
+        }
+    }
+
+    private func revertVoiceSelection() {
+        if let initialVoiceModelId {
+            voicePickerViewModel.selectedVoiceId = initialVoiceModelId
+        }
+        voicePickerViewModel.stop()
+    }
+}
+
+private struct AudioGuidePickerSheet: View {
+    @ObservedObject var viewModel: VoicePickerViewModel
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    @State private var hasConfirmed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
+            Spacer().frame(height: BrandSpacing.large)
+
+            Text("Select an audio guide narrator")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, BrandSpacing.large)
+
+            VoicePickerView(
+                viewModel: viewModel,
+                showCreditNote: true,
+                showAutoToggle: false,
+                persistSelectionOnTap: false
+            )
+            .padding(.top, BrandSpacing.small)
+
+            BrandPrimaryButton(title: "Confirm voice") {
+                hasConfirmed = true
+                onConfirm()
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.large)
+        }
+        .onDisappear {
+            if !hasConfirmed {
+                onCancel()
+            }
+        }
     }
 }

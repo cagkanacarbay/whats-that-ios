@@ -4,6 +4,8 @@ import WhatsThatShared
 public struct VoicePickerView: View {
     @ObservedObject private var viewModel: VoicePickerViewModel
     let showCreditNote: Bool
+    let showAutoToggle: Bool
+    let persistSelectionOnTap: Bool
     @Environment(\.colorScheme) private var colorScheme
     
     private var palette: BrandTheme.Palette {
@@ -12,10 +14,14 @@ public struct VoicePickerView: View {
     
     public init(
         viewModel: VoicePickerViewModel,
-        showCreditNote: Bool = false
+        showCreditNote: Bool = false,
+        showAutoToggle: Bool = true,
+        persistSelectionOnTap: Bool = true
     ) {
         self._viewModel = ObservedObject(wrappedValue: viewModel)
         self.showCreditNote = showCreditNote
+        self.showAutoToggle = showAutoToggle
+        self.persistSelectionOnTap = persistSelectionOnTap
     }
     
     public var body: some View {
@@ -36,7 +42,10 @@ public struct VoicePickerView: View {
                                 isLoading: sampleState.isLoading && !sampleState.isReady,
                                 palette: palette,
                                 onSelect: {
-                                    viewModel.handleVoiceTap(id: voice.voiceModelId)
+                                    viewModel.handleVoiceTap(
+                                        id: voice.voiceModelId,
+                                        persistSelection: persistSelectionOnTap
+                                    )
                                 }
                             )
                         }
@@ -45,29 +54,29 @@ public struct VoicePickerView: View {
                     .padding(.bottom, BrandSpacing.large)
                 }
             }
-            
-            // Auto-generate Toggle
-            VStack(alignment: .leading, spacing: BrandSpacing.small) {
-                Toggle(isOn: Binding(
-                    get: { viewModel.isAutoEnabled },
-                    set: { _ in viewModel.toggleAutoPlay() }
-                )) {
-                    Text("Auto-generate audio guides")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(palette.textPrimary)
+            if showAutoToggle {
+                VStack(alignment: .leading, spacing: BrandSpacing.small) {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.isAutoEnabled },
+                        set: { newValue in viewModel.setAutoEnabled(newValue) }
+                    )) {
+                        Text("Auto-generate audio guides after analysis")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(palette.textPrimary)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: palette.primaryAction))
+
+                    if showCreditNote {
+                        Text("Each audio guide uses one credit to generate. Oh, but it's so worth it.")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .toggleStyle(SwitchToggleStyle(tint: palette.primaryAction))
-                
-                if showCreditNote {
-                    Text("Each audio guide uses one credit to generate. Oh, but it's so worth it.")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.vertical, BrandSpacing.medium)
+                .background(palette.background)
             }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.vertical, BrandSpacing.medium)
-            .background(palette.background) // Ensure footer has background if list scrolls under?
         }
         .task {
             await viewModel.ensureLoadedForDisplay()

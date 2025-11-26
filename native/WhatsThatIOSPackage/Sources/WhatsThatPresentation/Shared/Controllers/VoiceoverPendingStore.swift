@@ -5,8 +5,9 @@ import Foundation
 public actor VoiceoverPendingStore {
     // Wrap UserDefaults to satisfy Sendable checks; UserDefaults is documented
     // as thread-safe.
-    private struct SendableDefaults: @unchecked Sendable {
-        let value: UserDefaults
+    public struct SendableDefaults: @unchecked Sendable {
+        public let value: UserDefaults
+        public static let standard = SendableDefaults(value: .standard)
     }
 
     public static let shared = VoiceoverPendingStore()
@@ -14,8 +15,8 @@ public actor VoiceoverPendingStore {
     private let defaults: SendableDefaults
     private let key = "voiceover.pending.ids"
 
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = SendableDefaults(value: defaults)
+    public init(defaults: SendableDefaults = .standard) {
+        self.defaults = defaults
     }
 
     public func load() -> Set<Int64> {

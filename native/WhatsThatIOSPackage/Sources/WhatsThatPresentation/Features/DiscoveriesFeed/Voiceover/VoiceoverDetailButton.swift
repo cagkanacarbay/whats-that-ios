@@ -10,13 +10,11 @@ struct VoiceoverDetailButton: View {
 
     private enum ButtonState {
         case generating
-        case downloading
         case playing
         case paused
         case readyToPlay
         case retry
         case create
-        case switchToThisDiscovery
     }
 
     init(
@@ -97,10 +95,7 @@ struct VoiceoverDetailButton: View {
                 if controller.isActive(discoveryId: discovery.id) {
                     return .paused
                 }
-                if isCached {
-                    return .readyToPlay
-                }
-                return .downloading
+                return .readyToPlay
             case .missing, .none:
                 return .create
             @unknown default:
@@ -115,8 +110,6 @@ struct VoiceoverDetailButton: View {
         switch state {
         case .generating:
             return "Generating…"
-        case .downloading:
-            return "Download & play"
         case .playing:
             return "Pause discovery"
         case .paused, .readyToPlay:
@@ -125,8 +118,6 @@ struct VoiceoverDetailButton: View {
             return "Retry audio"
         case .create:
             return "Create audio (one credit)"
-        case .switchToThisDiscovery:
-            return "Play this discovery"
         }
     }
 
@@ -134,11 +125,9 @@ struct VoiceoverDetailButton: View {
         switch state {
         case .generating:
             return nil
-        case .downloading:
-            return "arrow.down.circle.fill"
         case .playing:
             return "pause.fill"
-        case .paused, .readyToPlay, .switchToThisDiscovery:
+        case .paused, .readyToPlay:
             return "play.fill"
         case .retry:
             return "arrow.clockwise"
@@ -160,10 +149,6 @@ struct VoiceoverDetailButton: View {
         isLoading ? 0.8 : 1.0
     }
 
-    private var downloadNeeded: Bool {
-        controller.isDownloadPending(for: discovery.id)
-    }
-
     private var isCurrentDiscoveryPlaying: Bool {
         if case let .playing(id) = controller.playbackState, id == discovery.id {
             return true
@@ -179,10 +164,6 @@ struct VoiceoverDetailButton: View {
         state != .generating
     }
 
-    private var isCached: Bool {
-        !downloadNeeded
-    }
-
     private func handleTap() {
         guard canTap else { return }
 
@@ -190,7 +171,7 @@ struct VoiceoverDetailButton: View {
         case .retry, .create:
             controller.setCurrentDiscovery(discovery)
             controller.requestVoiceover(for: discovery)
-        case .downloading, .playing, .paused, .readyToPlay, .switchToThisDiscovery:
+        case .playing, .paused, .readyToPlay:
             controller.setCurrentDiscovery(discovery)
             controller.togglePlayback(for: discovery)
         case .generating:

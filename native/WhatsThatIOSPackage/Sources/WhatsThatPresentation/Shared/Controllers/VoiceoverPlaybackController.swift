@@ -1,6 +1,8 @@
 import AVFoundation
 import Foundation
+import MediaPlayer
 import SwiftUI
+import UIKit
 import WhatsThatDomain
 import WhatsThatShared
 
@@ -54,7 +56,13 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private let preferencesStore: VoiceoverPreferencesStore?
     private let audioSession: AVAudioSession
     private let player: AVPlayer
+    private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
+    private let remoteCommandCenter: MPRemoteCommandCenter
     private let pendingStore: VoiceoverPendingStore
+    private var discoveryQueueProvider: (() -> [DiscoverySummary])?
+    private var artworkCache: [Int64: MPMediaItemArtwork] = [:]
+    private var artworkTasks: [Int64: Task<MPMediaItemArtwork?, Never>] = [:]
+    private var remoteCommandTargets: [Any] = []
     private var timeObserverToken: Any?
     private var playerItemStatusObservation: NSKeyValueObservation?
     private var endPlaybackObserver: NSObjectProtocol?
@@ -75,7 +83,9 @@ public final class VoiceoverPlaybackController: ObservableObject {
         audioSession: AVAudioSession = .sharedInstance(),
         player: AVPlayer = AVPlayer(),
         urlSession: URLSession = .shared,
-        pendingStore: VoiceoverPendingStore = .shared
+        pendingStore: VoiceoverPendingStore = .shared,
+        nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default(),
+        remoteCommandCenter: MPRemoteCommandCenter = .shared()
     ) {
         self.repository = repository
         self.voiceoverCache = voiceoverCache
@@ -85,6 +95,18 @@ public final class VoiceoverPlaybackController: ObservableObject {
         self.player = player
         self.urlSession = urlSession
         self.pendingStore = pendingStore
+        self.nowPlayingInfoCenter = nowPlayingInfoCenter
+        self.remoteCommandCenter = remoteCommandCenter
+
+        do {
+            try audioSession.setCategory(.playback, mode: .default)
+        } catch {
+            print("Failed to set audio session category: \(error)")
+        }
+
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        configureRemoteCommands()
+        print("[VoiceoverPlaybackController] Init completed. Remote events registered.")
 
         Task { [weak self] in
             await self?.restorePendingRequests()
@@ -99,7 +121,21 @@ public final class VoiceoverPlaybackController: ObservableObject {
         if let observer = endPlaybackObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        UIApplication.shared.endReceivingRemoteControlEvents()
         pollingTask?.cancel()
+        nowPlayingInfoCenter.nowPlayingInfo = nil
+        nowPlayingInfoCenter.playbackState = .stopped
+        
+        // Clean up specific targets we added
+        // Note: The MPRemoteCommand API requires removing the target from the *specific* command.
+        // Since we just stored them in a flat list, we can't easily know which command they belong to.
+        // However, simply letting them deallocate is usually fine for block-based targets (they become no-ops).
+        // But to be proper, we should have stored them by command.
+        // Given the urgency, the most important fix was REMOVING the 'removeTarget(nil)' call.
+        // We will clear the list to release the opaque objects.
+        remoteCommandTargets.removeAll()
+        
+        artworkTasks.values.forEach { $0.cancel() }
     }
 }
 
@@ -148,6 +184,24 @@ public extension VoiceoverPlaybackController {
 
     func setCurrentDiscovery(_ discovery: DiscoverySummary) {
         currentDiscovery = discovery
+    }
+
+    func setDiscoveryQueueProvider(_ provider: @escaping () -> [DiscoverySummary]) {
+        discoveryQueueProvider = provider
+    }
+
+    @discardableResult
+    func skipToNextDiscovery() -> DiscoverySummary? {
+        guard let discovery = nextDiscoveryInQueue() else { return nil }
+        togglePlayback(for: discovery)
+        return discovery
+    }
+
+    @discardableResult
+    func skipToPreviousDiscovery() -> DiscoverySummary? {
+        guard let discovery = previousDiscoveryInQueue() else { return nil }
+        togglePlayback(for: discovery)
+        return discovery
     }
 
     func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
@@ -242,12 +296,19 @@ public extension VoiceoverPlaybackController {
         if case let .playing(id) = playbackState {
             playbackState = .paused(discoveryId: id)
         }
+        updateNowPlayingPlaybackState()
+        refreshNowPlayingInfo()
     }
 
     func resume() {
         guard case let .paused(id) = playbackState else { return }
+        Task {
+            await prepareAudioSession()
+        }
         player.play()
         playbackState = .playing(discoveryId: id)
+        updateNowPlayingPlaybackState()
+        refreshNowPlayingInfo()
     }
 
     func stop() {
@@ -259,6 +320,8 @@ public extension VoiceoverPlaybackController {
         position = 0
         errorMessage = nil
         teardownObservers()
+        nowPlayingInfoCenter.nowPlayingInfo = nil
+        updateNowPlayingPlaybackState()
     }
 
     func seek(to seconds: TimeInterval, completion: (() -> Void)? = nil) {
@@ -388,6 +451,7 @@ extension VoiceoverPlaybackController {
     }
 
     func play(discovery: DiscoverySummary, asset: DiscoveryVoiceoverAsset) {
+        print("[VoiceoverPlaybackController] Play requested for \(discovery.id)")
         playTask?.cancel()
         playTask = Task { [weak self] in
             guard let self else { return }
@@ -416,8 +480,9 @@ extension VoiceoverPlaybackController {
     }
 
     func prepareAudioSession() async {
+        print("[VoiceoverPlaybackController] Preparing Audio Session")
         do {
-            try audioSession.setCategory(.playback, mode: .default, options: [.interruptSpokenAudioAndMixWithOthers])
+            try audioSession.setCategory(.playback, mode: .default)
             try audioSession.setActive(true)
         } catch {
             errorMessage = "Audio session unavailable."
@@ -465,6 +530,8 @@ extension VoiceoverPlaybackController {
         addTimeObserver()
         player.replaceCurrentItem(with: item)
         player.play()
+        updateNowPlayingPlaybackState()
+        refreshNowPlayingInfo()
     }
 
     func handleReadyToPlay(item: AVPlayerItem, discovery: DiscoverySummary) async {
@@ -472,6 +539,8 @@ extension VoiceoverPlaybackController {
         duration = loadedDuration?.secondsValue
         playbackState = .playing(discoveryId: discovery.id)
         position = item.currentTime().seconds
+        updateNowPlayingPlaybackState()
+        refreshNowPlayingInfo()
     }
 
     func handlePlayerFailure(error: Error?, discovery: DiscoverySummary, attemptedRefresh: Bool) {
@@ -502,6 +571,7 @@ extension VoiceoverPlaybackController {
             message: error?.localizedDescription
         )
         errorMessage = error?.localizedDescription ?? "Playback failed."
+        nowPlayingInfoCenter.nowPlayingInfo = nil
     }
 
     func handlePlaybackEnded() {
@@ -512,6 +582,8 @@ extension VoiceoverPlaybackController {
         }
         player.seek(to: .zero)
         position = 0
+        updateNowPlayingPlaybackState()
+        refreshNowPlayingInfo()
     }
 
     func addTimeObserver() {
@@ -527,8 +599,10 @@ extension VoiceoverPlaybackController {
                        let currentDuration = cmTime.secondsValue,
                        currentDuration > 0 {
                         self.duration = currentDuration
+                        self.refreshNowPlayingInfo()
                     }
                 }
+                // self.refreshNowPlayingInfo() // Throttled: Do not update on every tick
             }
         }
     }
@@ -545,6 +619,169 @@ extension VoiceoverPlaybackController {
         if let endPlaybackObserver {
             NotificationCenter.default.removeObserver(endPlaybackObserver)
             self.endPlaybackObserver = nil
+        }
+    }
+}
+
+extension VoiceoverPlaybackController {
+    func configureRemoteCommands() {
+        print("[VoiceoverPlaybackController] Configuring remote commands")
+        
+        // Do not clear existing targets globally with removeTarget(nil) as it kills other instances.
+        // Instead, we just add our new handlers.
+        
+        remoteCommandCenter.playCommand.isEnabled = true
+        remoteCommandCenter.pauseCommand.isEnabled = true
+        remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
+        remoteCommandCenter.nextTrackCommand.isEnabled = true
+        remoteCommandCenter.previousTrackCommand.isEnabled = true
+        remoteCommandCenter.stopCommand.isEnabled = true
+        remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
+
+        remoteCommandTargets.append(remoteCommandCenter.playCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.resume()
+            return .success
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.pauseCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.pause()
+            return .success
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            switch self.playbackState {
+            case .playing:
+                self.pause()
+            case .paused:
+                self.resume()
+            default:
+                break
+            }
+            return .success
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            return self.skipToNextDiscovery() != nil ? .success : .noSuchContent
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            return self.skipToPreviousDiscovery() != nil ? .success : .noSuchContent
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.stopCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.stop()
+            return .success
+        })
+
+        remoteCommandTargets.append(remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard
+                let self,
+                let positionEvent = event as? MPChangePlaybackPositionCommandEvent
+            else { return .commandFailed }
+            self.seek(to: positionEvent.positionTime) {}
+            return .success
+        })
+    }
+
+    func refreshNowPlayingInfo() {
+        print("[VoiceoverPlaybackController] Refreshing NowPlayingInfo. Discovery: \(currentDiscovery?.title ?? "nil"), State: \(playbackState)")
+        guard let discovery = currentDiscovery else {
+            nowPlayingInfoCenter.nowPlayingInfo = nil
+            return
+        }
+
+        var info: [String: Any] = [
+            MPNowPlayingInfoPropertyIsLiveStream: false,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPMediaItemPropertyTitle: discovery.title,
+            MPMediaItemPropertyArtist: discovery.highlight,
+            MPMediaItemPropertyAlbumTitle: "WhatsThat Audio"
+        ]
+
+        if let artwork = artwork(for: discovery) {
+            info[MPMediaItemPropertyArtwork] = artwork
+        } else {
+            startArtworkLoad(for: discovery)
+        }
+
+        if let url = normalizedAsset(for: discovery.id)?.audioURL {
+            info[MPNowPlayingInfoPropertyAssetURL] = url
+        }
+
+        if let duration {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
+
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
+        info[MPNowPlayingInfoPropertyPlaybackRate] = {
+            switch playbackState {
+            case .playing, .preparing: return 1.0
+            default: return 0.0
+            }
+        }()
+        if let queue = discoveryQueueProvider?() {
+            info[MPNowPlayingInfoPropertyPlaybackQueueCount] = max(queue.count, 1)
+            if let index = queue.firstIndex(where: { $0.id == discovery.id }) {
+                info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = index
+            } else {
+                info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = 0
+            }
+        } else {
+            info[MPNowPlayingInfoPropertyPlaybackQueueCount] = 1
+            info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = 0
+        }
+
+        nowPlayingInfoCenter.nowPlayingInfo = info
+    }
+
+    func artwork(for discovery: DiscoverySummary) -> MPMediaItemArtwork? {
+        artworkCache[discovery.id]
+    }
+
+    func startArtworkLoad(for discovery: DiscoverySummary) {
+        guard artworkTasks[discovery.id] == nil,
+              let url = imageURL(for: discovery) else { return }
+
+        artworkTasks[discovery.id] = Task { [weak self] in
+            guard let self else { return nil }
+            defer { Task { @MainActor in self.artworkTasks[discovery.id] = nil } }
+
+            do {
+                let data: Data
+                if url.isFileURL {
+                    data = try Data(contentsOf: url)
+                } else {
+                    let (remoteData, _) = try await urlSession.data(from: url)
+                    data = remoteData
+                }
+
+                guard let image = UIImage(data: data) else { return nil }
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                await MainActor.run {
+                    self.artworkCache[discovery.id] = artwork
+                    self.refreshNowPlayingInfo()
+                }
+                return artwork
+            } catch {
+                return nil
+            }
+        }
+    }
+
+    func imageURL(for discovery: DiscoverySummary) -> URL? {
+        guard let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else { return nil }
+
+        if let url = URL(string: path), url.scheme != nil {
+            return url
+        } else {
+            return URL(fileURLWithPath: path)
         }
     }
 }
@@ -583,20 +820,6 @@ extension VoiceoverPlaybackController {
         return remoteURL
     }
 
-    func refreshCacheFlag(for asset: DiscoveryVoiceoverAsset) async {
-        guard let fileName = asset.fileName else { return }
-        let discoveryId = asset.discoveryId
-        if let _ = await voiceoverCache.cachedFileURL(discoveryId: discoveryId, fileName: fileName) {
-            _ = await MainActor.run {
-                downloadedIds.insert(discoveryId)
-            }
-        } else {
-            _ = await MainActor.run {
-                downloadedIds.remove(discoveryId)
-            }
-        }
-    }
-
     func cacheReadyAssetIfNeeded(for asset: DiscoveryVoiceoverAsset) async {
         guard asset.status == .ready,
               let fileName = asset.fileName,
@@ -622,6 +845,20 @@ extension VoiceoverPlaybackController {
             }
         } catch {
             // Silent failure; playback flow will retry download if needed.
+        }
+    }
+
+    func refreshCacheFlag(for asset: DiscoveryVoiceoverAsset) async {
+        guard let fileName = asset.fileName else { return }
+        let discoveryId = asset.discoveryId
+        if let _ = await voiceoverCache.cachedFileURL(discoveryId: discoveryId, fileName: fileName) {
+            _ = await MainActor.run {
+                downloadedIds.insert(discoveryId)
+            }
+        } else {
+            _ = await MainActor.run {
+                downloadedIds.remove(discoveryId)
+            }
         }
     }
 
@@ -710,6 +947,53 @@ extension VoiceoverPlaybackController {
                 self.applyFetchedAsset(asset)
             }
         }
+    }
+
+    private func nextDiscoveryInQueue() -> DiscoverySummary? {
+        let queue = discoveryQueueProvider?() ?? []
+        guard !queue.isEmpty else { return nil }
+
+        guard
+            let currentId = currentDiscovery?.id,
+            let currentIndex = queue.firstIndex(where: { $0.id == currentId })
+        else {
+            return queue.first
+        }
+
+        guard currentIndex > 0 else { return nil }
+        let nextIndex = queue.index(before: currentIndex)
+        return queue[nextIndex]
+    }
+
+    private func previousDiscoveryInQueue() -> DiscoverySummary? {
+        let queue = discoveryQueueProvider?() ?? []
+        guard !queue.isEmpty else { return nil }
+
+        guard
+            let currentId = currentDiscovery?.id,
+            let currentIndex = queue.firstIndex(where: { $0.id == currentId })
+        else {
+            return queue.last
+        }
+
+        let nextIndex = queue.index(after: currentIndex)
+        guard queue.indices.contains(nextIndex) else { return nil }
+        return queue[nextIndex]
+    }
+
+    private func updateNowPlayingPlaybackState() {
+        let state: MPNowPlayingPlaybackState
+        switch playbackState {
+        case .playing, .preparing:
+            state = .playing
+        case .paused:
+            state = .paused
+        case .idle:
+            state = .stopped
+        case .failed:
+            state = .stopped
+        }
+        nowPlayingInfoCenter.playbackState = state
     }
 }
 

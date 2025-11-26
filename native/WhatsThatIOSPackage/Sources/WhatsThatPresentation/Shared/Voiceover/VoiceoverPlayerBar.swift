@@ -23,9 +23,10 @@ struct VoiceoverPlayerBar: View {
             controller: controller,
             discovery: discovery,
             imageURL: imageURL,
-            onNextDiscovery: nil,
-            onPreviousDiscovery: nil
+            onNextDiscovery: { controller.skipToNextDiscovery() },
+            onPreviousDiscovery: { controller.skipToPreviousDiscovery() }
         )
+        .id(discovery.id)
         .frame(maxWidth: .infinity)
         // Cancel parent horizontal padding so the bar spans full width.
         .padding(.horizontal, -BrandSpacing.large)

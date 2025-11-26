@@ -124,12 +124,10 @@ struct DiscoveriesHomeView: View {
                 .coordinateSpace(name: "discoveriesScroll")
                 .refreshable {
                     await viewModel.refresh()
-                    prefetchVoiceovers()
                 }
                 .task {
                     await viewModel.loadInitialIfNeeded()
                     presentPendingDiscoveryIfNeeded()
-                    prefetchVoiceovers()
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
@@ -138,7 +136,6 @@ struct DiscoveriesHomeView: View {
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
-                    prefetchVoiceovers()
                 }
                 .onChange(of: pendingDiscoveryId) {
                     presentPendingDiscoveryIfNeeded()
@@ -207,7 +204,7 @@ struct DiscoveriesHomeView: View {
                         onShowOptions: nil,
                         onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
                     )
-                    .ignoresSafeArea(edges: [.top, .bottom])
+                    .ignoresSafeArea(edges: .top)
                     .transition(.identity)
                     .simultaneousGesture(detailEdgeDragGesture, including: .gesture)
                     .zIndex(5)
@@ -216,12 +213,16 @@ struct DiscoveriesHomeView: View {
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
                 updateSafeAreaTopInsetIfNeeded(safeTop)
+                voiceoverController.setDiscoveryQueueProvider { viewModel.discoveries }
             }
             .onChange(of: safeBottom) { _, newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
             }
             .onChange(of: safeTop) { _, newValue in
                 updateSafeAreaTopInsetIfNeeded(newValue)
+            }
+            .onChange(of: viewModel.discoveries) { _, _ in
+                voiceoverController.setDiscoveryQueueProvider { viewModel.discoveries }
             }
         }
         .overlay(alignment: .bottom) {
@@ -370,11 +371,6 @@ struct DiscoveriesHomeView: View {
                 }
             }
         }
-    }
-
-    private func prefetchVoiceovers() {
-        let ids = viewModel.discoveries.map(\.id)
-        voiceoverController.prefetch(for: ids)
     }
 
     private func updateSafeAreaBottomInsetIfNeeded(_ value: CGFloat) {

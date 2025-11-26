@@ -279,6 +279,8 @@ struct MainTabView: View {
     private var shouldShowPlayerInset: Bool {
         // Only in the Discoveries tab context.
         guard selectedTab == .discoveries else { return false }
+        // Hide while a detail overlay is active to avoid double bars.
+        guard !voiceoverController.isDetailOverlayActive else { return false }
 
         // Hide during capture/selection/confirmation stages of the creation overlay.
         if let phase = activeOverlayPhase {

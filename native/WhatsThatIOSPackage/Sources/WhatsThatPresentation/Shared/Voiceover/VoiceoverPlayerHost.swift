@@ -25,9 +25,10 @@ struct VoiceoverPlayerHost: View {
                     controller: controller,
                     discovery: discovery,
                     imageURL: imageURLResolver(discovery),
-                    onNextDiscovery: nil,
-                    onPreviousDiscovery: nil
+                    onNextDiscovery: { controller.skipToNextDiscovery() },
+                    onPreviousDiscovery: { controller.skipToPreviousDiscovery() }
                 )
+                .id(discovery.id)
                 .frame(maxWidth: .infinity)
                 .background(
                     GeometryReader { proxy in

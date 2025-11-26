@@ -399,7 +399,8 @@ private struct DiscoveryDetailContentView: View {
                     .padding(.horizontal, BrandSpacing.large)
                     .padding(
                         .bottom,
-                        BrandSpacing.xLarge * 2 + additionalBottomPadding
+                        // Keep a small base gap and cap the extra inset so large insets (e.g. player) don't balloon spacing.
+                        BrandSpacing.small + min(safeAreaInsets.bottom, BrandSpacing.medium)
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(backgroundColor.opacity(backgroundOpacity))
@@ -440,8 +441,6 @@ private struct DiscoveryDetailContentView: View {
             baselineOffset = nil
         }
     }
-
-    private var additionalBottomPadding: CGFloat { 0 }
 
     // Determine if the voiceover button should be visible.
     // Show only when:

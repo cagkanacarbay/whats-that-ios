@@ -73,7 +73,6 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
 
         snapshot = newSnapshot
 
-        voiceoverController.prefetch(for: [discovery.id])
         voiceoverController.isDetailOverlayActive = true
 
         withAnimation(heroAnimator.openAnimation()) {

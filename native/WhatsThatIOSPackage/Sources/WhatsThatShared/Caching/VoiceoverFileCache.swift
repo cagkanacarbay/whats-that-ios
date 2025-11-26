@@ -16,6 +16,14 @@ public actor VoiceoverFileCache: Sendable {
         var lastAccessedAt: Date
     }
 
+    public struct VoiceoverCacheEntry: Identifiable, Sendable {
+        public var id: Int64 { discoveryId }
+        public let discoveryId: Int64
+        public let fileName: String
+        public let fileSize: Int64
+        public let lastAccessedAt: Date
+    }
+
     private let fileManager: FileManager
     private let cacheDirectoryURL: URL
     private let metadataURL: URL
@@ -101,7 +109,11 @@ public extension VoiceoverFileCache {
         return nil
     }
 
-    func store(data: Data, discoveryId: Int64, fileName: String) async throws -> URL {
+    func store(
+        data: Data,
+        discoveryId: Int64,
+        fileName: String
+    ) async throws -> URL {
         let dirURL = cacheDirectoryURL.appendingPathComponent("\(discoveryId)", isDirectory: true)
         if !fileManager.fileExists(atPath: dirURL.path) {
             try fileManager.createDirectory(at: dirURL, withIntermediateDirectories: true, attributes: nil)
@@ -130,6 +142,19 @@ public extension VoiceoverFileCache {
         persistMetadata()
         try evictIfNeeded()
         return fileURL
+    }
+
+    func listEntries() -> [VoiceoverCacheEntry] {
+        entries.values
+            .map {
+                VoiceoverCacheEntry(
+                    discoveryId: $0.discoveryId,
+                    fileName: $0.fileName,
+                    fileSize: $0.fileSize,
+                    lastAccessedAt: $0.lastAccessedAt
+                )
+            }
+            .sorted { $0.lastAccessedAt > $1.lastAccessedAt }
     }
 
     func remove(discoveryId: Int64) {

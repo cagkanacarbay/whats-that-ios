@@ -1,6 +1,5 @@
 import SwiftUI
 import WhatsThatShared
-import WhatsThatDomain
 
 struct OnboardingVoicePickerSlide: View {
     let title: String
@@ -9,11 +8,7 @@ struct OnboardingVoicePickerSlide: View {
     let bodyColor: Color
     let containerWidth: CGFloat
     let topInset: CGFloat
-    
-    let loadVoiceoverPreferences: () async -> VoiceoverPreferences
-    let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
-    let fetchVoiceOptions: () async -> [VoiceModelOption]
-    let fetchVoiceSampleURL: (String) async -> URL?
+    @ObservedObject var viewModel: VoicePickerViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,10 +36,7 @@ struct OnboardingVoicePickerSlide: View {
             .padding(.bottom, BrandSpacing.large)
             
             VoicePickerView(
-                loadVoiceoverPreferences: loadVoiceoverPreferences,
-                saveVoiceoverPreferences: saveVoiceoverPreferences,
-                fetchVoiceOptions: fetchVoiceOptions,
-                fetchVoiceSampleURL: fetchVoiceSampleURL,
+                viewModel: viewModel,
                 showCreditNote: true
             )
             

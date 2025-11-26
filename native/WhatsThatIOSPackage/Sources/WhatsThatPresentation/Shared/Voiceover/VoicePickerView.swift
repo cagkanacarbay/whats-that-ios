@@ -1,9 +1,8 @@
 import SwiftUI
 import WhatsThatShared
-import WhatsThatDomain
 
 public struct VoicePickerView: View {
-    @StateObject private var viewModel: VoicePickerViewModel
+    @ObservedObject private var viewModel: VoicePickerViewModel
     let showCreditNote: Bool
     @Environment(\.colorScheme) private var colorScheme
     
@@ -12,18 +11,10 @@ public struct VoicePickerView: View {
     }
     
     public init(
-        loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
-        saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
-        fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
-        fetchVoiceSampleURL: @escaping (String) async -> URL?,
+        viewModel: VoicePickerViewModel,
         showCreditNote: Bool = false
     ) {
-        self._viewModel = StateObject(wrappedValue: VoicePickerViewModel(
-            loadVoiceoverPreferences: loadVoiceoverPreferences,
-            saveVoiceoverPreferences: saveVoiceoverPreferences,
-            fetchVoiceOptions: fetchVoiceOptions,
-            fetchVoiceSampleURL: fetchVoiceSampleURL
-        ))
+        self._viewModel = ObservedObject(wrappedValue: viewModel)
         self.showCreditNote = showCreditNote
     }
     
@@ -37,13 +28,15 @@ public struct VoicePickerView: View {
                 ScrollView {
                     VStack(spacing: BrandSpacing.medium) {
                         ForEach(viewModel.voices, id: \.voiceModelId) { voice in
+                            let sampleState = viewModel.sampleStates[voice.voiceModelId] ?? .idle
                             VoiceRow(
                                 voiceName: voice.displayName,
                                 isSelected: viewModel.selectedVoiceId == voice.voiceModelId,
-                                isPlaying: viewModel.selectedVoiceId == voice.voiceModelId && viewModel.isPlaying,
+                                isPlaying: viewModel.playingVoiceId == voice.voiceModelId && viewModel.isPlaying,
+                                isLoading: sampleState.isLoading && !sampleState.isReady,
                                 palette: palette,
                                 onSelect: {
-                                    viewModel.selectVoice(id: voice.voiceModelId)
+                                    viewModel.handleVoiceTap(id: voice.voiceModelId)
                                 }
                             )
                         }
@@ -66,7 +59,7 @@ public struct VoicePickerView: View {
                 .toggleStyle(SwitchToggleStyle(tint: palette.primaryAction))
                 
                 if showCreditNote {
-                    Text("Each audio guide uses one credit to generate.")
+                    Text("Each audio guide uses one credit to generate. Oh, but it's so worth it.")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -77,7 +70,7 @@ public struct VoicePickerView: View {
             .background(palette.background) // Ensure footer has background if list scrolls under?
         }
         .task {
-            await viewModel.load()
+            await viewModel.ensureLoadedForDisplay()
         }
         .onDisappear {
             viewModel.stop()
@@ -89,6 +82,7 @@ struct VoiceRow: View {
     let voiceName: String
     let isSelected: Bool
     let isPlaying: Bool
+    let isLoading: Bool
     let palette: BrandTheme.Palette
     let onSelect: () -> Void
     
@@ -104,12 +98,16 @@ struct VoiceRow: View {
                             Circle().stroke(palette.border, lineWidth: isSelected ? 0 : 1)
                         )
                     
-                    if isPlaying {
-                        Image(systemName: "speaker.wave.2.fill")
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(palette.primaryAction)
+                            .frame(width: 20, height: 20)
+                    } else if isPlaying {
+                        Image(systemName: "pause.fill")
                             .foregroundStyle(palette.primaryAction)
                     } else {
-                        Text(String(voiceName.prefix(1)))
-                            .font(.system(size: 18, weight: .bold))
+                        Image(systemName: "play.fill")
                             .foregroundStyle(isSelected ? palette.primaryAction : palette.textSecondary)
                     }
                 }

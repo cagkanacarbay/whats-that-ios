@@ -23,10 +23,7 @@ struct PostOnboardingCarousel: View {
     let onComplete: () -> Void
     let onLaunchCamera: () -> Void
     let onLaunchUpload: () -> Void
-    let loadVoiceoverPreferences: () async -> VoiceoverPreferences
-    let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
-    let fetchVoiceOptions: () async -> [VoiceModelOption]
-    let fetchVoiceSampleURL: (String) async -> URL?
+    @StateObject private var voicePickerViewModel: VoicePickerViewModel
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var index: Int = 0
@@ -34,6 +31,28 @@ struct PostOnboardingCarousel: View {
     @StateObject private var permissionsCoordinator = OnboardingPermissionsCoordinator()
     @State private var isRequestingLocation = false
     @State private var showLocationSettingsAlert = false
+
+    init(
+        onComplete: @escaping () -> Void,
+        onLaunchCamera: @escaping () -> Void,
+        onLaunchUpload: @escaping () -> Void,
+        loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
+        saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
+        fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
+        fetchVoiceSampleURL: @escaping (String) async -> URL?
+    ) {
+        self.onComplete = onComplete
+        self.onLaunchCamera = onLaunchCamera
+        self.onLaunchUpload = onLaunchUpload
+        _voicePickerViewModel = StateObject(
+            wrappedValue: VoicePickerViewModel(
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL
+            )
+        )
+    }
 
     private let slides: [Slide] = [
         Slide(
@@ -70,6 +89,9 @@ struct PostOnboardingCarousel: View {
 
     var body: some View {
         bodyContent
+            .task {
+                await voicePickerViewModel.prepareForOnboardingPrefetch()
+            }
     }
 
     @ViewBuilder
@@ -131,10 +153,7 @@ struct PostOnboardingCarousel: View {
                         bodyColor: bodyColor,
                         containerWidth: width,
                         topInset: topInset,
-                        loadVoiceoverPreferences: loadVoiceoverPreferences,
-                        saveVoiceoverPreferences: saveVoiceoverPreferences,
-                        fetchVoiceOptions: fetchVoiceOptions,
-                        fetchVoiceSampleURL: fetchVoiceSampleURL
+                        viewModel: voicePickerViewModel
                     )
                     .tag(idx)
                 default:
@@ -216,9 +235,20 @@ struct PostOnboardingCarousel: View {
 
     private func handleSlideTransition(from oldIndex: Int, to newIndex: Int) {
         guard oldIndex != newIndex else { return }
+        guard slides.indices.contains(oldIndex), slides.indices.contains(newIndex) else { return }
         let leavingSlide = slides[oldIndex]
         if leavingSlide.kind == .locationPermission, newIndex > oldIndex {
             requestLocationPermissionIfNeeded()
+        }
+        if leavingSlide.kind == .voicePicker {
+            voicePickerViewModel.stop()
+        }
+        
+        let enteringSlide = slides[newIndex]
+        if enteringSlide.kind == .voicePicker {
+            Task {
+                await voicePickerViewModel.autoplaySelectedVoice()
+            }
         }
     }
 

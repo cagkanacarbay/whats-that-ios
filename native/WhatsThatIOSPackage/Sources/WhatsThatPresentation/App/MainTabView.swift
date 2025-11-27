@@ -1,10 +1,12 @@
 import SwiftUI
 import WhatsThatDomain
+import WhatsThatShared
 
-enum MainTabDestination {
+public enum MainTabDestination {
     case camera
     case discoveries
     case upload
+    case audioGuides
 }
 
 struct MainTabView: View {
@@ -12,6 +14,7 @@ struct MainTabView: View {
         case camera
         case discoveries
         case upload
+        case audioGuides
     }
 
     @State private var selectedTab: Tab
@@ -99,6 +102,12 @@ struct MainTabView: View {
                     }
                 }
 
+                AudioGuidesPageView()
+                    .tag(Tab.audioGuides)
+                    .tabItem {
+                        Label("Audio Guides", systemImage: "headphones")
+                    }
+
                 DiscoveryCreationFlowView(
                     viewModel: uploadViewModel,
                     placeholderEmoji: "🖼️",
@@ -176,6 +185,10 @@ struct MainTabView: View {
                 cameraViewModel.cancelFlow()
                 uploadViewModel.cancelFlow()
             }
+        case .audioGuides:
+             cameraViewModel.cancelFlow()
+             uploadViewModel.cancelFlow()
+             activeOverlayTab = nil
         }
     }
 
@@ -247,6 +260,8 @@ struct MainTabView: View {
             return uploadViewModel
         case .discoveries:
             return nil
+        case .audioGuides:
+            return nil
         }
     }
 
@@ -271,7 +286,7 @@ struct MainTabView: View {
             return cameraViewModel.flowState.phase
         case .upload:
             return uploadViewModel.flowState.phase
-        case .discoveries:
+        case .discoveries, .audioGuides:
             return nil
         }
     }
@@ -316,6 +331,8 @@ struct MainTabView: View {
             return .discoveries
         case .upload:
             return .upload
+        case .audioGuides:
+            return .audioGuides
         }
     }
 }

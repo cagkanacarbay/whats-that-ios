@@ -30,6 +30,9 @@ public struct RootContentView: View {
     private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
     private let fetchVoiceOptions: () async -> [VoiceModelOption]
     private let fetchVoiceSampleURL: (String) async -> URL?
+    private let loadIPoPPreferences: () async -> IPoPPreferences?
+    private let saveIPoPPreferences: (IPoPPreferences) async -> Void
+    private let resetIPoPPreferences: () async -> Void
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -50,7 +53,10 @@ public struct RootContentView: View {
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
         fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
-        fetchVoiceSampleURL: @escaping (String) async -> URL?
+        fetchVoiceSampleURL: @escaping (String) async -> URL?,
+        loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
+        saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void,
+        resetIPoPPreferences: @escaping () async -> Void = {}
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
@@ -66,6 +72,9 @@ public struct RootContentView: View {
         self.saveVoiceoverPreferences = saveVoiceoverPreferences
         self.fetchVoiceOptions = fetchVoiceOptions
         self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
+        self.resetIPoPPreferences = resetIPoPPreferences
         _viewModel = StateObject<AppRootViewModel>(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
@@ -93,6 +102,7 @@ public struct RootContentView: View {
                 canRequestPasswordReset: settingsUser?.allowsPasswordReset ?? false,
                 onResetOnboarding: {
                     await viewModel.resetOnboarding()
+                    await resetIPoPPreferences()
                     return .success(())
                 },
                 onFetchCreditBalance: {
@@ -106,7 +116,12 @@ public struct RootContentView: View {
                     viewModel.onBalanceUpdated = { newBalance in
                         balanceUpdate(newBalance)
                     }
-                    return AnyView(CreditsView(viewModel: viewModel))
+                    return AnyView(
+                        CreditsView(
+                            viewModel: viewModel,
+                            backButtonTitle: "Settings"
+                        )
+                    )
                 },
                 makeNearbyCacheInspector: { makeNearbyCacheInspector?() ?? AnyView(Text("Not available")) },
                 onSendPasswordReset: { email in
@@ -136,7 +151,9 @@ public struct RootContentView: View {
                 loadVoiceoverPreferences: loadVoiceoverPreferences,
                 saveVoiceoverPreferences: saveVoiceoverPreferences,
                 fetchVoiceOptions: fetchVoiceOptions,
-                fetchVoiceSampleURL: fetchVoiceSampleURL
+                fetchVoiceSampleURL: fetchVoiceSampleURL,
+                loadIPoPPreferences: loadIPoPPreferences,
+                saveIPoPPreferences: saveIPoPPreferences
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
@@ -368,7 +385,9 @@ public struct RootContentView: View {
                 loadVoiceoverPreferences: loadVoiceoverPreferences,
                 saveVoiceoverPreferences: saveVoiceoverPreferences,
                 fetchVoiceOptions: fetchVoiceOptions,
-                fetchVoiceSampleURL: fetchVoiceSampleURL
+                fetchVoiceSampleURL: fetchVoiceSampleURL,
+                loadIPoPPreferences: loadIPoPPreferences,
+                saveIPoPPreferences: saveIPoPPreferences
             )
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         case .main:

@@ -18,6 +18,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
     private let locationService: DiscoveryLocationService
     private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
+    private let ipopPreferencesStore: IPoPPreferencesStore?
 
     init(
         maxImageDimension: Int,
@@ -32,7 +33,8 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         pushService: DiscoveryPushService,
         locationService: DiscoveryLocationService,
         voiceoverRepository: (any DiscoveryVoiceoverRepository)?,
-        voiceoverPreferencesStore: VoiceoverPreferencesStore?
+        voiceoverPreferencesStore: VoiceoverPreferencesStore?,
+        ipopPreferencesStore: IPoPPreferencesStore?
     ) {
         self.maxImageDimension = maxImageDimension
         self.recentHistoryLimit = recentHistoryLimit
@@ -47,6 +49,7 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         self.locationService = locationService
         self.voiceoverRepository = voiceoverRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
+        self.ipopPreferencesStore = ipopPreferencesStore
     }
 
     @MainActor
@@ -67,7 +70,8 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
             pushService: pushService,
             locationService: locationService,
             voiceoverRepository: voiceoverRepository,
-            voiceoverPreferencesStore: voiceoverPreferencesStore
+            voiceoverPreferencesStore: voiceoverPreferencesStore,
+            ipopPreferencesStore: ipopPreferencesStore
         )
     }
 }

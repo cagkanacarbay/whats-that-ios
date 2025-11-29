@@ -64,6 +64,11 @@ struct AudioGuideRowView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                (isPlaying ? BrandColors.logo.opacity(0.08) : Color.clear)
+                    .cornerRadius(12)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

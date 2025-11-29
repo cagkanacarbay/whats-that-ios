@@ -4,41 +4,48 @@ import WhatsThatShared
 struct MiniPlayerView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
     @Environment(\.colorScheme) var colorScheme
+    var onExpand: () -> Void = {}
     
     var body: some View {
         HStack(spacing: 12) {
-            // Mini Artwork & Progress
-            ZStack {
-                Circle()
-                    .stroke(BrandColors.Light.secondaryAction.opacity(0.3), lineWidth: 2)
-                    .frame(width: 40, height: 40)
-                
-                Circle()
-                    .trim(from: 0.0, to: viewModel.progress)
-                    .stroke(
-                        BrandColors.logo,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                    )
-                    .rotationEffect(Angle(degrees: -90))
-                    .frame(width: 40, height: 40)
-                
-                if let guide = viewModel.currentGuide {
-                    Image(guide.image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 34, height: 34)
-                        .clipShape(Circle())
+            Button(action: onExpand) {
+                HStack(spacing: 12) {
+                    // Mini Artwork & Progress
+                    ZStack {
+                        Circle()
+                            .stroke(BrandColors.Light.secondaryAction.opacity(0.3), lineWidth: 2)
+                            .frame(width: 40, height: 40)
+                        
+                        Circle()
+                            .trim(from: 0.0, to: viewModel.progress)
+                            .stroke(
+                                BrandColors.logo,
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                            )
+                            .rotationEffect(Angle(degrees: -90))
+                            .frame(width: 40, height: 40)
+                        
+                        if let guide = viewModel.currentGuide {
+                            Image(guide.image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 34, height: 34)
+                                .clipShape(Circle())
+                        }
+                    }
+                    
+                    // Title
+                    Text(viewModel.currentGuide?.title ?? "Select a guide")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                    
+                    Spacer(minLength: 0)
                 }
+                .contentShape(Rectangle())
             }
-            
-            // Title
-            Text(viewModel.currentGuide?.title ?? "Select a guide")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-                .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
-            
-            Spacer()
+            .buttonStyle(.plain)
             
             // Controls
             HStack(spacing: 16) {

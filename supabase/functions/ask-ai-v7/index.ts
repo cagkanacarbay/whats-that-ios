@@ -242,6 +242,20 @@ interface RequestBody {
   customContext?: string;
 }
 
+type CustomContextPayload = {
+  recentFullDiscoveries?: string;
+  aggregatedHistory?: string;
+  ipopPreferences?: { ordered?: string[] };
+};
+
+const formatIpopPreferences = (ordered: string[]): string => {
+  if (!Array.isArray(ordered) || ordered.length === 0) {
+    return "";
+  }
+  const sequence = ordered.join(" -> ");
+  return `IPoP preference order: ${sequence}. Primary lens bias: aim ~60/30/10/rare with ranges 45-70% / 20-40% / 5-20% / <=5%. Flip lens selection is independent of this order and may use any IPoP dimension.`;
+};
+
 serve(async (req: Request) => {
   const correlationId = crypto.randomUUID();
   const corsHeaders = buildCorsHeaders(req.headers.get('Origin'));
@@ -444,16 +458,25 @@ serve(async (req: Request) => {
       let recentFullDiscoveries = "";
       let aggregatedHistory = "";
       let customContextDisplay = "None provided.";
+      let ipopPreferencesText = "";
 
       if (customContext && customContext.trim()) {
         customContextDisplay = customContext.trim();
         try {
-          const contexts = JSON.parse(customContext);
+          const contexts = JSON.parse(customContext) as CustomContextPayload;
           if (contexts.recentFullDiscoveries) {
             recentFullDiscoveries = contexts.recentFullDiscoveries;
           }
           if (contexts.aggregatedHistory) {
             aggregatedHistory = contexts.aggregatedHistory;
+          }
+          if (Array.isArray(contexts.ipopPreferences?.ordered)) {
+            const normalizedOrder = (contexts.ipopPreferences?.ordered ?? []).filter(
+              (item): item is string => typeof item === "string"
+            );
+            if (normalizedOrder.length === 4) {
+              ipopPreferencesText = formatIpopPreferences(normalizedOrder);
+            }
           }
           customContextDisplay = JSON.stringify(contexts, null, 2);
         } catch {
@@ -463,7 +486,11 @@ serve(async (req: Request) => {
 
       promptVariables.recentFullDiscoveries = recentFullDiscoveries;
       promptVariables.userDiscoveryContext = aggregatedHistory;
-      promptVariables.customContext = customContextDisplay;
+      const customContextParts = [
+        customContextDisplay !== "None provided." ? customContextDisplay : "",
+        ipopPreferencesText,
+      ].filter((part) => part && part.trim().length > 0);
+      promptVariables.customContext = customContextParts.length > 0 ? customContextParts.join("\n\n") : "None provided.";
 
       sendEvent('status', { stage: 'prompt', message: 'Assembling prompt…' });
       const promptLogger = handlerLogger.child({ scope: 'prompt' });

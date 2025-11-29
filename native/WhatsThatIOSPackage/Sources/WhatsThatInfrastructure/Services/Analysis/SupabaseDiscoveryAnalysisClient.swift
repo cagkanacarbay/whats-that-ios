@@ -161,6 +161,7 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
 
         if let customContext = payload.customContext {
             body["customContext"] = customContext
+            logIPoPIfPresent(customContext)
         }
 
         if let pushToken = payload.pushToken {
@@ -205,6 +206,20 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
            let jsonString = String(data: data, encoding: .utf8) {
             debugLog("nearbyPlacesPayload", jsonString)
         }
+    }
+
+    private func logIPoPIfPresent(_ customContext: String) {
+        guard isDebugLoggingEnabled else { return }
+        guard
+            let data = customContext.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+            let ipop = json["ipopPreferences"] as? [String: Any],
+            let ordered = ipop["ordered"] as? [String],
+            !ordered.isEmpty,
+            let payloadData = try? JSONSerialization.data(withJSONObject: ipop, options: [.sortedKeys]),
+            let payloadString = String(data: payloadData, encoding: .utf8)
+        else { return }
+        print("[AskAI] ipopPreferences payload=\(payloadString)")
     }
 
     private func parseAvailableEvents(
@@ -314,6 +329,9 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
 
     private func debugLog(_ event: String, _ payload: String) {
         guard isDebugLoggingEnabled else { return }
+        if event.contains("token") {
+            return
+        }
         print("[SupabaseDiscoveryAnalysisClient] event=\(event) payload=\(payload)")
     }
 

@@ -23,6 +23,7 @@ public struct AppDependencyContainer: Sendable {
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
     private let voiceInventoryRepository: VoiceInventoryRepository
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
+    private let ipopPreferencesStore: IPoPPreferencesStore
     private let creditsRepository: DiscoveryCreditsRepository
     private let creditsStore: any CreditsStore
     private let creditBalanceStore: CreditBalanceStore
@@ -39,6 +40,7 @@ public struct AppDependencyContainer: Sendable {
         voiceoverRepository: any DiscoveryVoiceoverRepository,
         voiceInventoryRepository: VoiceInventoryRepository,
         voiceoverPreferencesStore: VoiceoverPreferencesStore,
+        ipopPreferencesStore: IPoPPreferencesStore,
         creditsRepository: DiscoveryCreditsRepository,
         creditsStore: any CreditsStore,
         creditBalanceStore: CreditBalanceStore,
@@ -54,6 +56,7 @@ public struct AppDependencyContainer: Sendable {
         self.voiceoverRepository = voiceoverRepository
         self.voiceInventoryRepository = voiceInventoryRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
+        self.ipopPreferencesStore = ipopPreferencesStore
         self.creditsRepository = creditsRepository
         self.creditsStore = creditsStore
         self.creditBalanceStore = creditBalanceStore
@@ -180,6 +183,7 @@ public extension AppDependencyContainer {
         )
         let voiceInventoryRepository = VoiceInventoryRepository(client: client)
         let voiceoverPreferencesStore = VoiceoverPreferencesStore()
+        let ipopPreferencesStore = IPoPPreferencesStore()
         let discoveryCreationProvider = DiscoveryCreationDependencyProvider(
             maxImageDimension: 2048,
             recentHistoryLimit: 25,
@@ -193,7 +197,8 @@ public extension AppDependencyContainer {
             pushService: pushService,
             locationService: locationService,
             voiceoverRepository: voiceoverRepository,
-            voiceoverPreferencesStore: voiceoverPreferencesStore
+            voiceoverPreferencesStore: voiceoverPreferencesStore,
+            ipopPreferencesStore: ipopPreferencesStore
         )
         #endif
 
@@ -207,6 +212,7 @@ public extension AppDependencyContainer {
             voiceoverRepository: voiceoverRepository,
             voiceInventoryRepository: voiceInventoryRepository,
             voiceoverPreferencesStore: voiceoverPreferencesStore,
+            ipopPreferencesStore: ipopPreferencesStore,
             creditsRepository: creditsRepository,
             creditsStore: creditsStore,
             creditBalanceStore: creditBalanceStore,
@@ -261,6 +267,18 @@ public extension AppDependencyContainer {
 
     func saveVoiceoverPreferences(_ preferences: VoiceoverPreferences) async {
         await voiceoverPreferencesStore.save(preferences)
+    }
+
+    func loadIPoPPreferences() async -> IPoPPreferences? {
+        await ipopPreferencesStore.load()
+    }
+
+    func saveIPoPPreferences(_ preferences: IPoPPreferences) async {
+        await ipopPreferencesStore.save(preferences)
+    }
+
+    func resetIPoPPreferences() async {
+        await ipopPreferencesStore.reset()
     }
 
     func fetchVoiceOptions() async -> [VoiceModelOption] {

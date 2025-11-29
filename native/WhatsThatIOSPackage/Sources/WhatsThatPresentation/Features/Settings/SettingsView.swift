@@ -13,9 +13,12 @@ struct SettingsView: View {
 
     @StateObject private var viewModel: SettingsViewModel
     @StateObject private var voicePickerViewModel: VoicePickerViewModel
+    @StateObject private var ipopPreferencesViewModel: IPoPPreferencesViewModel
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     @State private var isNearbyInspectorPresented = false
+    @State private var isCreditsSheetPresented = false
     @State private var isVoicePickerPresented = false
+    @State private var isIPoPSheetPresented = false
     @State private var initialVoiceModelId: String?
     @State private var committedVoiceModelId: String?
 
@@ -33,7 +36,9 @@ struct SettingsView: View {
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
         fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
-        fetchVoiceSampleURL: @escaping (String) async -> URL?
+        fetchVoiceSampleURL: @escaping (String) async -> URL?,
+        loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
+        saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void
     ) {
         self.makeCreditsView = makeCreditsView
         self.makeNearbyCacheInspector = makeNearbyCacheInspector
@@ -62,6 +67,12 @@ struct SettingsView: View {
                 fetchVoiceSampleURL: fetchVoiceSampleURL
             )
         )
+        _ipopPreferencesViewModel = StateObject(
+            wrappedValue: IPoPPreferencesViewModel(
+                loadPreferences: loadIPoPPreferences,
+                savePreferences: saveIPoPPreferences
+            )
+        )
     }
 
     var body: some View {
@@ -69,6 +80,7 @@ struct SettingsView: View {
             List {
                 creditsSection
                 themeSection
+                ipopSection
                 audioGuidesSection
                 accountSection
                 onboardingSection
@@ -77,6 +89,7 @@ struct SettingsView: View {
             .task {
                 await viewModel.refreshCreditBalance()
                 await voicePickerViewModel.ensureLoadedForDisplay()
+                await ipopPreferencesViewModel.ensureLoaded()
                 if committedVoiceModelId == nil {
                     committedVoiceModelId = voicePickerViewModel.selectedVoiceId
                 }
@@ -87,11 +100,28 @@ struct SettingsView: View {
                     Button("Done", action: onClose)
                 }
             }
+            .sheet(isPresented: $isCreditsSheetPresented) {
+                makeCreditsView { newBalance in
+                    viewModel.updateCreditBalance(newBalance)
+                }
+            }
             .sheet(isPresented: $isVoicePickerPresented) {
                 AudioGuidePickerSheet(
                     viewModel: voicePickerViewModel,
                     onConfirm: confirmVoiceSelection,
                     onCancel: revertVoiceSelection
+                )
+            }
+            .sheet(isPresented: $isIPoPSheetPresented) {
+                IPoPPreferencesSheet(
+                    viewModel: ipopPreferencesViewModel,
+                    onSaved: {
+                        isIPoPSheetPresented = false
+                    },
+                    onCancel: {
+                        ipopPreferencesViewModel.resetDraftToPersistedOrDefault()
+                        isIPoPSheetPresented = false
+                    }
                 )
             }
             .alert(item: alertBinding) { state in
@@ -203,6 +233,49 @@ struct SettingsView: View {
         }
     }
 
+    private var ipopSection: some View {
+        Section(header: Text("Content preferences")) {
+            Button {
+                ipopPreferencesViewModel.resetDraftToPersistedOrDefault()
+                isIPoPSheetPresented = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.accentColor)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Content preferences")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+
+                        if let summary = ipopPreferencesViewModel.summaryOrder {
+                            ipopSummaryChips(summary)
+                        } else {
+                            Text("Not set yet")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            .accessibilityIdentifier("settings.ipop")
+
+            Text("We use your preferences to craft responses that interest you.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 2)
+        }
+    }
+
     private var accountSection: some View {
         Section(header: Text("Account")) {
             if viewModel.canRequestPasswordReset {
@@ -247,10 +320,8 @@ struct SettingsView: View {
 
     private var creditsSection: some View {
         Section(header: Text("Credits")) {
-            NavigationLink {
-                makeCreditsView { newBalance in
-                    viewModel.updateCreditBalance(newBalance)
-                }
+            Button {
+                isCreditsSheetPresented = true
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles")
@@ -276,6 +347,10 @@ struct SettingsView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.secondary)
                     }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -390,7 +465,12 @@ struct SettingsView: View {
     }
 
     private func resetOnboarding() {
-        Task { await viewModel.performReset() }
+        Task {
+            let didReset = await viewModel.performReset()
+            if didReset {
+                ipopPreferencesViewModel.clearPersisted()
+            }
+        }
     }
 
     private func signOut() {
@@ -407,6 +487,22 @@ struct SettingsView: View {
             get: { voicePickerViewModel.isAutoEnabled },
             set: { newValue in voicePickerViewModel.setAutoEnabled(newValue) }
         )
+    }
+
+    private func ipopSummaryChips(_ items: [String]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                Text(item)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .foregroundStyle(Color.accentColor.opacity(0.12))
+                    )
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
     }
 
     private func confirmVoiceSelection() {
@@ -430,11 +526,29 @@ private struct AudioGuidePickerSheet: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var hasConfirmed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-            Spacer().frame(height: BrandSpacing.large)
+            HStack {
+                Button {
+                    hasConfirmed = true
+                    onCancel()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Settings")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.top, BrandSpacing.large)
 
             Text("Select an audio guide narrator")
                 .font(.system(size: 20, weight: .semibold))

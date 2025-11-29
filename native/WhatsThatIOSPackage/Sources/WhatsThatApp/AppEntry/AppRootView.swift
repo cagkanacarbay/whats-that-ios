@@ -57,6 +57,15 @@ public struct AppRootView: View {
         let fetchVoiceSampleURL: (String) async -> URL? = {
             await container.fetchVoiceSampleURL(voiceName: $0)
         }
+        let loadIPoPPreferences: () async -> IPoPPreferences? = {
+            await container.loadIPoPPreferences()
+        }
+        let saveIPoPPreferences: (IPoPPreferences) async -> Void = { preferences in
+            await container.saveIPoPPreferences(preferences)
+        }
+        let resetIPoPPreferences: () async -> Void = {
+            await container.resetIPoPPreferences()
+        }
         #else
         let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
@@ -76,6 +85,9 @@ public struct AppRootView: View {
         let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void = { _ in }
         let fetchVoiceOptions: () async -> [VoiceModelOption] = { [] }
         let fetchVoiceSampleURL: (String) async -> URL? = { _ in nil }
+        let loadIPoPPreferences: () async -> IPoPPreferences? = { nil }
+        let saveIPoPPreferences: (IPoPPreferences) async -> Void = { _ in }
+        let resetIPoPPreferences: () async -> Void = { }
         #endif
 
         let nearbyInspectorFactory: (() -> AnyView)? = {
@@ -109,7 +121,10 @@ public struct AppRootView: View {
             loadVoiceoverPreferences: loadVoiceoverPreferences,
             saveVoiceoverPreferences: saveVoiceoverPreferences,
             fetchVoiceOptions: fetchVoiceOptions,
-            fetchVoiceSampleURL: fetchVoiceSampleURL
+            fetchVoiceSampleURL: fetchVoiceSampleURL,
+            loadIPoPPreferences: loadIPoPPreferences,
+            saveIPoPPreferences: saveIPoPPreferences,
+            resetIPoPPreferences: resetIPoPPreferences
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

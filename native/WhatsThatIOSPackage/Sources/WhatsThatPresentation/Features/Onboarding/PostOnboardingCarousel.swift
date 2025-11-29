@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import OSLog
 import CoreLocation
 import WhatsThatShared
 import WhatsThatDomain
@@ -7,6 +8,7 @@ import WhatsThatDomain
 struct PostOnboardingCarousel: View {
     enum SlideKind {
         case overview
+        case ipopPreferences
         case voicePicker
         case locationPermission
         case actions
@@ -24,13 +26,14 @@ struct PostOnboardingCarousel: View {
     let onLaunchCamera: () -> Void
     let onLaunchUpload: () -> Void
     @StateObject private var voicePickerViewModel: VoicePickerViewModel
+    @StateObject private var ipopPreferencesViewModel: IPoPPreferencesViewModel
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var index: Int = 0
-    @State private var previousIndex: Int = 0
     @StateObject private var permissionsCoordinator = OnboardingPermissionsCoordinator()
     @State private var isRequestingLocation = false
     @State private var showLocationSettingsAlert = false
+    private let logger = Logger(subsystem: "com.whatsthat.onboarding", category: "PostOnboardingCarousel")
 
     init(
         onComplete: @escaping () -> Void,
@@ -39,7 +42,9 @@ struct PostOnboardingCarousel: View {
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
         fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
-        fetchVoiceSampleURL: @escaping (String) async -> URL?
+        fetchVoiceSampleURL: @escaping (String) async -> URL?,
+        loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
+        saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void
     ) {
         self.onComplete = onComplete
         self.onLaunchCamera = onLaunchCamera
@@ -50,6 +55,12 @@ struct PostOnboardingCarousel: View {
                 saveVoiceoverPreferences: saveVoiceoverPreferences,
                 fetchVoiceOptions: fetchVoiceOptions,
                 fetchVoiceSampleURL: fetchVoiceSampleURL
+            )
+        )
+        _ipopPreferencesViewModel = StateObject(
+            wrappedValue: IPoPPreferencesViewModel(
+                loadPreferences: loadIPoPPreferences,
+                savePreferences: saveIPoPPreferences
             )
         )
     }
@@ -74,6 +85,12 @@ struct PostOnboardingCarousel: View {
             kind: .voicePicker
         ),
         Slide(
+            title: "Content Preferences",
+            message: "Put these in the order that matters to you. We’ll shape our answers based on your preferences.",
+            imageName: nil,
+            kind: .ipopPreferences
+        ),
+        Slide(
             title: "Unlock local insights.",
             message: "With location permissions, discoveries will be attuned to where you are. Used only to improve your experience—never sold.",
             imageName: "post3",
@@ -90,33 +107,21 @@ struct PostOnboardingCarousel: View {
     var body: some View {
         bodyContent
             .task {
+                await ipopPreferencesViewModel.ensureLoaded()
                 await voicePickerViewModel.prepareForOnboardingPrefetch()
             }
     }
 
     @ViewBuilder
     private var bodyContent: some View {
-        if #available(iOS 17.0, *) {
-            coreView
-                .onChange(of: index) { oldValue, newValue in
-                    handleSlideTransition(from: oldValue, to: newValue)
-                    previousIndex = newValue
-                }
-                .onChange(of: permissionsCoordinator.locationStatus) { _, newStatus in
-                    guard isRequestingLocation else { return }
-                    evaluateLocationStatus(for: newStatus)
-                }
-        } else {
-            coreView
-                .onChange(of: index) { newValue in
-                    handleSlideTransition(from: previousIndex, to: newValue)
-                    previousIndex = newValue
-                }
-                .onChange(of: permissionsCoordinator.locationStatus) { newStatus in
-                    guard isRequestingLocation else { return }
-                    evaluateLocationStatus(for: newStatus)
-                }
-        }
+        coreView
+            .onChange(of: index) { oldValue, newValue in
+                handleSlideTransition(from: oldValue, to: newValue)
+            }
+            .onChange(of: permissionsCoordinator.locationStatus) { _, newStatus in
+                guard isRequestingLocation else { return }
+                evaluateLocationStatus(for: newStatus)
+            }
     }
 
     private var coreView: some View {
@@ -142,9 +147,20 @@ struct PostOnboardingCarousel: View {
 
     @ViewBuilder
     private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
-        TabView(selection: $index) {
+        TabView(selection: selectionBinding) {
             ForEach(slides.indices, id: \.self) { idx in
                 switch slides[idx].kind {
+                case .ipopPreferences:
+                    OnboardingIPoPSlide(
+                        title: slides[idx].title,
+                        message: slides[idx].message,
+                        titleColor: titleColor,
+                        bodyColor: bodyColor,
+                        containerWidth: width,
+                        topInset: topInset,
+                        viewModel: ipopPreferencesViewModel
+                    )
+                    .tag(idx)
                 case .voicePicker:
                     OnboardingVoicePickerSlide(
                         title: slides[idx].title,
@@ -180,6 +196,24 @@ struct PostOnboardingCarousel: View {
         }
     }
 
+    private var selectionBinding: Binding<Int> {
+        Binding(
+            get: { index },
+            set: { newValue in
+                guard slides.indices.contains(index), slides.indices.contains(newValue) else { return }
+                let currentKind = slides[index].kind
+                if currentKind == .ipopPreferences,
+                   newValue > index,
+                   ipopPreferencesViewModel.persistedOrder == nil {
+                    ipopPreferencesViewModel.errorMessage = "Please set your preferences in order to continue."
+                    logger.debug("Blocked forward swipe via binding; persisted=nil, currentIdx=\(self.index), attempted=\(newValue)")
+                    return
+                }
+                index = newValue
+            }
+        )
+    }
+
     @ViewBuilder
     private func callToAction(bottomInset: CGFloat) -> some View {
         VStack(spacing: BrandSpacing.small) {
@@ -192,6 +226,24 @@ struct PostOnboardingCarousel: View {
                     }
                     BrandSecondaryButton(title: "Gallery") {
                         onLaunchUpload()
+                    }
+                }
+            case .ipopPreferences:
+                VStack(spacing: BrandSpacing.small) {
+                    let errorText = ipopPreferencesViewModel.errorMessage ?? " "
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(ipopPreferencesViewModel.errorMessage == nil ? Color.clear : Color.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .animation(.none, value: ipopPreferencesViewModel.errorMessage)
+                    HStack(spacing: BrandSpacing.medium) {
+                        BrandSecondaryButton(title: "Previous") {
+                            goToPreviousSlide()
+                        }
+                        BrandPrimaryButton(title: ipopPreferencesViewModel.isSaving ? "Saving…" : "Save order") {
+                            Task { await saveIPoPAndAdvance() }
+                        }
+                        .disabled(ipopPreferencesViewModel.isSaving)
                     }
                 }
             case .overview, .locationPermission, .voicePicker:
@@ -221,10 +273,12 @@ struct PostOnboardingCarousel: View {
     }
 
     private func goToNextSlide() {
-        if index < slides.count - 1 {
-            withAnimation { index += 1 }
-        } else {
+        guard index < slides.count - 1 else {
             onComplete()
+            return
+        }
+        withAnimation {
+            selectionBinding.wrappedValue = index + 1
         }
     }
 
@@ -233,9 +287,19 @@ struct PostOnboardingCarousel: View {
         withAnimation { index -= 1 }
     }
 
+    private func saveIPoPAndAdvance() async {
+        let didSave = await ipopPreferencesViewModel.persistChanges()
+        if didSave {
+            goToNextSlide()
+        }
+    }
+
     private func handleSlideTransition(from oldIndex: Int, to newIndex: Int) {
         guard oldIndex != newIndex else { return }
         guard slides.indices.contains(oldIndex), slides.indices.contains(newIndex) else { return }
+        if slides[newIndex].kind == .ipopPreferences {
+            logger.debug("Navigating to IPoP slide idx=\(newIndex), persisted=\(ipopPreferencesViewModel.persistedOrder != nil)")
+        }
         let leavingSlide = slides[oldIndex]
         if leavingSlide.kind == .locationPermission, newIndex > oldIndex {
             requestLocationPermissionIfNeeded()

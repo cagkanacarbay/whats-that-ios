@@ -99,8 +99,9 @@ final class SettingsViewModel: ObservableObject {
         creditBalance = newBalance
     }
 
-    func performReset() async {
-        guard !isProcessing else { return }
+    @discardableResult
+    func performReset() async -> Bool {
+        guard !isProcessing else { return false }
         isProcessing = true
         alertState = nil
 
@@ -110,8 +111,10 @@ final class SettingsViewModel: ObservableObject {
         switch result {
         case .success:
             alertState = .finished
+            return true
         case .failure(let error):
             alertState = .error(error.localizedDescription)
+            return false
         }
     }
 

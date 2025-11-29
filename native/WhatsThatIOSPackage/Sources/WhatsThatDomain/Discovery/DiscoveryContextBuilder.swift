@@ -3,8 +3,12 @@ import Foundation
 public struct DiscoveryContextBuilder: Sendable {
     public init() {}
 
-    public func buildContext(from discoveries: [DiscoverySummary], limit: Int = 25) -> String? {
-        guard !discoveries.isEmpty else { return nil }
+    public func buildContext(
+        from discoveries: [DiscoverySummary],
+        limit: Int = 25,
+        ipopPreferences: IPoPPreferences? = nil
+    ) -> String? {
+        guard !discoveries.isEmpty || ipopPreferences != nil else { return nil }
 
         let sorted = discoveries.sorted(by: { $0.capturedAt > $1.capturedAt })
         let truncated = Array(sorted.prefix(limit))
@@ -14,7 +18,8 @@ public struct DiscoveryContextBuilder: Sendable {
 
         let payload = DiscoveryContextPayload(
             recentFullDiscoveries: recentSection,
-            aggregatedHistory: historySection
+            aggregatedHistory: historySection,
+            ipopPreferences: ipopPreferences
         )
 
         guard let data = try? JSONEncoder().encode(payload) else {
@@ -140,6 +145,7 @@ public struct DiscoveryContextBuilder: Sendable {
 private struct DiscoveryContextPayload: Codable {
     let recentFullDiscoveries: String
     let aggregatedHistory: String
+    let ipopPreferences: IPoPPreferences?
 }
 
 private struct HistoryGroupKey: Hashable {

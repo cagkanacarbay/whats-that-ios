@@ -6,9 +6,17 @@ public struct CreditsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: CreditsViewModel
+    private let backButtonTitle: String
+    private let onClose: (() -> Void)?
 
-    public init(viewModel: CreditsViewModel) {
+    public init(
+        viewModel: CreditsViewModel,
+        backButtonTitle: String = "Back",
+        onClose: (() -> Void)? = nil
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.backButtonTitle = backButtonTitle
+        self.onClose = onClose
     }
 
     public var body: some View {
@@ -16,14 +24,18 @@ public struct CreditsView: View {
             backgroundGradient
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
-                    balanceCard
-                    packSection
+            VStack(spacing: BrandSpacing.medium) {
+                header
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 32) {
+                        balanceCard
+                        packSection
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 80)
+                    .padding(.top, BrandSpacing.small)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 80)
-                .padding(.top, 28)
             }
 
             if let toast = viewModel.toastMessage {
@@ -31,14 +43,6 @@ public struct CreditsView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.horizontal, 20)
                     .padding(.bottom, 20)
-            }
-        }
-        .navigationTitle("Credits")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { dismiss() }
-                    .font(.system(size: 16, weight: .semibold))
             }
         }
         .task {
@@ -66,6 +70,41 @@ public struct CreditsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: BrandSpacing.small) {
+            HStack {
+                Button {
+                    close()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text(backButtonTitle)
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.top, BrandSpacing.large)
+
+            Text("Credits")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, BrandSpacing.large)
+        }
+    }
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
         }
     }
 

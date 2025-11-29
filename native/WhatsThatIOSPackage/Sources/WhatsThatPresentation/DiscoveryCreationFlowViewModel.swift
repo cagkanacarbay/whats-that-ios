@@ -75,6 +75,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private let locationService: DiscoveryLocationService
     private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
+    private let ipopPreferencesStore: IPoPPreferencesStore?
     private let analysisParser = DiscoveryAnalysisParser()
     #if DEBUG
     private let debugLoggingEnabled = true
@@ -104,7 +105,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         pushService: DiscoveryPushService,
         locationService: DiscoveryLocationService,
         voiceoverRepository: (any DiscoveryVoiceoverRepository)? = nil,
-        voiceoverPreferencesStore: VoiceoverPreferencesStore? = nil
+        voiceoverPreferencesStore: VoiceoverPreferencesStore? = nil,
+        ipopPreferencesStore: IPoPPreferencesStore? = nil
     ) {
         self.configuration = configuration
         self.captureService = captureService
@@ -118,6 +120,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         self.locationService = locationService
         self.voiceoverRepository = voiceoverRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
+        self.ipopPreferencesStore = ipopPreferencesStore
     }
 
     func startFlow(retake: Bool = false) {
@@ -540,6 +543,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
         async let historyTask = historyRepository.fetchRecentDiscoveries(limit: configuration.recentHistoryLimit)
         async let pushTask = pushService.requestPushAuthorizationIfNeeded()
+        let ipopPreferences = await ipopPreferencesStore?.load()
 
         // Refresh credits if stale; if it fails, keep the cached value.
         do {
@@ -552,7 +556,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         do {
             let discoveries = try await historyTask
             let builder = DiscoveryContextBuilder()
-            confirmationState?.customContext = builder.buildContext(from: discoveries)
+            confirmationState?.customContext = builder.buildContext(
+                from: discoveries,
+                limit: configuration.recentHistoryLimit,
+                ipopPreferences: ipopPreferences
+            )
         } catch {
             confirmationState?.customContext = nil
         }
@@ -724,6 +732,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                       let preferencesStore = voiceoverPreferencesStore else { return }
                 let preferences = await preferencesStore.load()
                 guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
+                print("[DiscoveryCreationFlowViewModel] autoTTS=enabled voiceModelId=\(preferences.voiceModelId) discoveryId=\(discoveryId)")
                 _ = await voiceoverRepository.requestVoiceover(
                     for: discoveryId,
                     voiceModelId: preferences.voiceModelId,
@@ -841,6 +850,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         guard debugLoggingEnabled else { return }
         // print("[DiscoveryCreationFlowViewModel] \(message)")
     }
+
 
     private func flowStateSummary(_ state: DiscoveryCreationFlowState) -> String {
         switch state {

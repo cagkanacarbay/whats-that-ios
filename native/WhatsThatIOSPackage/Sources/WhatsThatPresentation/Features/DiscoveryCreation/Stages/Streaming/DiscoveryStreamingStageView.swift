@@ -37,6 +37,9 @@ struct DiscoveryStreamingStageView: View {
     @State private var currentMessageOpacity: Double = 1
     @State private var metadataVisible: Bool = false
     @State private var hasScrolledToContent = false
+    @State private var hasLoggedStreamStart = false
+    @State private var hasLoggedStreamEnd = false
+    @State private var hasLoggedMetadata = false
 
     private enum Layout {
         static let headerHeightFactor: CGFloat = 0.72
@@ -162,20 +165,8 @@ struct DiscoveryStreamingStageView: View {
                 .onChange(of: state.displayMarkdown) {
                     updateDisplayedMarkdown()
                 }
-                .onChange(of: currentMessageIndex) { _, newIndex in
-                    let currentOpacityFormatted = String(format: "%.2f", currentMessageOpacity)
-                    let previousOpacityFormatted = String(format: "%.2f", previousMessageOpacity)
-                    debugLog(
-                        "loaderMessageIndex -> \(newIndex) message=\"\(currentLoadingMessage)\" prev=\"\(previousMessage ?? "nil")\" currentOpacity=\(currentOpacityFormatted) previousOpacity=\(previousOpacityFormatted)"
-                    )
-                }
-                .onChange(of: currentMessageOpacity) { _, newValue in
-                    let formatted = String(format: "%.2f", newValue)
-                    debugLog("currentMessageOpacity changed -> \(formatted) message=\"\(currentLoadingMessage)\"")
-                }
-                .onChange(of: previousMessageOpacity) { _, newValue in
-                    let formatted = String(format: "%.2f", newValue)
-                    debugLog("previousMessageOpacity changed -> \(formatted) previous=\"\(previousMessage ?? "nil")\"")
+                .onAppear {
+                    logStreamStarted()
                 }
                 .onChange(of: state.streamedText) {
                     // Throttle noisy updates: only consider stream text for clearing
@@ -186,10 +177,12 @@ struct DiscoveryStreamingStageView: View {
                     evaluateLoaderCleared(with: currentMarkdown)
                 }
                 .onChange(of: state.metadataTitle) {
+                    logMetadataVisibleIfNeeded()
                     evaluateMetadataVisibility()
                     evaluateLoaderCleared(with: displayedMarkdown)
                 }
                 .onChange(of: state.metadataShortDescription) {
+                    logMetadataVisibleIfNeeded()
                     evaluateMetadataVisibility()
                     evaluateLoaderCleared(with: displayedMarkdown)
                 }
@@ -201,10 +194,10 @@ struct DiscoveryStreamingStageView: View {
                         displayedMarkdown = final
                         evaluateLoaderCleared(with: final)
                         loaderCleared = true
+                        logStreamEnded()
                     }
                 }
                 .onChange(of: loaderCleared) {
-                    debugLog("loaderCleared changed -> \(loaderCleared)")
                     if loaderCleared {
                         scrollToContent(using: scrollProxy)
                         let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
@@ -232,7 +225,6 @@ struct DiscoveryStreamingStageView: View {
         displayedMarkdown = initialNarrative
         loaderCleared = loaderShouldBeCleared(for: initialNarrative)
         hasScrolledToContent = false
-        debugLog("resetState loaderCleared=\(loaderCleared) initialMarkdownLength=\(initialNarrative.count) metadataTitle=\(state.metadataTitle ?? "nil")")
     }
 
     private func updateDisplayedMarkdown() {
@@ -291,19 +283,15 @@ struct DiscoveryStreamingStageView: View {
         // End loading as soon as actual streamed narrative content is visible,
         // or metadata is present. Do not wait for the stream to finish.
         if let title = state.metadataTitle, !title.isEmpty {
-            debugLog("loaderShouldBeCleared -> true (metadataTitle=\"\(title)\")")
             return true
         }
         if let short = state.metadataShortDescription, !short.isEmpty {
-            debugLog("loaderShouldBeCleared -> true (metadataShortDescription length=\(short.count))")
             return true
         }
         let visibleLength = DiscoveryStreamFormatter.visibleLength(for: state.streamedText)
         if visibleLength > 0 {
-            debugLog("loaderShouldBeCleared -> true (visibleStreamLength=\(visibleLength))")
             return true
         }
-        debugLog("loaderShouldBeCleared -> false (textLength=\(text.count))")
         return false
     }
 
@@ -313,7 +301,6 @@ struct DiscoveryStreamingStageView: View {
         }
         if loaderShouldBeCleared(for: text) {
             loaderCleared = true
-            debugLog("loaderCleared = true (textLength=\(text.count), isStreaming=\(state.isStreaming), title=\(state.metadataTitle ?? "nil"))")
         }
     }
 
@@ -324,13 +311,11 @@ struct DiscoveryStreamingStageView: View {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     metadataVisible = true
                 }
-                debugLog("metadataVisible = true (title=\(state.metadataTitle ?? "nil"), shortLen=\(state.metadataShortDescription?.count ?? 0))")
             } else {
                 // Wait to animate title/short until the loader clears so it matches the description reveal.
             }
         } else if !hasMetadata && metadataVisible && state.isStreaming {
             metadataVisible = false
-            debugLog("metadataVisible = false (awaiting metadata)")
         }
     }
 
@@ -422,17 +407,15 @@ struct DiscoveryStreamingStageView: View {
             capturedAt: capturedAt,
             availableWidth: availableWidth,
             onMessageFinished: { advanceMessage() },
-            debugLog: { debugLog($0) }
+            debugLog: { _ in }
         )
     }
 
     private func advanceMessage() {
         guard shouldShowLoader else {
-            debugLog("advanceMessage skipped (loader already cleared)")
             return
         }
         guard !shuffledMessages.isEmpty else {
-            debugLog("advanceMessage skipped (no shuffled messages)")
             return
         }
 
@@ -441,23 +424,16 @@ struct DiscoveryStreamingStageView: View {
         previousMessage = old
         previousMessageOpacity = 1
         currentMessageOpacity = 0
-        debugLog("advanceMessage preparing crossfade from \"\(old)\" (index=\(currentMessageIndex))")
 
         // Compute next index and add a brief dwell before crossfading
         let nextIndex = (currentMessageIndex + 1) % shuffledMessages.count
         let upcomingMessage = shuffledMessages[nextIndex]
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            debugLog("advanceMessage switching to index \(nextIndex) message=\"\(upcomingMessage)\"")
             currentMessageIndex = nextIndex
             withAnimation(.easeInOut(duration: 0.28)) {
                 previousMessageOpacity = 0
                 currentMessageOpacity = 1
             }
-            let currentOpacityFormatted = String(format: "%.2f", currentMessageOpacity)
-            let previousOpacityFormatted = String(format: "%.2f", previousMessageOpacity)
-            debugLog(
-                "advanceMessage crossfade applied currentOpacity=\(currentOpacityFormatted) previousOpacity=\(previousOpacityFormatted) loaderCleared=\(loaderCleared)"
-            )
         }
     }
 
@@ -483,15 +459,29 @@ struct DiscoveryStreamingStageView: View {
         "Translating squirrel chatter…"
     ]
 
-    private static let streamRevealThreshold: Int = 12
-    private static let streamContentThreshold: Int = 40
-
     private enum ScrollTarget {
         static let markdown = "analysisMarkdown"
     }
 
-    private func debugLog(_ message: String) {
-        guard debugLoggingEnabled else { return }
-        print("[DiscoveryStreamingStageView] \(message)")
+    private func logStreamStarted() {
+        guard debugLoggingEnabled, !hasLoggedStreamStart else { return }
+        hasLoggedStreamStart = true
+        print("[DiscoveryStreamingStageView] Stream started")
+    }
+
+    private func logStreamEnded() {
+        guard debugLoggingEnabled, !hasLoggedStreamEnd else { return }
+        hasLoggedStreamEnd = true
+        let title = state.metadataTitle ?? "nil"
+        let shortLen = state.metadataShortDescription?.count ?? 0
+        print("[DiscoveryStreamingStageView] Stream ended metadataTitle=\"\(title)\" shortLen=\(shortLen)")
+    }
+
+    private func logMetadataVisibleIfNeeded() {
+        guard debugLoggingEnabled, !hasLoggedMetadata else { return }
+        guard let title = state.metadataTitle, !title.isEmpty else { return }
+        let shortLen = state.metadataShortDescription?.count ?? 0
+        hasLoggedMetadata = true
+        print("[DiscoveryStreamingStageView] Metadata received title=\"\(title)\" shortLen=\(shortLen)")
     }
 }

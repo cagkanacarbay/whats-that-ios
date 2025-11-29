@@ -3,7 +3,7 @@ import type { PromptConfig } from '../types.ts';
 export const userPromptMetadata: PromptConfig = {
   name: 'USER_PROMPT',
   description: 'Context payload emphasizing IPoP-driven story selection and cohesive flow',
-  version: '0.7.0',
+  version: '0.8.0',
   author: "What's That Team",
   variables: [
     'locationContext',
@@ -32,7 +32,7 @@ INPUT SIGNALS
 ## Location signal
 {locationContext}
 
-## Custom context (tone, interests, constraints)
+## Custom context (tone, interests, constraints) — includes user IPoP preference order for the primary lens when provided (flip lens can be any dimension)
 {customContext}
 
 ## Recent discovery summaries - What the user has been discovering recently. We generated all these results for them.

@@ -55,7 +55,7 @@ private extension AudioGuidesPageView {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 toggleBar(enterListOnTap: true, showSelection: false)
-                    .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace)
+                    .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace, isSource: mode == .fullPage)
                     .padding(.horizontal, 8)
                     .padding(.bottom, bottomInset)
             }
@@ -85,7 +85,7 @@ private extension AudioGuidesPageView {
                 .padding(.horizontal, 0)
 
                 toggleBar(enterListOnTap: false, showSelection: true)
-                    .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace)
+                    .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace, isSource: mode == .list)
                     .padding(.top, 4)
                     .padding(.bottom, 8)
 

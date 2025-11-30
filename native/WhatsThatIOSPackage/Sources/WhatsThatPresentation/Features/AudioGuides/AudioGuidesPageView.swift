@@ -40,7 +40,7 @@ struct AudioGuidesPageView: View {
                             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                                 // Hero inside scroll content to keep stacking order with tabs/list
                                 HeroPlayerView(viewModel: viewModel)
-                                    .padding(.top, 20)
+                                    .padding(.top, 10)
                                     .padding(.bottom, 30)
                                     .padding(.horizontal, 24)
                                     .frame(maxWidth: .infinity)
@@ -89,7 +89,7 @@ struct AudioGuidesPageView: View {
                                 alignment: .top
                             )
                             // Keep all content below the top safe area so nothing renders in the notch.
-                            .padding(.top, viewport.safeAreaInsets.top)
+                            //.padding(.top, viewport.safeAreaInsets.top)
                             .background(
                                 GeometryReader { proxy in
                                     let offset = -proxy.frame(in: .named("scroll")).minY
@@ -217,7 +217,7 @@ struct ToggleBarView: View {
     var body: some View {
         HStack {
             toggleButton(title: "Up Next", type: .upNext)
-            toggleButton(title: "Discover", type: .discover)
+            toggleButton(title: "My Discoveries", type: .discover)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

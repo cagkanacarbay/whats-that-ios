@@ -5,6 +5,8 @@ class AudioGuidesViewModel: ObservableObject {
     @Published var currentGuide: AudioGuide?
     @Published var playbackState: PlaybackState = .paused
     @Published var progress: Double = 0.35 // 0.0 to 1.0
+    @Published var autoplayEnabled: Bool = false
+    @Published var playbackSpeed: Double = 1.0
     
     @Published var selectedList: AudioGuideListType = .upNext
     

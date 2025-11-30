@@ -427,7 +427,6 @@ struct DiscoveryStreamingStageView: View {
 
         // Compute next index and add a brief dwell before crossfading
         let nextIndex = (currentMessageIndex + 1) % shuffledMessages.count
-        let upcomingMessage = shuffledMessages[nextIndex]
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             currentMessageIndex = nextIndex
             withAnimation(.easeInOut(duration: 0.28)) {

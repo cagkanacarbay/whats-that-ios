@@ -17,7 +17,7 @@ struct HeroPlayerView: View {
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .frame(width: 80, height: 32)
-                        .foregroundColor(selectedMode == "Text" ? BrandTheme.palette(for: colorScheme).textPrimary : BrandTheme.palette(for: colorScheme).textSecondary)
+                        .foregroundColor(selectedMode == "Text" ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textSecondary)
                         .background(
                             ZStack {
                                 if selectedMode == "Text" {
@@ -34,7 +34,7 @@ struct HeroPlayerView: View {
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .frame(width: 80, height: 32)
-                        .foregroundColor(selectedMode == "Audio" ? BrandTheme.palette(for: colorScheme).textPrimary : BrandTheme.palette(for: colorScheme).textSecondary)
+                        .foregroundColor(selectedMode == "Audio" ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textSecondary)
                         .background(
                             ZStack {
                                 if selectedMode == "Audio" {

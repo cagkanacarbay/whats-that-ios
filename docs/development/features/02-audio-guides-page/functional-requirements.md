@@ -6,9 +6,9 @@ Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against exist
 - ✅ Replace existing voiceover playback controller; same global availability (wherever current player is shown). Tapping mini from any screen opens the full Audio Guides page; back returns to prior screen.
 - ✅ Controls: play/pause, next/prev in queue, seek via ±5s buttons (no scrubbing required). Holding the ±5s buttons should repeat/accelerate seek jumps.
 - ✅ Playback speed presets: 0.75x, 1.5x, 2x. No sleep timer.
-- ✅ States surfaced: ready / playing / paused / stopped. Current position and total duration shown.
-- ✅ Mini dismiss: gesture-based dismiss (not a close button). If dismissed while playing, stop playback; if already stopped, hide mini. Mini appears when audio is playing/paused; otherwise hidden.
-- ✅ State sync: hero and mini always reflect the same item/progress; collapse/expand does not interrupt playback.
+- ✅ States tracked: ready / playing / paused / stopped; maintain position and duration for display.
+- ✅ Mini dismiss: dismiss stops playback if active; hidden when stopped.
+- ✅ State sync: hero and mini share the same item/progress; collapse/expand does not interrupt playback.
 - ✅ Per-guide resume: track last-played position per discovery; surface progress in My Discoveries rows and history items in Up Next.
 
 ## Audio Guide Storage & Caching
@@ -16,11 +16,11 @@ Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against exist
 - ✅ Offline: play from cache when available; if not cached and offline, show “Download to Play” and block playback.
 - ✅ Streaming fallback when online if not cached.
 - ✅ Prefetch: any item placed in the queue (manual insert or auto) is prefetched in the background. Track in-flight fetches to avoid duplicate downloads, especially for just-generated items.
-- ✅ Generation statuses: absent (not generated), generating, failed, ready. Absent/failed shown as ghost/alert states in My Discoveries; retry regenerates.
+- ✅ Generation statuses: absent (not generated), generating, failed, ready.
 - ✅ Retention/cleanup: reuse existing voiceover cache eviction as-is (no new policy).
 
 ## Up Next Queue (with History)
-- ✅ Single list combining history, current, and upcoming. Current item visually distinct; history visually separated from upcoming.
+- ✅ Single list combining history, current, and upcoming.
 - ⏳ Revisit history UX from scratch: how to present and interact with history vs upcoming (prior option set discarded).
 - ✅ Actions: tap history item makes it current; removing current advances to next; removing upcoming reflows order.
 - ✅ Insertion rules: “Play next” inserts at top of upcoming; “Add to end” appends. Auto-generated items append after manual ones.
@@ -29,12 +29,11 @@ Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against exist
 
 ## My Discoveries List (renamed from Discover tab)
 - ✅ Mirrors existing My Discoveries content (ordering/metadata) without reordering controls.
-- ✅ Row states: ready (normal), generating (ghosted + spinner + “Generating…”), absent (ghosted + “Create audio guide”), failed (warning tint + retry icon overlay), playing indicator for current item.
 - ✅ Actions:
   - Ready: tap plays in place; does **not** auto-switch tabs.
   - Absent: tap opens modal: “Creating an audio guide costs 1 credit” + current credit balance; Cancel/OK. OK triggers generation via edge function (edge handles credit deduction).
   - Failed: tap/overlay retry icon retries generation; transitions to generating state.
-  - Swipe (light) adds to end of queue with haptic/toast feedback.
+  - Swipe (light) adds to end of queue with feedback.
 - ✅ No search/filters in this list.
 - ✅ Credit balance is updated from edge function response (no local deduction logic).
 
@@ -44,8 +43,8 @@ Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against exist
 - ✅ Auto-generate setting (if enabled elsewhere) can create guides as new discoveries are captured; these appear in Up Next with generating state, then ready when done.
 
 ## Error Handling
-- ✅ Playback errors: inline toast/banner; allow retry; stop playback if unrecoverable.
-- ✅ Generation failures: show failed state on the item (warning tint + retry overlay).
+- ✅ Playback errors: surface inline and allow retry; stop playback if unrecoverable.
+- ✅ Generation failures: mark the item failed and allow retry.
 - ✅ Fetch/prefetch errors: surface inline on the item; retry available; do not block rest of queue.
 - ✅ Dismiss mini while error visible stops playback and hides mini.
 
@@ -60,3 +59,12 @@ Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against exist
 ## Open Questions / Decisions Needed
 - History UX: how to present and interact with history vs upcoming (fresh design pass).
 - Visual separation: preferred layout for history vs current vs upcoming (chips, subheaders, dividers)?
+
+## UI Requirements
+- Hero/mini: collapse/expand pattern maintained; mini sticky while browsing; mini dismiss via gesture (not button). Dismissing while playing stops playback; when stopped, mini hides.
+- Player display: show current position and total duration; expose state (ready/playing/paused/stopped); show playback speed options (0.75x/1.5x/2x).
+- Queue visuals: current item clearly distinct; history visually separated from upcoming (design TBD in fresh pass).
+- My Discoveries states: ready (normal), generating (ghosted + spinner + “Generating…”), absent (ghosted + “Create audio guide”), failed (warning tint + retry icon overlay), playing indicator when active.
+- My Discoveries actions UI: absent tap opens credit modal (cost 1 credit + current balance, Cancel/OK); failed shows retry overlay; light swipe adds to queue tail with feedback; ready tap plays in place without tab switch.
+- Error/feedback: playback errors via inline toast/banner; generation failures visible on item with retry; fetch/prefetch errors inline per item.
+- Navigation: mini tap opens Audio Guides page; back gesture returns; gesture-based tab swipe remains (Up Next vs My Discoveries).

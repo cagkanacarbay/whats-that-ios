@@ -55,6 +55,9 @@ struct AudioGuidesPageView: View {
             }
         }
         .animation(.easeInOut(duration: transitionDuration), value: mode)
+        .sheet(isPresented: $viewModel.showHistory) {
+            HistoryView(viewModel: viewModel)
+        }
     }
 }
 
@@ -88,11 +91,11 @@ private extension AudioGuidesPageView {
             let topInset = proxy.safeAreaInsets.top
             let bottomInset = proxy.safeAreaInsets.bottom
             let dragGesture = DragGesture(minimumDistance: 12)
-                .onChanged { value in
-                    overlayDragOffset = max(0, value.translation.height)
+                .onChanged {
+                    overlayDragOffset = max(0, $0.translation.height)
                 }
-                .onEnded { value in
-                    handleOverlayDragEnd(translation: value.translation)
+                .onEnded {
+                    handleOverlayDragEnd(translation: $0.translation)
                 }
 
             VStack(spacing: 0) {
@@ -188,6 +191,10 @@ private extension AudioGuidesPageView {
             namespace: toggleNamespace,
             showSelection: showSelection
         ) { list in
+            if list != .upNext {
+                viewModel.resetHistoryLimit()
+            }
+            
             if enterListOnTap {
                 enterListMode(selecting: list)
             }
@@ -206,6 +213,7 @@ private extension AudioGuidesPageView {
         withAnimation(.easeInOut(duration: transitionDuration)) {
             mode = .fullPage
             overlayDragOffset = 0
+            viewModel.resetHistoryLimit()
         }
     }
 
@@ -251,6 +259,12 @@ struct ToggleBarView: View {
     private func toggleButton(title: String, type: AudioGuideListType) -> some View {
         let isActive = showSelection && selectedList == type
         return Button(action: {
+            // Reset history limit if switching away from upNext
+            if type != .upNext {
+                // We can't access viewModel directly here easily as it's not passed in.
+                // But we can rely on the onSelection callback which is passed from the parent view.
+            }
+            
             withAnimation(.easeInOut(duration: 0.22)) {
                 selectedList = type
             }
@@ -279,35 +293,117 @@ struct UpNextListView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
     var bottomPadding: CGFloat = 0
     var onOpenPlayer: (AudioGuide) -> Void
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         List {
-            ForEach(viewModel.upNextQueue) { guide in
-                AudioGuideRowView(
-                    guide: guide,
-                    isPlaying: viewModel.currentGuide?.id == guide.id,
-                    progress: viewModel.playbackProgress[guide.id],
-                    showMenu: false,
-                    onPlay: { viewModel.playGuide(guide) },
-                    onOpenPlayer: { onOpenPlayer(guide) }
-                ) {
-                    EmptyView()
+            // 1. Now Playing Section
+            if let current = viewModel.currentGuide {
+                Section(header: Text("Now Playing").font(.caption).fontWeight(.bold)) {
+                    AudioGuideRowView(
+                        guide: current,
+                        isPlaying: true,
+                        progress: viewModel.progress,
+                        showMenu: false,
+                        onPlay: { /* Already playing */ },
+                        onOpenPlayer: { onOpenPlayer(current) }
+                    ) { EmptyView() }
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(BrandTheme.palette(for: colorScheme).surface)
+                            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    )
                 }
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            }
-            .onMove { source, destination in
-                viewModel.reorderQueue(from: source, to: destination)
             }
 
-            if viewModel.upNextQueue.isEmpty {
+            // 2. Up Next Queue
+            Section(header: Text("Up Next").font(.caption).fontWeight(.bold)) {
+                ForEach(viewModel.upNextQueue) { guide in
+                    AudioGuideRowView(
+                        guide: guide,
+                        isPlaying: false,
+                        progress: viewModel.playbackProgress[guide.id],
+                        showMenu: false,
+                        onPlay: { viewModel.playGuide(guide) },
+                        onOpenPlayer: { onOpenPlayer(guide) }
+                    ) { EmptyView() }
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+                .onMove { source, destination in
+                    viewModel.reorderQueue(from: source, to: destination)
+                }
+            }
+
+            if viewModel.upNextQueue.isEmpty && viewModel.currentGuide == nil {
                 Text("Nothing queued — pick from Discover")
                     .frame(maxWidth: .infinity, alignment: .center)
                     .foregroundColor(.secondary)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .padding(.top, 40)
+            }
+
+            // 3. Just Played (History)
+            if !viewModel.playedHistory.isEmpty {
+                Section(header: Text("Just Played").font(.caption).fontWeight(.bold)) {
+                    ForEach(viewModel.playedHistory.prefix(viewModel.historyLimit)) { guide in
+                        AudioGuideRowView(
+                            guide: guide,
+                            isPlaying: false,
+                            progress: viewModel.playbackProgress[guide.id],
+                            showMenu: false,
+                            onPlay: { viewModel.playGuide(guide) },
+                            onOpenPlayer: { onOpenPlayer(guide) }
+                        ) {
+                            Button {
+                                viewModel.playNextInQueue(guide)
+                            } label: {
+                                Label("Play Next", systemImage: "text.insert")
+                            }
+                            
+                            Button {
+                                viewModel.addToQueue(guide)
+                            } label: {
+                                Label("Add to End", systemImage: "text.append")
+                            }
+                        }
+                        .opacity(0.6) // Visually separated/faded
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            Button {
+                                viewModel.addToQueue(guide)
+                            } label: {
+                                Label("Queue", systemImage: "text.append")
+                            }
+                            .tint(BrandColors.logo)
+                        }
+                    }
+                    
+                    if viewModel.historyLimit < viewModel.playedHistory.count {
+                        Button(action: {
+                            withAnimation {
+                                viewModel.loadMoreHistory()
+                            }
+                        }) {
+                            Text(viewModel.historyLimit == 3 ? "View History" : "View More")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.blue)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 8)
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                }
             }
             
             Color.clear
@@ -329,41 +425,45 @@ struct DiscoverListView: View {
 
     var body: some View {
         List {
-            ForEach(viewModel.filteredDiscoverList) { guide in
-                AudioGuideRowView(
-                    guide: guide,
-                    isPlaying: viewModel.currentGuide?.id == guide.id,
-                    progress: nil,
-                    isRecentlyQueued: viewModel.recentlyQueuedGuideId == guide.id,
-                    onPlay: { viewModel.playGuide(guide) },
-                    onOpenPlayer: { onOpenPlayer(guide) },
-                    onCreate: { viewModel.requestCreation(for: guide) }
-                ) {
-                    if guide.status == .ready {
-                        Button {
-                            viewModel.playNextInQueue(guide)
-                        } label: {
-                            Label("Play Next", systemImage: "text.insert")
+            ForEach(viewModel.groupedDiscoverList, id: \.0) { sectionTitle, guides in
+                Section(header: Text(sectionTitle).font(.caption).fontWeight(.bold)) {
+                    ForEach(guides) { guide in
+                        AudioGuideRowView(
+                            guide: guide,
+                            isPlaying: viewModel.currentGuide?.id == guide.id,
+                            progress: nil,
+                            isRecentlyQueued: viewModel.recentlyQueuedGuideId == guide.id,
+                            onPlay: { viewModel.playGuide(guide) },
+                            onOpenPlayer: { onOpenPlayer(guide) },
+                            onCreate: { viewModel.requestCreation(for: guide) }
+                        ) {
+                            if guide.status == .ready {
+                                Button {
+                                    viewModel.playNextInQueue(guide)
+                                } label: {
+                                    Label("Play Next", systemImage: "text.insert")
+                                }
+                                
+                                Button {
+                                    viewModel.addToQueue(guide)
+                                } label: {
+                                    Label("Add to End", systemImage: "text.append")
+                                }
+                            }
                         }
-                        
-                        Button {
-                            viewModel.addToQueue(guide)
-                        } label: {
-                            Label("Add to End", systemImage: "text.append")
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            if guide.status == .ready {
+                                Button {
+                                    viewModel.addToQueue(guide)
+                                } label: {
+                                    Label("Queue", systemImage: "text.append")
+                                }
+                                .tint(BrandColors.logo)
+                            }
                         }
-                    }
-                }
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .swipeActions(edge: .trailing) {
-                    if guide.status == .ready {
-                        Button {
-                            viewModel.addToQueue(guide)
-                        } label: {
-                            Label("Queue", systemImage: "text.append")
-                        }
-                        .tint(BrandColors.logo)
                     }
                 }
             }
@@ -446,6 +546,40 @@ struct CustomAlertView: View {
             .frame(width: 270)
         }
         .zIndex(999)
+    }
+}
+
+struct HistoryView: View {
+    @ObservedObject var viewModel: AudioGuidesViewModel
+    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(viewModel.playedHistory) { guide in
+                    AudioGuideRowView(
+                        guide: guide,
+                        isPlaying: viewModel.currentGuide?.id == guide.id,
+                        progress: viewModel.playbackProgress[guide.id],
+                        showMenu: false,
+                        onPlay: { viewModel.playGuide(guide) },
+                        onOpenPlayer: { 
+                             viewModel.playGuide(guide)
+                             presentationMode.wrappedValue.dismiss()
+                        }
+                    ) { EmptyView() }
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("History")
+            .navigationBarItems(trailing: Button("Done") {
+                presentationMode.wrappedValue.dismiss()
+            })
+        }
     }
 }
 

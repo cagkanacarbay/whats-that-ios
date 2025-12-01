@@ -8,10 +8,19 @@ class AudioGuidesViewModel: ObservableObject {
     @Published var autoplayEnabled: Bool = false
     @Published var playbackSpeed: Double = 1.0
     
-    @Published var selectedList: AudioGuideListType = .upNext
+    @Published var selectedList: AudioGuideListType = .upNext {
+        didSet {
+            if selectedList != .upNext {
+                historyLimit = 3
+            }
+        }
+    }
     
     @Published var upNextQueue: [AudioGuide] = []
     @Published var discoverList: [AudioGuide] = []
+    @Published var playedHistory: [AudioGuide] = []
+    @Published var showHistory: Bool = false
+    @Published var historyLimit: Int = 3
     
     // Persisted progress for each guide (0.0 to 1.0)
     @Published var playbackProgress: [UUID: Double] = [:]
@@ -41,28 +50,99 @@ class AudioGuidesViewModel: ObservableObject {
         }
     }
     
+    var groupedDiscoverList: [(String, [AudioGuide])] {
+        let grouped = Dictionary(grouping: filteredDiscoverList) { guide -> String in
+            if Calendar.current.isDateInToday(guide.date) {
+                return "Today"
+            } else if Calendar.current.isDateInYesterday(guide.date) {
+                return "Yesterday"
+            } else {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .none
+                return formatter.string(from: guide.date)
+            }
+        }
+        
+        // Sort keys (Dates) descending. We need a way to sort the keys.
+        // Since the keys are strings now, sorting by string might be wrong for dates other than Today/Yesterday.
+        // Better to group by Date (stripped of time) then map to String.
+        
+        let groupedByDate = Dictionary(grouping: filteredDiscoverList) { guide -> Date in
+            return Calendar.current.startOfDay(for: guide.date)
+        }
+        
+        let sortedDates = groupedByDate.keys.sorted(by: >)
+        
+        return sortedDates.map { date in
+            let title: String
+            if Calendar.current.isDateInToday(date) {
+                title = "Today"
+            } else if Calendar.current.isDateInYesterday(date) {
+                title = "Yesterday"
+            } else {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .none
+                title = formatter.string(from: date)
+            }
+            return (title, groupedByDate[date] ?? [])
+        }
+    }
+    
+    func loadMoreHistory() {
+        historyLimit += 10
+    }
+    
+    func resetHistoryLimit() {
+        historyLimit = 3
+    }
+    
     func setupMockData() {
-        currentGuide = AudioGuide(title: "Architectural History of the Colosseum", duration: 425, image: "post1", isAuto: false)
+        let now = Date()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)!
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: now)!
+        
+        currentGuide = AudioGuide(title: "Architectural History of the Colosseum", duration: 425, image: "post1", isAuto: false, date: now)
         
         let upNext = [
-            AudioGuide(title: "Roman Forum Highlights", duration: 180, image: "post2", isAuto: true),
-            AudioGuide(title: "Palatine Hill Myths", duration: 320, image: "post3", isAuto: false),
-            AudioGuide(title: "The Pantheon's Dome", duration: 245, image: "post4", isAuto: false),
+            AudioGuide(title: "Roman Forum Highlights", duration: 180, image: "post2", isAuto: true, date: now),
+            AudioGuide(title: "Palatine Hill Myths", duration: 320, image: "post3", isAuto: false, date: now),
+            AudioGuide(title: "The Pantheon's Dome", duration: 245, image: "post4", isAuto: false, date: now),
             // Dummy generating item
-            AudioGuide(title: "Circus Maximus History", duration: 0, image: "post1", isAuto: false, status: .generating)
+            AudioGuide(title: "Circus Maximus History", duration: 0, image: "post1", isAuto: false, status: .generating, date: now)
         ]
         upNextQueue = upNext
+
+        playedHistory = [
+            AudioGuide(title: "Ancient Roman Roads", duration: 200, image: "post4", isAuto: false, date: yesterday),
+            AudioGuide(title: "Trajan's Column", duration: 150, image: "post3", isAuto: true, date: yesterday),
+            AudioGuide(title: "Baths of Caracalla", duration: 350, image: "post2", isAuto: false, date: yesterday),
+            AudioGuide(title: "Appian Way", duration: 400, image: "post1", isAuto: false, date: twoDaysAgo),
+            // Adding more history items for pagination testing
+            AudioGuide(title: "Circus Maximus", duration: 300, image: "post2", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Capitoline Museums", duration: 450, image: "post3", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "St. Peter's Basilica", duration: 600, image: "post4", isAuto: true, date: twoDaysAgo),
+            AudioGuide(title: "Sistine Chapel", duration: 500, image: "post1", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Piazza del Popolo", duration: 250, image: "post2", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Villa d'Este", duration: 400, image: "post3", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Hadrian's Villa", duration: 350, image: "post4", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Ostia Antica", duration: 550, image: "post1", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Catacombs of Callixtus", duration: 280, image: "post2", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Baths of Diocletian", duration: 320, image: "post3", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Palazzo Barberini", duration: 290, image: "post4", isAuto: false, date: twoDaysAgo)
+        ]
         
         discoverList = [
-            AudioGuide(title: "Vatican City Secrets", duration: 600, image: "post2", isAuto: false),
-            AudioGuide(title: "Trevi Fountain Legends", duration: 150, image: "post3", isAuto: false),
-            AudioGuide(title: "Spanish Steps Guide", duration: 200, image: "post4", isAuto: false),
-            AudioGuide(title: "Castle of the Holy Angel", duration: 400, image: "post1", isAuto: false),
-            AudioGuide(title: "Piazza Navona Art", duration: 300, image: "post2", isAuto: false),
-            AudioGuide(title: "Villa Borghese Gardens", duration: 500, image: "post3", isAuto: false),
+            AudioGuide(title: "Vatican City Secrets", duration: 600, image: "post2", isAuto: false, date: now),
+            AudioGuide(title: "Trevi Fountain Legends", duration: 150, image: "post3", isAuto: false, date: now),
+            AudioGuide(title: "Spanish Steps Guide", duration: 200, image: "post4", isAuto: false, date: yesterday),
+            AudioGuide(title: "Castle of the Holy Angel", duration: 400, image: "post1", isAuto: false, date: yesterday),
+            AudioGuide(title: "Piazza Navona Art", duration: 300, image: "post2", isAuto: false, date: yesterday),
+            AudioGuide(title: "Villa Borghese Gardens", duration: 500, image: "post3", isAuto: false, date: twoDaysAgo),
             // New states
-            AudioGuide(title: "Pantheon Exterior", duration: 0, image: "post1", isAuto: false, status: .empty),
-            AudioGuide(title: "Colosseum Underground", duration: 0, image: "post2", isAuto: false, status: .failed)
+            AudioGuide(title: "Pantheon Exterior", duration: 0, image: "post1", isAuto: false, status: .empty, date: twoDaysAgo),
+            AudioGuide(title: "Colosseum Underground", duration: 0, image: "post2", isAuto: false, status: .failed, date: twoDaysAgo)
         ]
         
         // Mock some progress
@@ -144,7 +224,8 @@ class AudioGuidesViewModel: ObservableObject {
                         duration: Double.random(in: 120...600),
                         image: updatedGuide.image,
                         isAuto: true,
-                        status: .ready
+                        status: .ready,
+                        date: updatedGuide.date
                     )
                     self.discoverList[currentIndex] = updatedGuide
                     
@@ -203,13 +284,22 @@ class AudioGuidesViewModel: ObservableObject {
     func playGuide(_ guide: AudioGuide) {
         guard guide.status == .ready else { return }
         
-        // Save progress of currently playing guide
+        // Save progress of currently playing guide and move to history
         if let current = currentGuide {
             playbackProgress[current.id] = progress
+            // Avoid duplicates at the top of history if re-playing immediately
+            if playedHistory.first?.id != current.id {
+                playedHistory.insert(current, at: 0)
+            }
         }
         
         currentGuide = guide
         playbackState = .playing
+        
+        // Remove from queue if present
+        if let index = upNextQueue.firstIndex(where: { $0.id == guide.id }) {
+            upNextQueue.remove(at: index)
+        }
         
         // Restore progress or start from 0
         progress = playbackProgress[guide.id] ?? 0.0

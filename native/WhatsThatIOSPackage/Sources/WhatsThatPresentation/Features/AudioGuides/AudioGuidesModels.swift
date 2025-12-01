@@ -14,6 +14,7 @@ struct AudioGuide: Identifiable, Equatable {
     let image: String // Placeholder image name
     let isAuto: Bool
     var status: AudioGuideStatus = .ready
+    var date: Date = Date()
     
     var durationString: String {
         let minutes = Int(duration) / 60

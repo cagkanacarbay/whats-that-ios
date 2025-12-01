@@ -55,7 +55,7 @@ struct MiniPlayerView: View {
                         }
                         
                         // Prev Track
-                        Button(action: { viewModel.playPrevious() }) {
+                        Button(action: { viewModel.handleBackButtonTap() }) {
                             Image(systemName: "backward.end.fill")
                                 .font(.system(size: 20))
                                 .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)

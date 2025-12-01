@@ -32,6 +32,27 @@ struct AudioGuidesPageView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(1)
             }
+            
+            if viewModel.showCreateAlert {
+                CustomAlertView(
+                    title: "Generate an audio guide?",
+                    message: "The audio guide takes one credit.\nYou currently have \(viewModel.userCredits) credits.",
+                    onCancel: {
+                        withAnimation {
+                            viewModel.showCreateAlert = false
+                            viewModel.guideForAlert = nil
+                        }
+                    },
+                    onConfirm: {
+                        withAnimation {
+                            viewModel.confirmCreation()
+                            viewModel.showCreateAlert = false
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(2)
+            }
         }
         .animation(.easeInOut(duration: transitionDuration), value: mode)
     }
@@ -66,32 +87,83 @@ private extension AudioGuidesPageView {
         GeometryReader { proxy in
             let topInset = proxy.safeAreaInsets.top
             let bottomInset = proxy.safeAreaInsets.bottom
+            let dragGesture = DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    overlayDragOffset = max(0, value.translation.height)
+                }
+                .onEnded { value in
+                    handleOverlayDragEnd(translation: value.translation)
+                }
 
             VStack(spacing: 0) {
-                HStack {
-                    Button(action: { exitListMode(reason: "down arrow") }) {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
-                            .padding(8)
-                            .background(BrandTheme.palette(for: colorScheme).surface.opacity(0.9))
-                            .clipShape(Circle())
+                VStack(spacing: 0) {
+                    HStack {
+                        Button(action: { exitListMode(reason: "down arrow") }) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                                .padding(8)
+                                .background(BrandTheme.palette(for: colorScheme).surface.opacity(0.9))
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Close list")
+                        .padding(.leading, 4)
+
+                        Spacer()
+                        
+                        // Top Toggles
+                        if viewModel.selectedList == .upNext {
+                            HStack(spacing: 8) {
+                                Text("Autoplay")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                                Toggle("", isOn: $viewModel.autoplayEnabled)
+                                    .labelsHidden()
+                                    .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
+                            }
+                            .padding(.trailing, 16)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text("Show discoveries without audio")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                                    .lineLimit(1)
+                                Toggle("", isOn: $viewModel.showWithoutAudioGuide)
+                                    .labelsHidden()
+                                    .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
+                            }
+                            .padding(.trailing, 16)
+                        }
                     }
-                    .accessibilityLabel("Close list")
+                    .padding(.top, topInset + 12)
+                    .padding(.horizontal, 0)
 
-                    Spacer()
+                    toggleBar(enterListOnTap: false, showSelection: true)
+                        .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace, isSource: mode == .list)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8)
                 }
-                .padding(.top, topInset + 12)
-                .padding(.horizontal, 0)
+                .gesture(dragGesture)
 
-                toggleBar(enterListOnTap: false, showSelection: true)
-                    .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace, isSource: mode == .list)
-                    .padding(.top, 4)
-                    .padding(.bottom, 8)
-
-                ScrollView(showsIndicators: true) {
-                    listContent
-                        .padding(.bottom, bottomInset + miniPlayerHeight + 16)
+                // Content area - specific list handles scrolling
+                ZStack {
+                    if viewModel.selectedList == .upNext {
+                        UpNextListView(
+                            viewModel: viewModel,
+                            bottomPadding: bottomInset + miniPlayerHeight + 16
+                        ) { guide in
+                            handleOpenPlayer(for: guide)
+                        }
+                    } else {
+                        DiscoverListView(
+                            viewModel: viewModel,
+                            bottomPadding: bottomInset + miniPlayerHeight + 16
+                        ) { guide in
+                            handleOpenPlayer(for: guide)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
 
@@ -107,35 +179,6 @@ private extension AudioGuidesPageView {
             .ignoresSafeArea()
             .offset(y: overlayDragOffset)
             .animation(.easeInOut(duration: transitionDuration), value: overlayDragOffset)
-            .gesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        overlayDragOffset = max(0, value.translation.height)
-                    }
-                    .onEnded { value in
-                        handleOverlayDragEnd(translation: value.translation)
-                    }
-            )
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        handleHorizontalSwipe(translation: value.translation)
-                    }
-            )
-        }
-    }
-
-    var listContent: some View {
-        Group {
-            if viewModel.selectedList == .upNext {
-                UpNextListView(viewModel: viewModel) { guide in
-                    handleOpenPlayer(for: guide)
-                }
-            } else {
-                DiscoverListView(viewModel: viewModel) { guide in
-                    handleOpenPlayer(for: guide)
-                }
-            }
         }
     }
 
@@ -163,22 +206,6 @@ private extension AudioGuidesPageView {
         withAnimation(.easeInOut(duration: transitionDuration)) {
             mode = .fullPage
             overlayDragOffset = 0
-        }
-    }
-
-    func handleHorizontalSwipe(translation: CGSize) {
-        let horizontal = translation.width
-        let vertical = translation.height
-
-        // Only treat as a tab swipe if the gesture is predominantly horizontal (at least 1.5x the vertical movement) and clears the threshold.
-        guard abs(horizontal) > abs(vertical) * 1.5, abs(horizontal) > 50 else { return }
-
-        withAnimation {
-            if horizontal < 0 {
-                viewModel.selectedList = .discover
-            } else {
-                viewModel.selectedList = .upNext
-            }
         }
     }
 
@@ -250,45 +277,175 @@ struct ToggleBarView: View {
 
 struct UpNextListView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
+    var bottomPadding: CGFloat = 0
     var onOpenPlayer: (AudioGuide) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        List {
             ForEach(viewModel.upNextQueue) { guide in
                 AudioGuideRowView(
                     guide: guide,
                     isPlaying: viewModel.currentGuide?.id == guide.id,
+                    progress: viewModel.playbackProgress[guide.id],
+                    showMenu: false,
                     onPlay: { viewModel.playGuide(guide) },
                     onOpenPlayer: { onOpenPlayer(guide) }
-                )
-                Divider().padding(.horizontal, 16)
+                ) {
+                    EmptyView()
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+            .onMove { source, destination in
+                viewModel.reorderQueue(from: source, to: destination)
             }
 
             if viewModel.upNextQueue.isEmpty {
                 Text("Nothing queued — pick from Discover")
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .foregroundColor(.secondary)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                     .padding(.top, 40)
             }
+            
+            Color.clear
+                .frame(height: bottomPadding)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        .environment(\.editMode, .constant(.active))
     }
 }
 
 struct DiscoverListView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
+    var bottomPadding: CGFloat = 0
     var onOpenPlayer: (AudioGuide) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(viewModel.discoverList) { guide in
+        List {
+            ForEach(viewModel.filteredDiscoverList) { guide in
                 AudioGuideRowView(
                     guide: guide,
                     isPlaying: viewModel.currentGuide?.id == guide.id,
+                    progress: nil,
+                    isRecentlyQueued: viewModel.recentlyQueuedGuideId == guide.id,
                     onPlay: { viewModel.playGuide(guide) },
-                    onOpenPlayer: { onOpenPlayer(guide) }
-                )
-                Divider().padding(.horizontal, 16)
+                    onOpenPlayer: { onOpenPlayer(guide) },
+                    onCreate: { viewModel.requestCreation(for: guide) }
+                ) {
+                    if guide.status == .ready {
+                        Button {
+                            viewModel.playNextInQueue(guide)
+                        } label: {
+                            Label("Play Next", systemImage: "text.insert")
+                        }
+                        
+                        Button {
+                            viewModel.addToQueue(guide)
+                        } label: {
+                            Label("Add to End", systemImage: "text.append")
+                        }
+                    }
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .swipeActions(edge: .trailing) {
+                    if guide.status == .ready {
+                        Button {
+                            viewModel.addToQueue(guide)
+                        } label: {
+                            Label("Queue", systemImage: "text.append")
+                        }
+                        .tint(BrandColors.logo)
+                    }
+                }
             }
+            
+            Color.clear
+                .frame(height: bottomPadding)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+    }
+}
+
+struct CustomAlertView: View {
+    let title: String
+    let message: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .edgesIgnoringSafeArea(.all)
+                .onTapGesture { onCancel() }
+            
+            VStack(spacing: 0) {
+                VStack(spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                    
+                    // User-requested separator after header
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 0.5)
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)
+                    
+                    Text(message)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                }
+                .padding(16)
+                
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
+                HStack(spacing: 0) {
+                    Button(action: onCancel) {
+                        Text("Cancel")
+                            .fontWeight(.regular)
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
+                    }
+                    
+                    Divider()
+                        .frame(width: 0.5)
+                        .background(Color.gray.opacity(0.3))
+                    
+                    Button(action: onConfirm) {
+                        Text("Create")
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
+                    }
+                }
+                .frame(height: 44)
+            }
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .frame(width: 270)
+        }
+        .zIndex(999)
     }
 }
 

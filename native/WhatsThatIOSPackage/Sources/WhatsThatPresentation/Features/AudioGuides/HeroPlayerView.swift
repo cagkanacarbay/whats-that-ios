@@ -3,7 +3,6 @@ import WhatsThatShared
 
 struct HeroPlayerView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
-    @State private var showAutoplayInfo = false
     @State private var selectedMode = "Audio"
     
     @Environment(\.colorScheme) var colorScheme
@@ -117,7 +116,7 @@ struct HeroPlayerView: View {
             // Controls
             HStack(spacing: 24) {
                 // Prev
-                Button(action: { viewModel.playPrevious() }) {
+                Button(action: { viewModel.handleBackButtonTap() }) {
                     Image(systemName: "backward.end.fill")
                         .font(.system(size: 24))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
@@ -156,26 +155,7 @@ struct HeroPlayerView: View {
             
             // Autoplay and Speed Control Row
             HStack {
-                // Autoplay Toggle (Left)
-                HStack(spacing: 8) {
-                    Toggle("", isOn: $viewModel.autoplayEnabled)
-                        .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
-                    
-                    Text("Autoplay next discovery")
-                        .font(.subheadline)
-                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                    
-                    Button(action: { showAutoplayInfo = true }) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                    }
-                }
-                
-                Spacer()
-                
-                // Speed Control (Right)
+                // Speed Control (Left)
                 VStack(spacing: 2) {
                     Menu {
                         ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
@@ -209,13 +189,21 @@ struct HeroPlayerView: View {
                         .font(.caption2)
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 }
+                
+                Spacer()
+                
+                // Autoplay Toggle (Right)
+                HStack(spacing: 8) {
+                    Text("Autoplay")
+                        .font(.subheadline)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                    
+                    Toggle("", isOn: $viewModel.autoplayEnabled)
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
+                }
             }
             .padding(.horizontal, 16) // Ensure it doesn't touch the edges
-            .alert("Autoplay", isPresented: $showAutoplayInfo) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("It will play the next made discovery unless there is something else in the queue.")
-            }
         }
     }
 }

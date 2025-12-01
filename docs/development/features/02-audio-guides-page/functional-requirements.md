@@ -1,70 +1,114 @@
 # Audio Guides – Functional Requirements (Working Draft)
 
-Status legend: ✅ locked, ⏳ open for discussion, 🔍 to verify against existing voiceover system.
+Status legend: [ ] not implemented, [~] partial, [x] implemented (as of current mock UI in `native/WhatsThatIOSPackage/Sources/WhatsThatPresentation/Features/AudioGuides/`).
+UI-only items are called out explicitly; anything not wired to real playback/generation/storage should be read as visual/demo behavior only.
 
-## Audio Player + Mini Player
-- ✅ Replace existing voiceover playback controller; same global availability (wherever current player is shown). Tapping mini from any screen opens the full Audio Guides page; back returns to prior screen.
-- ✅ Controls: play/pause, next/prev in queue, seek via ±5s buttons (no scrubbing required). Holding the ±5s buttons should repeat/accelerate seek jumps.
-- ✅ Playback speed presets: 0.75x, 1.5x, 2x. No sleep timer.
-- ✅ States tracked: ready / playing / paused / stopped; maintain position and duration for display.
-- ✅ Mini dismiss: dismiss stops playback if active; hidden when stopped.
-- ✅ State sync: hero and mini share the same item/progress; collapse/expand does not interrupt playback.
-- ✅ Per-guide resume: track last-played position per discovery; surface progress in My Discoveries rows and history items in Up Next.
+## Audio Player (Hero)
+- [~] Controls: play/pause, next/prev, seek via ±5s; hold to repeat/accelerate seek.
+  - [x] UI buttons for play/pause, next/prev, ±5s in hero (updates mock progress).
+  - [ ] Actual audio playback engine; long-press seek or accelerated seeking.
+- [~] Playback speed presets: 0.75x, 1.25x, 1.5x, 2x (no sleep timer).
+  - [x] Speed menu UI present in hero.
+  - [ ] Speed affects playback (actual audio engine rate changes).
+  - [ ] Speed selection is stored and restored across sessions/plays.
+- [~] States tracked: ready / playing / paused / stopped with position/duration display.
+  - [x] UI shows play/pause state and position/duration.
+  - [ ] Ready/stopped surfaced in UI.
+  - [ ] Real playback state tracking from audio engine.
+- [~] Per-guide resume: persist last-played position per discovery (surface in lists/history).
+  - [x] In-memory per-guide progress shown for queued items in the mock.
+  - [ ] Progress persisted per discovery (stored and restored across sessions).
+  - [ ] Resume works with real audio playback and surfaces in history.
+
+## Mini Player (Global replacement)
+- [ ] Replace existing voiceover playback controller globally; mini opens Audio Guides page from anywhere (back returns). (Only lives within the Audio Guides tab today.)
+- [ ] Mini visible on all screens where legacy player appears; tap opens Audio Guides page; back returns. (No global mini or deep link into the page.)
+- [ ] Mini dismiss gesture: stops playback if active; hides when stopped.
+- [~] Hero and mini stay in sync; collapse/expand doesn’t interrupt playback.
+  - [x] UI state syncs within Audio Guides page via shared view model.
+  - [ ] Real playback sync with shared audio engine across views/screens.
+
+## List View (common shell for Up Next & My Discoveries)
+- [x] Toggle bar switches between Up Next and My Discoveries. (Tap only.)
+- [ ] Gesture-based tab swipe between Up Next and My Discoveries. (Not implemented.)
+- [x] Hero↔list collapse/expand; mini sticky while browsing within Audio Guides page. (Works in-page; no global mini/dismiss.)
+
+## Up Next
+- [ ] Single list combining history, current, and upcoming.
+- [ ] History UX: fresh design for presentation/interaction.
+- [~] Actions: tap history makes current; removing current advances; removing upcoming reflows.
+  - [x] Tap-to-play works for Up Next items in the mock list.
+  - [ ] History/removal/advance behaviors implemented with real queue.
+- [~] Insertion rules: “Play next” inserts at top; “Add to end” appends; auto items append after manual.
+  - [x] Play Next/Add UI via menu and swipe appends to mock queue.
+  - [ ] Enforced ordering rules for auto vs manual; aligns with real queue.
+- [~] Auto-play toggle: advance to next ready item; skip non-ready and continue.
+  - [x] Toggle UI present.
+  - [ ] Functional auto-advance behavior wired to playback/queue.
+- [ ] Persistence: queue ordering, history, current item, progress, auto-play toggle.
+- [x] Up Next reordering: drag-to-reorder allowed in Up Next. (Works in the mock list; no persistence.)
+- [ ] Queued items without guides trigger generation: any item queued/Play Next with no guide calls edge function to generate.
+- [~] Queue visuals: distinct current; clear separation of history vs upcoming.
+  - [x] Playing highlight in list.
+  - [ ] History section/visual separation.
+- [ ] Unified Up Next layout: `Now Playing` row pinned at top with “Now Playing” chip; `Up Next` section immediately below (shows full queue, short slice + expand when long); `Last Played` section at bottom showing up to 3 most-recent items with an “Expand history” affordance; clear visual separation between the three.
+- [ ] Swipe-to-remove on Up Next rows (including upcoming/current items) with trash/dumpster affordance and remove-on-release behavior; tap-to-play remains unchanged. Removal should mirror the lightweight swipe feedback used for queuing (haptic + disappearance).
+
+## My Discoveries
+- [ ] Mirrors existing My Discoveries content/ordering (real data, not mocks).
+- [~] Row states: ready / generating (ghosted + spinner) / absent (ghosted + “Create audio guide”) / failed (warning tint + retry overlay) / playing indicator.
+  - [x] UI shows ready/generating/empty/failed/playing on mock data.
+  - [ ] States driven by backend; absent copy/affordance polish.
+- [~] Ready action: tap plays in place without tab switch (works in-page; needs full integration).
+  - [x] Single tap plays via mock player; double tap opens hero.
+  - [ ] Hooks into real playback and cross-tab context.
+- [~] Absent action: credit modal (cost + current balance) with Cancel/OK; OK triggers generation via edge function.
+  - [x] Alert shows credits and starts simulated generation.
+  - [ ] Real edge call + credit handling.
+- [~] Failed action: retry overlay/icon triggers regeneration.
+  - [x] Failed badge + tap retries simulated generation.
+  - [ ] Real regeneration call and error handling.
+- [~] Light swipe adds to queue tail with feedback.
+  - [x] Trailing swipe queues item in mock list.
+  - [ ] Haptics/feedback + real queue integration.
+- [x] Queue controls: slide row or use 3-dot menu to add to end or play next (no reordering). (Menu + swipe route to the mock queue.)
+- [x] No search/filters in this list.
+- [ ] Credit balance updates from edge function response. (Only local decrement in the mock flow.)
+- [~] My Discoveries actions UI: credit modal, retry overlay, swipe to queue tail, play-in-place. (All UI present; actions operate on mock data only.)
+- [~] My Discoveries states visuals: ready/generating/absent/failed/playing. (UI covers these on mock data; not driven by live backend.)
+- [ ] Status/queue chips in My Discoveries: keep current readiness styling (Ready/Generating/Failed/Empty) and add chips for queue state—`Playing` chip when active, `Queued` chip when the item is in Up Next (prevent duplicate queue action when already queued).
 
 ## Audio Guide Storage & Caching
-- 🔍 Reuse existing voiceover caching layer for Audio Guides; verify parity with new needs.
-- ✅ Offline: play from cache when available; if not cached and offline, show “Download to Play” and block playback.
-- ✅ Streaming fallback when online if not cached.
-- ✅ Prefetch: any item placed in the queue (manual insert or auto) is prefetched in the background. Track in-flight fetches to avoid duplicate downloads, especially for just-generated items.
-- ✅ Generation statuses: absent (not generated), generating, failed, ready.
-- ✅ Retention/cleanup: reuse existing voiceover cache eviction as-is (no new policy).
-
-## Up Next Queue (with History)
-- ✅ Single list combining history, current, and upcoming.
-- ⏳ Revisit history UX from scratch: how to present and interact with history vs upcoming (prior option set discarded).
-- ✅ Actions: tap history item makes it current; removing current advances to next; removing upcoming reflows order.
-- ✅ Insertion rules: “Play next” inserts at top of upcoming; “Add to end” appends. Auto-generated items append after manual ones.
-- ✅ Auto-play toggle: when on, advance to next ready item automatically. Skip non-ready items and continue; log/indicate skips.
-- ✅ Persistence: queue ordering, history, current item, progress, auto-play toggle persist across app relaunch.
-
-## My Discoveries List (renamed from Discover tab)
-- ✅ Mirrors existing My Discoveries content (ordering/metadata) without reordering controls.
-- ✅ Actions:
-  - Ready: tap plays in place; does **not** auto-switch tabs.
-  - Absent: tap opens modal: “Creating an audio guide costs 1 credit” + current credit balance; Cancel/OK. OK triggers generation via edge function (edge handles credit deduction).
-  - Failed: tap/overlay retry icon retries generation; transitions to generating state.
-  - Swipe (light) adds to end of queue with feedback.
-- ✅ No search/filters in this list.
-- ✅ Credit balance is updated from edge function response (no local deduction logic).
+- [ ] Reuse voiceover caching layer for Audio Guides; verify parity with needs.
+- [ ] Offline: play from cache; if not cached and offline, show “Download to Play” and block.
+- [ ] Streaming fallback when online if not cached.
+- [ ] Prefetch any queued item; track in-flight fetches to avoid duplicates.
+- [~] Generation statuses: absent / generating / failed / ready.
+  - [x] Status enum + UI badges/spinner in mock data.
+  - [ ] Wired to backend/edge responses.
+- [ ] Retention/cleanup: reuse existing voiceover cache eviction (no new policy). (No audio-guide-specific caching yet.)
 
 ## Credit & Generation Flow
-- ✅ Absent state = no guide exists in backend; displayed ghosted. Tapping prompts credit modal; generation starts on confirm.
-- ✅ No cancel of in-flight generation. Failed state uses a light warning color and retry affordance; retry returns to generating.
-- ✅ Auto-generate setting (if enabled elsewhere) can create guides as new discoveries are captured; these appear in Up Next with generating state, then ready when done.
+- [~] Absent ghosted items show credit modal; generation starts on confirm.
+  - [x] Alert + simulated generation in mock.
+  - [ ] Real credit check (balance) + edge generation call.
+- [~] No cancel of in-flight generation; failed state with retry returning to generating.
+  - [x] Mock generation toggles to failed/ready; tap retries.
+  - [ ] Real request lifecycle and error handling.
+- [ ] Auto-generate setting feeds Up Next (generating → ready) for new discoveries.
 
 ## Error Handling
-- ✅ Playback errors: surface inline and allow retry; stop playback if unrecoverable.
-- ✅ Generation failures: mark the item failed and allow retry.
-- ✅ Fetch/prefetch errors: surface inline on the item; retry available; do not block rest of queue.
-- ✅ Dismiss mini while error visible stops playback and hides mini.
+- [ ] Playback errors: inline surface + retry; stop on unrecoverable.
+- [~] Generation failures: mark item failed and allow retry.
+  - [x] Mock flow sets failed state and allows tap-to-retry.
+  - [ ] Real error surfacing + retry behavior.
+- [ ] Fetch/prefetch errors: inline per item with retry; avoid blocking rest of queue.
+- [ ] Dismiss mini while error visible stops playback and hides mini.
 
-## Navigation & Visibility
-- ✅ Mini player visible on all screens where legacy voiceover controller appears; opens Audio Guides page on tap. Swiping back returns to prior screen.
-- ✅ Audio Guides page retains hero↔mini collapse; mini sticks while browsing.
+## Data & Persistence
+- [ ] Stable discovery IDs everywhere; hydrate from store/cache; avoid transient UUIDs and duplicate fetches.
+- [ ] Persist per-discovery progress, queue state, toggle settings, cached assets. (Current model uses ephemeral UUIDs and in-memory state only.)
 
-## Data Model
-- ✅ Stable discovery IDs drive everything (My Discoveries rows, queue, cache keys). Avoid transient UUIDs. Do not re-fetch existing voiceovers already stored for a discovery; hydrate from cache/store when present.
-- ✅ Persist per-discovery progress, queue state, toggle settings, and cached assets.
-
-## Open Questions / Decisions Needed
-- History UX: how to present and interact with history vs upcoming (fresh design pass).
-- Visual separation: preferred layout for history vs current vs upcoming (chips, subheaders, dividers)?
-
-## UI Requirements
-- Hero/mini: collapse/expand pattern maintained; mini sticky while browsing; mini dismiss via gesture (not button). Dismissing while playing stops playback; when stopped, mini hides.
-- Player display: show current position and total duration; expose state (ready/playing/paused/stopped); show playback speed options (0.75x/1.5x/2x).
-- Queue visuals: current item clearly distinct; history visually separated from upcoming (design TBD in fresh pass).
-- My Discoveries states: ready (normal), generating (ghosted + spinner + “Generating…”), absent (ghosted + “Create audio guide”), failed (warning tint + retry icon overlay), playing indicator when active.
-- My Discoveries actions UI: absent tap opens credit modal (cost 1 credit + current balance, Cancel/OK); failed shows retry overlay; light swipe adds to queue tail with feedback; ready tap plays in place without tab switch.
-- Error/feedback: playback errors via inline toast/banner; generation failures visible on item with retry; fetch/prefetch errors inline per item.
-- Navigation: mini tap opens Audio Guides page; back gesture returns; gesture-based tab swipe remains (Up Next vs My Discoveries).
+## Discovery Detail Integration
+- [ ] Text/Audio pill in Discovery Detail view; selecting Audio switches to the audio side (audio player); Text returns to discovery details. (Audio/Text pill exists only inside the Audio Guides page hero; no integration with Discovery Detail.)
+- [ ] Text pill tap triggers smooth “page-flip” animation into Discovery Detail for the selected discovery, and Audio pill in Discovery Detail triggers the inverse “page-flip” back to the audio player. (Animation + navigation not implemented.)

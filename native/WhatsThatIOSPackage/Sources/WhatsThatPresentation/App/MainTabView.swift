@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import WhatsThatDomain
 import WhatsThatShared
 
@@ -29,6 +30,9 @@ struct MainTabView: View {
     @State private var summaryFallbackTask: Task<Void, Never>?
     @State private var activeOverlayTab: Tab?
     @StateObject private var playerInsetStore = VoiceoverPlayerInsetStore()
+    @State private var openFirstDetailFromAudioGuides = false
+    @State private var audioGuidesTargetDiscoveryId: Int64?
+    @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
 
     private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
@@ -79,10 +83,16 @@ struct MainTabView: View {
                     voiceoverController: voiceoverController,
                     pendingDiscoveryId: $pendingDiscoveryId,
                     pendingCreatedSummary: $pendingCreatedSummary,
+                    openFirstDetailFromAudioGuides: $openFirstDetailFromAudioGuides,
+                    audioGuidesTargetDiscoveryId: $audioGuidesTargetDiscoveryId,
+                    audioGuidesTargetDiscoverySummary: $audioGuidesTargetDiscoverySummary,
                     onSignOut: onSignOut,
                     onSettings: onSettings,
                     onQuickCamera: { selectedTab = .camera },
-                    onQuickUpload: { selectedTab = .upload }
+                    onQuickUpload: { selectedTab = .upload },
+                    onOpenAudioGuide: { discovery in
+                        handleDiscoveryAudioPillTapped(discovery)
+                    }
                 )
                 .id(feedRefreshToken)
                 .tag(Tab.discoveries)
@@ -102,7 +112,14 @@ struct MainTabView: View {
                     }
                 }
 
-                AudioGuidesPageView()
+                AudioGuidesPageView(
+                    fetchDiscoveries: {
+                        (try? await feedUseCase.loadPage(limit: 12, before: nil)) ?? []
+                    },
+                    onTextSelected: { discovery in
+                        handleAudioGuideTextSelected(discovery)
+                    }
+                )
                     .tag(Tab.audioGuides)
                     .tabItem {
                         Label("Audio Guides", systemImage: "headphones")
@@ -190,6 +207,29 @@ struct MainTabView: View {
              uploadViewModel.cancelFlow()
              activeOverlayTab = nil
         }
+    }
+
+    private func handleAudioGuideTextSelected(_ summary: DiscoverySummary?) {
+        let logger = Logger(subsystem: "WhatsThat.AudioGuides", category: "MainTab")
+
+        if let summary {
+            audioGuidesTargetDiscoveryId = summary.id
+            audioGuidesTargetDiscoverySummary = summary
+            logger.info("Text pill from Audio Guides for discovery id=\(summary.id, privacy: .public); switching to Discoveries")
+        } else {
+            audioGuidesTargetDiscoveryId = nil
+            audioGuidesTargetDiscoverySummary = nil
+            logger.info("Text pill from Audio Guides with no discovery; switching to Discoveries")
+        }
+
+        selectedTab = .discoveries
+        openFirstDetailFromAudioGuides = true
+    }
+
+    private func handleDiscoveryAudioPillTapped(_ discovery: DiscoverySummary) {
+        let logger = Logger(subsystem: "WhatsThat.AudioGuides", category: "MainTab")
+        logger.info("Audio pill from Discovery Detail for discovery id=\(discovery.id, privacy: .public); switching to Audio Guides")
+        selectedTab = .audioGuides
     }
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {

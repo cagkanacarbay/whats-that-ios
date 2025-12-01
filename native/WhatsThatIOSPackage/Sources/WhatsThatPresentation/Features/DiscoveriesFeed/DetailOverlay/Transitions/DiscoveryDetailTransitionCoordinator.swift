@@ -41,7 +41,8 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         discovery: DiscoverySummary,
         cardFrame: CGRect,
         imageURL: URL?,
-        placeholderImage: UIImage? = nil
+        placeholderImage: UIImage? = nil,
+        animated: Bool = true
     ) {
         guard canBeginPresentation(for: discovery.id) else { return }
 
@@ -75,9 +76,18 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
 
         voiceoverController.isDetailOverlayActive = true
 
-        withAnimation(heroAnimator.openAnimation()) {
-            snapshot.phase = .animatingIn
-            snapshot.progress = 1
+        // For direct replace/no-animation cases, force the overlay into the fully open state immediately.
+        let openBlock = { [weak self] in
+            guard let self else { return }
+            self.snapshot.phase = .animatingIn
+            self.snapshot.progress = 1
+        }
+        if animated {
+            withAnimation(heroAnimator.openAnimation()) {
+                openBlock()
+            }
+        } else {
+            openBlock()
         }
 
         scheduleDetailSettled(for: sessionId)
@@ -198,6 +208,10 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     }
 
     private func canBeginPresentation(for discoveryId: Int64) -> Bool {
+        // If nothing is active, always allow.
+        if !snapshot.phase.isActive {
+            return true
+        }
         guard let existingContext = snapshot.context else {
             return true
         }

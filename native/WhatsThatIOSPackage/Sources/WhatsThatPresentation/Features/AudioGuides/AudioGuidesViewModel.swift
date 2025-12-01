@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import WhatsThatDomain
 
 class AudioGuidesViewModel: ObservableObject {
     @Published var currentGuide: AudioGuide?
@@ -37,9 +38,11 @@ class AudioGuidesViewModel: ObservableObject {
     private let backDoubleTapInterval: TimeInterval = 0.4
     private let earlyPreviousWindow: TimeInterval = 1.5
     private var lastBackTapDate: Date?
+    private let fetchDiscoveries: (() async -> [DiscoverySummary])?
     
-    init() {
-        setupMockData()
+    init(fetchDiscoveries: (() async -> [DiscoverySummary])? = nil) {
+        self.fetchDiscoveries = fetchDiscoveries
+        Task { await loadDiscoveriesOrMocks() }
     }
     
     var filteredDiscoverList: [AudioGuide] {
@@ -51,25 +54,8 @@ class AudioGuidesViewModel: ObservableObject {
     }
     
     var groupedDiscoverList: [(String, [AudioGuide])] {
-        let grouped = Dictionary(grouping: filteredDiscoverList) { guide -> String in
-            if Calendar.current.isDateInToday(guide.date) {
-                return "Today"
-            } else if Calendar.current.isDateInYesterday(guide.date) {
-                return "Yesterday"
-            } else {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                return formatter.string(from: guide.date)
-            }
-        }
-        
-        // Sort keys (Dates) descending. We need a way to sort the keys.
-        // Since the keys are strings now, sorting by string might be wrong for dates other than Today/Yesterday.
-        // Better to group by Date (stripped of time) then map to String.
-        
         let groupedByDate = Dictionary(grouping: filteredDiscoverList) { guide -> Date in
-            return Calendar.current.startOfDay(for: guide.date)
+            Calendar.current.startOfDay(for: guide.date)
         }
         
         let sortedDates = groupedByDate.keys.sorted(by: >)
@@ -98,51 +84,88 @@ class AudioGuidesViewModel: ObservableObject {
         historyLimit = 3
     }
     
+    @MainActor
+    private func loadDiscoveriesOrMocks() async {
+        guard let fetchDiscoveries else {
+            setupMockData()
+            return
+        }
+        
+        let discoveries = await fetchDiscoveries()
+        if discoveries.isEmpty {
+            setupMockData()
+            return
+        }
+        
+        let placeholders = ["post1", "post2", "post3", "post4"]
+        let guides = discoveries.enumerated().map { idx, summary in
+            AudioGuide(
+                title: summary.title,
+                duration: Double(Int.random(in: 180...540)),
+                image: placeholders[idx % placeholders.count],
+                isAuto: false,
+                status: .ready,
+                date: summary.capturedAt,
+                discovery: summary
+            )
+        }
+        
+        currentGuide = guides.first
+        if guides.count > 1 {
+            upNextQueue = Array(guides.dropFirst().prefix(3))
+        } else {
+            upNextQueue = []
+        }
+        discoverList = guides
+        playedHistory = []
+        playbackProgress.removeAll()
+    }
+    
     func setupMockData() {
         let now = Date()
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)!
         let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: now)!
         
-        currentGuide = AudioGuide(title: "Architectural History of the Colosseum", duration: 425, image: "post1", isAuto: false, date: now)
+        currentGuide = AudioGuide(title: "Architectural History of the Colosseum", duration: 425, image: "post1", isAuto: false, date: now, discovery: nil)
         
         let upNext = [
-            AudioGuide(title: "Roman Forum Highlights", duration: 180, image: "post2", isAuto: true, date: now),
-            AudioGuide(title: "Palatine Hill Myths", duration: 320, image: "post3", isAuto: false, date: now),
-            AudioGuide(title: "The Pantheon's Dome", duration: 245, image: "post4", isAuto: false, date: now),
+            AudioGuide(title: "Roman Forum Highlights", duration: 180, image: "post2", isAuto: true, date: now, discovery: nil),
+            AudioGuide(title: "Palatine Hill Myths", duration: 320, image: "post3", isAuto: false, date: now, discovery: nil),
+            AudioGuide(title: "The Pantheon's Dome", duration: 245, image: "post4", isAuto: false, date: now, discovery: nil),
             // Dummy generating item
-            AudioGuide(title: "Circus Maximus History", duration: 0, image: "post1", isAuto: false, status: .generating, date: now)
+            AudioGuide(title: "Circus Maximus History", duration: 0, image: "post1", isAuto: false, status: .generating, date: now, discovery: nil)
         ]
         upNextQueue = upNext
 
         playedHistory = [
-            AudioGuide(title: "Ancient Roman Roads", duration: 200, image: "post4", isAuto: false, date: yesterday),
-            AudioGuide(title: "Trajan's Column", duration: 150, image: "post3", isAuto: true, date: yesterday),
-            AudioGuide(title: "Baths of Caracalla", duration: 350, image: "post2", isAuto: false, date: yesterday),
-            AudioGuide(title: "Appian Way", duration: 400, image: "post1", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Ancient Roman Roads", duration: 200, image: "post4", isAuto: false, date: yesterday, discovery: nil),
+            AudioGuide(title: "Trajan's Column", duration: 150, image: "post3", isAuto: true, date: yesterday, discovery: nil),
+            AudioGuide(title: "Baths of Caracalla", duration: 350, image: "post2", isAuto: false, date: yesterday, discovery: nil),
+            AudioGuide(title: "Appian Way", duration: 400, image: "post1", isAuto: false, date: twoDaysAgo, discovery: nil),
             // Adding more history items for pagination testing
-            AudioGuide(title: "Circus Maximus", duration: 300, image: "post2", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Capitoline Museums", duration: 450, image: "post3", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "St. Peter's Basilica", duration: 600, image: "post4", isAuto: true, date: twoDaysAgo),
-            AudioGuide(title: "Sistine Chapel", duration: 500, image: "post1", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Piazza del Popolo", duration: 250, image: "post2", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Villa d'Este", duration: 400, image: "post3", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Hadrian's Villa", duration: 350, image: "post4", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Ostia Antica", duration: 550, image: "post1", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Catacombs of Callixtus", duration: 280, image: "post2", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Baths of Diocletian", duration: 320, image: "post3", isAuto: false, date: twoDaysAgo),
-            AudioGuide(title: "Palazzo Barberini", duration: 290, image: "post4", isAuto: false, date: twoDaysAgo)
+            AudioGuide(title: "Circus Maximus", duration: 300, image: "post2", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Capitoline Museums", duration: 450, image: "post3", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "St. Peter's Basilica", duration: 600, image: "post4", isAuto: true, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Sistine Chapel", duration: 500, image: "post1", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Piazza del Popolo", duration: 250, image: "post2", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Villa d'Este", duration: 400, image: "post3", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Hadrian's Villa", duration: 350, image: "post4", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Ostia Antica", duration: 550, image: "post1", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Catacombs of Callixtus", duration: 280, image: "post2", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Baths of Diocletian", duration: 320, image: "post3", isAuto: false, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Palazzo Barberini", duration: 290, image: "post4", isAuto: false, date: twoDaysAgo, discovery: nil)
         ]
         
         discoverList = [
-            AudioGuide(title: "Vatican City Secrets", duration: 600, image: "post2", isAuto: false, date: now),
-            AudioGuide(title: "Trevi Fountain Legends", duration: 150, image: "post3", isAuto: false, date: now),
-            AudioGuide(title: "Spanish Steps Guide", duration: 200, image: "post4", isAuto: false, date: yesterday),
-            AudioGuide(title: "Castle of the Holy Angel", duration: 400, image: "post1", isAuto: false, date: yesterday),
-            AudioGuide(title: "Piazza Navona Art", duration: 300, image: "post2", isAuto: false, date: yesterday),
-            AudioGuide(title: "Villa Borghese Gardens", duration: 500, image: "post3", isAuto: false, date: twoDaysAgo),
+            AudioGuide(title: "Vatican City Secrets", duration: 600, image: "post2", isAuto: false, date: now, discovery: nil),
+            AudioGuide(title: "Trevi Fountain Legends", duration: 150, image: "post3", isAuto: false, date: now, discovery: nil),
+            AudioGuide(title: "Spanish Steps Guide", duration: 200, image: "post4", isAuto: false, date: yesterday, discovery: nil),
+            AudioGuide(title: "Castle of the Holy Angel", duration: 400, image: "post1", isAuto: false, date: yesterday, discovery: nil),
+            AudioGuide(title: "Piazza Navona Art", duration: 300, image: "post2", isAuto: false, date: yesterday, discovery: nil),
+            AudioGuide(title: "Villa Borghese Gardens", duration: 500, image: "post3", isAuto: false, date: twoDaysAgo, discovery: nil),
             // New states
-            AudioGuide(title: "Pantheon Exterior", duration: 0, image: "post1", isAuto: false, status: .empty, date: twoDaysAgo),
-            AudioGuide(title: "Colosseum Underground", duration: 0, image: "post2", isAuto: false, status: .failed, date: twoDaysAgo)
+            AudioGuide(title: "Pantheon Exterior", duration: 0, image: "post1", isAuto: false, status: .empty, date: twoDaysAgo, discovery: nil),
+            AudioGuide(title: "Colosseum Underground", duration: 0, image: "post2", isAuto: false, status: .failed, date: twoDaysAgo, discovery: nil)
         ]
         
         // Mock some progress
@@ -225,7 +248,8 @@ class AudioGuidesViewModel: ObservableObject {
                         image: updatedGuide.image,
                         isAuto: true,
                         status: .ready,
-                        date: updatedGuide.date
+                        date: updatedGuide.date,
+                        discovery: updatedGuide.discovery
                     )
                     self.discoverList[currentIndex] = updatedGuide
                     

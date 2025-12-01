@@ -16,6 +16,7 @@ struct DiscoveryDetailOverlayView: View {
     let isDeletingDiscovery: Bool
     let onDelete: ((DiscoverySummary) -> Void)?
     let onShowOptions: (() -> Void)?
+    let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
     let onScrollContentOffsetChanged: (CGFloat) -> Void
     @State private var scrollOffset: CGFloat = 0
     @State private var isImageSheetPresented = false
@@ -32,6 +33,7 @@ struct DiscoveryDetailOverlayView: View {
         isDeletingDiscovery: Bool,
         onDelete: ((DiscoverySummary) -> Void)?,
         onShowOptions: (() -> Void)?,
+        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil,
         onScrollContentOffsetChanged: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.snapshot = snapshot
@@ -43,6 +45,7 @@ struct DiscoveryDetailOverlayView: View {
         self.isDeletingDiscovery = isDeletingDiscovery
         self.onDelete = onDelete
         self.onShowOptions = onShowOptions
+        self.onOpenAudioGuide = onOpenAudioGuide
         self.onScrollContentOffsetChanged = onScrollContentOffsetChanged
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
     }
@@ -227,8 +230,12 @@ struct DiscoveryDetailOverlayView: View {
                         onDelete?(context.discovery)
                     },
                     onShowOptions: onShowOptions,
-                    onShowImage: { presentFullscreen(for: context) }
+                    onShowImage: { presentFullscreen(for: context) },
+                    onOpenAudioGuide: {
+                        onOpenAudioGuide?(context.discovery)
+                    }
                 )
+                .id(context.sessionId)
 
                 heroCard
                     .allowsHitTesting(!isImageSheetPresented)

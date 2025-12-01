@@ -1,17 +1,24 @@
 import SwiftUI
+import os
 import WhatsThatShared
+import WhatsThatDomain
 
 struct HeroPlayerView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
+    var onTextSelected: (DiscoverySummary?) -> Void = { _ in }
     @State private var selectedMode = "Audio"
     
     @Environment(\.colorScheme) var colorScheme
+    private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "HeroPlayerView")
     
     var body: some View {
         VStack(spacing: 24) {
             // Mode Switcher Pill
             HStack(spacing: 0) {
-                Button(action: { selectedMode = "Text" }) {
+                Button(action: {
+                    log.debug("Text pill tapped; requesting detail open")
+                    onTextSelected(viewModel.currentGuide?.discovery)
+                }) {
                     Text("Text")
                         .font(.subheadline)
                         .fontWeight(.medium)

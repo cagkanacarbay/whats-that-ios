@@ -20,6 +20,9 @@ struct DiscoveryHeaderOverlayView: View {
     var onShowOptions: (() -> Void)? = nil
     var isOptionsEnabled: Bool = true
     private let topControlsBottomPadding: CGFloat = BrandSpacing.small
+    var onOpenAudioGuide: (() -> Void)? = nil
+
+    @State private var selectedMode: String = "Text"
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -61,14 +64,26 @@ struct DiscoveryHeaderOverlayView: View {
         .frame(width: contentWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .overlay(alignment: .top) {
-            if showTopControls {
-                topControls
-                    .frame(maxWidth: contentWidth ?? .infinity)
-                    .padding(.horizontal, BrandSpacing.large)
-                    .padding(.top, resolvedTopPadding(from: topControlsSafeAreaInsets))
-                    .padding(.bottom, topControlsBottomPadding)
-                    .frame(maxWidth: .infinity)
-                    .ignoresSafeArea()
+            if showTopControls || onOpenAudioGuide != nil {
+                VStack(spacing: BrandSpacing.small) {
+                    if showTopControls {
+                        topControls
+                    }
+
+                    if onOpenAudioGuide != nil {
+                        HStack {
+                            Spacer()
+                            modePill
+                            Spacer()
+                        }
+                    }
+                }
+                .frame(maxWidth: contentWidth ?? .infinity)
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.top, resolvedTopPadding(from: topControlsSafeAreaInsets))
+                .padding(.bottom, topControlsBottomPadding)
+                .frame(maxWidth: .infinity)
+                .ignoresSafeArea()
             }
         }
     }
@@ -114,6 +129,73 @@ struct DiscoveryHeaderOverlayView: View {
 
     private var shouldShowActionRow: Bool {
         hasActionRow && !isClosing
+    }
+
+    @ViewBuilder
+    private var modePill: some View {
+        HStack(spacing: 0) {
+            Button(action: {
+                selectedMode = "Text"
+            }) {
+                Text("Text")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .frame(width: 80, height: 32)
+                    .foregroundColor(
+                        selectedMode == "Text"
+                            ? BrandColors.logo
+                            : palette.textSecondary
+                    )
+                    .background(
+                        ZStack {
+                            if selectedMode == "Text" {
+                                Capsule()
+                                    .fill(palette.surface)
+                                    .shadow(
+                                        color: Color.black.opacity(0.1),
+                                        radius: 2,
+                                        x: 0,
+                                        y: 1
+                                    )
+                            }
+                        }
+                    )
+            }
+            .recordOverlayInteractiveRegion()
+
+            Button(action: {
+                selectedMode = "Audio"
+                onOpenAudioGuide?()
+            }) {
+                Text("Audio")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .frame(width: 80, height: 32)
+                    .foregroundColor(
+                        selectedMode == "Audio"
+                            ? BrandColors.logo
+                            : palette.textSecondary
+                    )
+                    .background(
+                        ZStack {
+                            if selectedMode == "Audio" {
+                                Capsule()
+                                    .fill(palette.surface)
+                                    .shadow(
+                                        color: Color.black.opacity(0.1),
+                                        radius: 2,
+                                        x: 0,
+                                        y: 1
+                                    )
+                            }
+                        }
+                    )
+            }
+            .recordOverlayInteractiveRegion()
+        }
+        .padding(2)
+        .background(Color.black.opacity(0.65))
+        .clipShape(Capsule())
     }
 
     @ViewBuilder

@@ -18,10 +18,14 @@ struct DiscoveriesHomeView: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var pendingDiscoveryId: Int64?
     @Binding private var pendingCreatedSummary: DiscoverySummary?
+    @Binding private var openFirstDetailFromAudioGuides: Bool
+    @Binding private var audioGuidesTargetDiscoveryId: Int64?
+    @Binding private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
     private let onQuickCamera: (() -> Void)?
     private let onQuickUpload: (() -> Void)?
+    private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
 
     @StateObject private var viewModel: DiscoveryFeedViewModel
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
@@ -36,6 +40,7 @@ struct DiscoveriesHomeView: View {
     @State private var deletingDiscoveryId: Int64?
     @State private var isDeletionInProgress = false
     @State private var deletionErrorMessage: String?
+    @State private var isDetailFromAudioGuides = false
 
     private var headerMetrics: DiscoveriesHeaderMetrics {
         DiscoveriesHeaderMetrics(
@@ -54,20 +59,28 @@ struct DiscoveriesHomeView: View {
         voiceoverController: VoiceoverPlaybackController,
         pendingDiscoveryId: Binding<Int64?>,
         pendingCreatedSummary: Binding<DiscoverySummary?>,
+        openFirstDetailFromAudioGuides: Binding<Bool>,
+        audioGuidesTargetDiscoveryId: Binding<Int64?>,
+        audioGuidesTargetDiscoverySummary: Binding<DiscoverySummary?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
         onQuickCamera: (() -> Void)? = nil,
-        onQuickUpload: (() -> Void)? = nil
+        onQuickUpload: (() -> Void)? = nil,
+        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil
     ) {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
         self._voiceoverController = ObservedObject(initialValue: voiceoverController)
         self._pendingDiscoveryId = pendingDiscoveryId
         self._pendingCreatedSummary = pendingCreatedSummary
+        self._openFirstDetailFromAudioGuides = openFirstDetailFromAudioGuides
+        self._audioGuidesTargetDiscoveryId = audioGuidesTargetDiscoveryId
+        self._audioGuidesTargetDiscoverySummary = audioGuidesTargetDiscoverySummary
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         self.onQuickCamera = onQuickCamera
         self.onQuickUpload = onQuickUpload
+        self.onOpenAudioGuide = onOpenAudioGuide
         _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
         _detailCoordinator = StateObject(
             wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
@@ -128,6 +141,7 @@ struct DiscoveriesHomeView: View {
                 .task {
                     await viewModel.loadInitialIfNeeded()
                     presentPendingDiscoveryIfNeeded()
+                    resolveOpenFromAudioGuidesIfNeeded()
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
@@ -136,9 +150,16 @@ struct DiscoveriesHomeView: View {
                 }
                 .onChange(of: viewModel.discoveries) {
                     presentPendingDiscoveryIfNeeded()
+                    resolveOpenFromAudioGuidesIfNeeded()
                 }
                 .onChange(of: pendingDiscoveryId) {
                     presentPendingDiscoveryIfNeeded()
+                }
+                .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
+                    if newValue {
+                        discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
+                        resolveOpenFromAudioGuidesIfNeeded()
+                    }
                 }
                 .onChange(of: pendingCreatedSummary) { oldValue, newValue in
                     guard let summary = newValue else { return }
@@ -202,6 +223,7 @@ struct DiscoveriesHomeView: View {
                         isDeletingDiscovery: isDeletionInProgress,
                         onDelete: { handleDeleteRequest(for: $0) },
                         onShowOptions: nil,
+                        onOpenAudioGuide: isDetailFromAudioGuides ? onOpenAudioGuide : nil,
                         onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
                     )
                     .ignoresSafeArea(edges: .top)
@@ -292,12 +314,21 @@ struct DiscoveriesHomeView: View {
         }
     }
 
-    private func handleDiscoverySelection(discovery: DiscoverySummary, imageURL: URL?, startFrame: CGRect) {
+    private func handleDiscoverySelection(
+        discovery: DiscoverySummary,
+        imageURL: URL?,
+        startFrame: CGRect,
+        animated: Bool = true,
+        fromAudioGuides: Bool = false
+    ) {
+        isDetailFromAudioGuides = fromAudioGuides
+        discoveriesHomeLogger.info("Presenting discovery detail id=\(discovery.id, privacy: .public) animated=\(animated, privacy: .public)")
         let resolvedImageURL = imageURL ?? self.imageURL(for: discovery)
         detailCoordinator.present(
             discovery: discovery,
             cardFrame: startFrame,
-            imageURL: resolvedImageURL
+            imageURL: resolvedImageURL,
+            animated: animated
         )
     }
 
@@ -312,15 +343,17 @@ struct DiscoveriesHomeView: View {
             return
         }
 
-        guard let startFrame = resolveStartFrame(for: discovery.id) else {
-            return
-        }
+        let startFrame = resolveStartFrame(for: discovery.id) ?? fallbackStartFrame()
 
         pendingDiscoveryId = nil
+        let animated = true
+        discoveriesHomeLogger.info("Pending discovery resolved id=\(discovery.id, privacy: .public) animated=\(animated, privacy: .public)")
         handleDiscoverySelection(
             discovery: discovery,
             imageURL: imageURL(for: discovery),
-            startFrame: startFrame
+            startFrame: startFrame,
+            animated: animated,
+            fromAudioGuides: false
         )
     }
 
@@ -338,6 +371,73 @@ struct DiscoveriesHomeView: View {
         }
 
         return frame
+    }
+
+    private func fallbackStartFrame() -> CGRect {
+        let screen = UIScreen.main.bounds
+        let width = min(screen.width * 0.9, 360)
+        let height = width * 1.2
+        let origin = CGPoint(
+            x: (screen.width - width) / 2,
+            y: (screen.height - height) / 3
+        )
+        discoveriesHomeLogger.info("Using fallback start frame for discovery detail")
+        return CGRect(origin: origin, size: CGSize(width: width, height: height))
+    }
+
+    private func resolveOpenFromAudioGuidesIfNeeded() {
+        guard openFirstDetailFromAudioGuides else { return }
+
+        // Require an explicit target from Audio Guides; do not fall back to first.
+        let targetId = audioGuidesTargetDiscoveryId ?? audioGuidesTargetDiscoverySummary?.id
+        guard let discoveryId = targetId else {
+            discoveriesHomeLogger.info("AudioGuides Text tap: no discovery attached to guide")
+            return
+        }
+
+        // Try to find in current feed; otherwise use the passed summary (may be from a different page).
+        let feedTarget = viewModel.discoveries.first(where: { $0.id == discoveryId })
+        let resolvedTarget = feedTarget ?? audioGuidesTargetDiscoverySummary
+
+        guard let target = resolvedTarget else {
+            discoveriesHomeLogger.info("AudioGuides Text tap: target discovery not found id=\(discoveryId, privacy: .public)")
+            openFirstDetailFromAudioGuides = false
+            audioGuidesTargetDiscoveryId = nil
+            audioGuidesTargetDiscoverySummary = nil
+            return
+        }
+
+        let isOverlayActive = detailCoordinator.snapshot.phase.isActive
+        let activeId = detailCoordinator.snapshot.context?.discovery.id
+
+        let openBlock = {
+            self.openFirstDetailFromAudioGuides = false
+            self.audioGuidesTargetDiscoveryId = nil
+            self.audioGuidesTargetDiscoverySummary = nil
+
+            let startFrame = self.resolveStartFrame(for: target.id) ?? self.fallbackStartFrame()
+
+            self.handleDiscoverySelection(
+                discovery: target,
+                imageURL: self.imageURL(for: target),
+                startFrame: startFrame,
+                animated: false,
+                fromAudioGuides: true
+            )
+        }
+
+        if isOverlayActive, let activeId, activeId != target.id {
+            discoveriesHomeLogger.info("AudioGuides Text tap: replacing active discovery id=\(activeId, privacy: .public) with id=\(target.id, privacy: .public)")
+            openBlock()
+        } else if isOverlayActive, let activeId, activeId == target.id {
+            discoveriesHomeLogger.info("AudioGuides Text tap: target already active id=\(activeId, privacy: .public); no action")
+            openFirstDetailFromAudioGuides = false
+            audioGuidesTargetDiscoveryId = nil
+            audioGuidesTargetDiscoverySummary = nil
+        } else {
+            discoveriesHomeLogger.info("AudioGuides Text tap: will open discovery id=\(target.id, privacy: .public) (inFeed=\(feedTarget != nil, privacy: .public))")
+            openBlock()
+        }
     }
 
     private func handleDetailDragChanged(_ value: DragGesture.Value) {

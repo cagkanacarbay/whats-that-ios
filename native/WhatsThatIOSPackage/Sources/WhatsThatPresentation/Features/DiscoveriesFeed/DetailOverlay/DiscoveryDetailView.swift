@@ -42,6 +42,7 @@ struct DiscoveryDetailView: View {
     let onDelete: (() -> Void)?
     let onShowOptions: (() -> Void)?
     let onShowImage: (() -> Void)?
+    let onOpenAudioGuide: (() -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var scrollOffset: CGFloat
     @State private var isOptionsPresented = false
@@ -64,7 +65,8 @@ struct DiscoveryDetailView: View {
         isDeleting: Bool,
         onDelete: (() -> Void)?,
         onShowOptions: (() -> Void)?,
-        onShowImage: (() -> Void)? = nil
+        onShowImage: (() -> Void)? = nil,
+        onOpenAudioGuide: (() -> Void)? = nil
     ) {
         self.discovery = discovery
         self.imageURL = imageURL
@@ -80,6 +82,7 @@ struct DiscoveryDetailView: View {
         self.onDelete = onDelete
         self.onShowOptions = onShowOptions
         self.onShowImage = onShowImage
+        self.onOpenAudioGuide = onOpenAudioGuide
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
     }
@@ -132,7 +135,8 @@ struct DiscoveryDetailView: View {
                 onScrollViewContentOffsetChange: onScrollViewContentOffsetChange,
                 scrollOffset: $scrollOffset,
                 onShare: { presentShareSheet() },
-                onShowMap: discovery.location != nil ? { openLocationIfAvailable() } : nil
+                onShowMap: discovery.location != nil ? { openLocationIfAvailable() } : nil,
+                onOpenAudioGuide: onOpenAudioGuide
             )
         }
         .frame(width: layout.cardSize.width, height: layout.cardSize.height)
@@ -245,6 +249,7 @@ private struct DiscoveryDetailContentView: View {
     let onShare: (() -> Void)?
     let onShowMap: (() -> Void)?
     let onScrollViewContentOffsetChange: ((CGFloat) -> Void)?
+    let onOpenAudioGuide: (() -> Void)?
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     // Player inset store is not required when using a bottom safeAreaInset.
     @Binding var scrollOffset: CGFloat
@@ -282,7 +287,8 @@ private struct DiscoveryDetailContentView: View {
         onScrollViewContentOffsetChange: ((CGFloat) -> Void)? = nil,
         scrollOffset: Binding<CGFloat>,
         onShare: (() -> Void)? = nil,
-        onShowMap: (() -> Void)? = nil
+        onShowMap: (() -> Void)? = nil,
+        onOpenAudioGuide: (() -> Void)? = nil
     ) {
         self.discovery = discovery
         self.imageHeight = imageHeight
@@ -311,6 +317,7 @@ private struct DiscoveryDetailContentView: View {
         self.onScrollViewContentOffsetChange = onScrollViewContentOffsetChange
         self.onShare = onShare
         self.onShowMap = onShowMap
+        self.onOpenAudioGuide = onOpenAudioGuide
         _voiceoverController = ObservedObject(initialValue: voiceoverController)
         _scrollOffset = scrollOffset
     }
@@ -359,7 +366,8 @@ private struct DiscoveryDetailContentView: View {
                         topControlsSafeAreaInsets: safeAreaInsets,
                         onClose: onClose,
                         onShowOptions: onShowOptions,
-                        isOptionsEnabled: isOptionsEnabled
+                        isOptionsEnabled: isOptionsEnabled,
+                        onOpenAudioGuide: shouldShowAudioPill ? onOpenAudioGuide : nil
                     )
                     .frame(height: heroVisibleHeight)
                     .offset(y: overlayYOffset)
@@ -453,6 +461,22 @@ private struct DiscoveryDetailContentView: View {
         }
         // Always show to allow creating when nothing exists yet (missing/none)
         return true
+    }
+
+    private var shouldShowAudioPill: Bool {
+        // If we have an explicit Audio Guides callback for this discovery,
+        // prefer showing the pill (used when navigating from Audio Guides).
+        if onOpenAudioGuide != nil {
+            return true
+        }
+
+        // Otherwise, fall back to the global voiceover playback controller.
+        switch voiceoverController.playbackState {
+        case let .playing(id), let .paused(id):
+            return id == discovery.id
+        default:
+            return false
+        }
     }
 
     private var isPlaybackFailedForThisDiscovery: Bool {

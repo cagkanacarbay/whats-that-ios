@@ -1,4 +1,5 @@
 import Foundation
+import WhatsThatDomain
 
 enum AudioGuideStatus: Equatable {
     case ready
@@ -15,6 +16,9 @@ struct AudioGuide: Identifiable, Equatable {
     let isAuto: Bool
     var status: AudioGuideStatus = .ready
     var date: Date = Date()
+    let discovery: DiscoverySummary?
+    
+    var discoveryId: Int64? { discovery?.id }
     
     var durationString: String {
         let minutes = Int(duration) / 60

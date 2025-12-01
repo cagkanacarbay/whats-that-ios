@@ -23,14 +23,12 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 ## Mini Player (Global replacement)
 - [ ] Replace existing voiceover playback controller globally; mini opens Audio Guides page from anywhere (back returns). (Only lives within the Audio Guides tab today.)
 - [ ] Mini visible on all screens where legacy player appears; tap opens Audio Guides page; back returns. (No global mini or deep link into the page.)
-- [ ] Mini dismiss gesture: stops playback if active; hides when stopped.
 - [~] Hero and mini stay in sync; collapse/expand doesn’t interrupt playback.
   - [x] UI state syncs within Audio Guides page via shared view model.
   - [ ] Real playback sync with shared audio engine across views/screens.
 
 ## List View (common shell for Up Next & My Discoveries)
 - [x] Toggle bar switches between Up Next and My Discoveries. (Tap only.)
-- [ ] Gesture-based tab swipe between Up Next and My Discoveries. (Not implemented.)
 - [x] Hero↔list collapse/expand; mini sticky while browsing within Audio Guides page. (Works in-page; no global mini/dismiss.)
 
 ## Up Next
@@ -53,6 +51,7 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
   - [ ] History section/visual separation.
 - [ ] Unified Up Next layout: `Now Playing` row pinned at top with “Now Playing” chip; `Up Next` section immediately below (shows full queue, short slice + expand when long); `Last Played` section at bottom showing up to 3 most-recent items with an “Expand history” affordance; clear visual separation between the three.
 - [ ] Swipe-to-remove on Up Next rows (including upcoming/current items) with trash/dumpster affordance and remove-on-release behavior; tap-to-play remains unchanged. Removal should mirror the lightweight swipe feedback used for queuing (haptic + disappearance).
+- [ ] Offline state: when the device is offline and a queued item’s voiceover is not cached locally, show an “Offline – not downloaded” chip/badge on the row and block playback until the asset has been downloaded while online.
 
 ## My Discoveries
 - [ ] Mirrors existing My Discoveries content/ordering (real data, not mocks).
@@ -80,7 +79,7 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 
 ## Audio Guide Storage & Caching
 - [ ] Reuse voiceover caching layer for Audio Guides; verify parity with needs.
-- [ ] Offline: play from cache; if not cached and offline, show “Download to Play” and block.
+- [ ] Offline: play from cache; if not cached and offline, show an “Offline – not downloaded” state and block playback.
 - [ ] Streaming fallback when online if not cached.
 - [ ] Prefetch any queued item; track in-flight fetches to avoid duplicates.
 - [~] Generation statuses: absent / generating / failed / ready.
@@ -108,7 +107,13 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 ## Data & Persistence
 - [ ] Stable discovery IDs everywhere; hydrate from store/cache; avoid transient UUIDs and duplicate fetches.
 - [ ] Persist per-discovery progress, queue state, toggle settings, cached assets. (Current model uses ephemeral UUIDs and in-memory state only.)
+- [ ] Stale session handling: if there is no playback activity for 24h, prompt to resume or clear; auto-clear queue/history payloads on user-decline or after timeout.
 
 ## Discovery Detail Integration
 - [ ] Text/Audio pill in Discovery Detail view; selecting Audio switches to the audio side (audio player); Text returns to discovery details. (Audio/Text pill exists only inside the Audio Guides page hero; no integration with Discovery Detail.)
 - [ ] Text pill tap triggers smooth “page-flip” animation into Discovery Detail for the selected discovery, and Audio pill in Discovery Detail triggers the inverse “page-flip” back to the audio player. (Animation + navigation not implemented.)
+- [ ] Discovery Detail Text/Audio pill visibility is driven by the single source of truth for the active audio guide: show the pill only when the open Discovery Detail corresponds to the same discovery currently loaded in the shared Audio Guides/voiceover player and that player is in a playing or paused state; hide it for all other discoveries and when playback is idle, stopped, or failed.
+
+## Nice to have (post-MVP)
+- Mini dismiss gesture: stops playback if active; hides when stopped.
+- Gesture-based tab swipe between Up Next and My Discoveries.

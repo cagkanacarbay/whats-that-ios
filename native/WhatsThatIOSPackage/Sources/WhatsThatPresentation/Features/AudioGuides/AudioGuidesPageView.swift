@@ -1,6 +1,7 @@
 import SwiftUI
 import os
 import WhatsThatShared
+import WhatsThatDomain
 
 struct AudioGuidesPageView: View {
     enum ViewMode {
@@ -8,7 +9,7 @@ struct AudioGuidesPageView: View {
         case list
     }
 
-    @StateObject private var viewModel = AudioGuidesViewModel()
+    @StateObject private var viewModel: AudioGuidesViewModel
     @Environment(\.colorScheme) var colorScheme
     private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "AudioGuidesPageView")
 
@@ -18,6 +19,17 @@ struct AudioGuidesPageView: View {
 
     private let transitionDuration: Double = 0.3
     private let miniPlayerHeight: CGFloat = 76
+    private let onTextSelected: (DiscoverySummary?) -> Void
+
+    init(
+        fetchDiscoveries: (() async -> [DiscoverySummary])? = nil,
+        onTextSelected: @escaping (DiscoverySummary?) -> Void = { _ in }
+    ) {
+        _viewModel = StateObject(
+            wrappedValue: AudioGuidesViewModel(fetchDiscoveries: fetchDiscoveries)
+        )
+        self.onTextSelected = onTextSelected
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -70,7 +82,12 @@ private extension AudioGuidesPageView {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 20) {
                     Spacer(minLength: 12)
-                    HeroPlayerView(viewModel: viewModel)
+                    HeroPlayerView(
+                        viewModel: viewModel,
+                        onTextSelected: { discovery in
+                            onTextSelected(discovery)
+                        }
+                    )
                         .padding(.horizontal, 16)
                     Spacer(minLength: 12)
                 }

@@ -21,7 +21,7 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
   - Error surfacing and retry pathways we can re-use.
 - Inspect generation flow call sites (Discovery creation, Settings auto-generate toggle) to ensure Audio Guides connects to the existing edge function and credit handling without duplication.
 - Inventory data models where discovery IDs are the source of truth (e.g., `DiscoverySummary`) to replace Audio Guides’ mock UUIDs.
-- Identify storage/persistence mechanism for queue/history/progress (UserDefaults? local store? existing voiceover stores) and gaps to fill.
+- Identify storage/persistence mechanism for queue/history/progress (UserDefaults-backed actors for this phase) and gaps to fill.
 
 ## Architecture & Data Model Draft
 - Identity: use stable `discovery.id` (`Int64`) everywhere; no transient UUIDs or Audio-Guides-specific IDs. Audio Guides must operate on the same discovery models already used in the Discoveries tab and detail view.
@@ -38,7 +38,7 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
   - Per-discovery position stored locally; restored on play.
   - Update on periodic ticks and on pause/stop transitions.
 - Playback settings:
-  - Playback speed presets (0.75/1/1.25/1.5/2x) stored (scope to decide: per-user global vs. per-discovery).
+  - Playback speed presets (0.75/1/1.25/1.5/2x) stored as a global per-user setting (not per discovery), shared across all voiceover playback surfaces.
   - Autoplay toggle persisted.
 
 ## Real Data Wiring (mock → production)
@@ -46,16 +46,16 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 - Single source of truth: playback state, position, duration, and asset readiness come from `VoiceoverPlaybackController`; queue/history/autoplay come from the new store; UI only mirrors these sources (no local progress/credits/UUIDs).
 - Per-discovery progress: add a lightweight `VoiceoverProgressStore` (actor) that persists position and lastPlayedAt by discovery ID in `UserDefaults`. Drive updates from the controller’s time observer and pause/stop callbacks; hydrate when resuming a discovery.
 - Queue/history store: add `AudioGuidesQueueStore` (actor) that owns Immediate/Deferred/base snapshot, history stack, autoplay flag, current discovery ID, and lastActivityAt. Persist to `UserDefaults` with dedupe and trimming. On app launch, reload and drop missing discoveries; if `lastActivityAt` is older than 24h, prompt to resume or clear, and auto-clear if declined or after timeout. Auto-clear also runs if no playback activity for 24h.
-- Queue control flow: store exposes `next()/previous()/playNow(id)/enqueue` helpers; hero/mini invoke these and in turn call `VoiceoverPlaybackController.togglePlayback(for:)` with the resolved `DiscoverySummary`. Controller `currentDiscovery` stays in sync with store `current`.
-- Playback speed: add a global `PlaybackSpeedStore` (actor/UserDefaults) storing the last chosen speed. Wire hero/mini speed menu to set/read it and call a new `VoiceoverPlaybackController.setRate(_:)` helper that updates AVPlayer rate immediately and on new items.
+- Queue control flow: `AudioGuidesQueueStore` is the single source of truth for Up Next. It exposes `next()/previous()/playNow(id)/enqueue` helpers; hero/mini invoke these, and the store in turn calls `VoiceoverPlaybackController.togglePlayback(for:)` with the resolved `DiscoverySummary`. The controller’s `currentDiscovery` stays in sync with the store’s `current` item; any legacy queue providers are adapted once into the store and then discarded.
+- Playback speed: add a global `VoiceoverPlaybackSpeedStore` (actor/UserDefaults) storing the last chosen speed per user. Wire hero/mini speed menu to set/read it and call a new `VoiceoverPlaybackController.setRate(_:)` helper that updates AVPlayer rate immediately and on new items. This store is separate from `VoiceoverPreferences` (which govern voice creation, not playback).
 - Prefetch & offline guards: queue store calls `VoiceoverPlaybackController.prefetch(for:)` when items enter Immediate/Deferred/base snapshot. UI asks controller for `isDownloadPending` + reachability to show “Offline – not downloaded” and block playback; retries when online and cache available.
 - Generation path: My Discoveries absent/failed states call `requestVoiceover(for:)` on the controller; reuse `insufficient_credits` copy and retry semantics from `VoiceoverDetailButton`. No local credit math.
 - Error surfacing: playback errors surfaced from controller errorMessage; UI shows inline chip with retry → `togglePlayback`/`requestVoiceover` as appropriate. Clearing error hides mini if playback is idle/failed.
 
 ## Playback Speed (new, global)
-- New store key (UserDefaults) for `playbackSpeed`, default 1.0. Exposed via `PlaybackSpeedStore` actor to keep concurrency safe.
-- `VoiceoverPlaybackController` gains `setRate(_:)` and persists current rate in memory; on player setup, apply stored rate. UI reads the store and updates controller; controller publishes active rate to hero/mini.
-- This store is distinct from `VoiceoverPreferences` (auto/voice/tts); no migration of prior keys required.
+- New store key (UserDefaults) for `playbackSpeed`, default 1.0. Exposed via `VoiceoverPlaybackSpeedStore` actor to keep concurrency safe.
+- `VoiceoverPlaybackController` gains `setRate(_:)` and persists current rate in memory; on player setup, it applies the stored rate from `VoiceoverPlaybackSpeedStore`. UI reads the store and updates the controller; the controller’s active rate is reflected in hero/mini and any other playback surfaces.
+- This store is distinct from `VoiceoverPreferences` (auto/voice/tts); no migration of prior keys is required and playback speed does not affect voiceover generation.
 
 ### Voiceover Asset Status Behaviour (Parity with Discovery Detail)
 - Source of truth: Audio Guides must use `VoiceoverPlaybackController.normalizedAsset(for:)` for all readiness/error states. Do not reimplement status ageing logic.
@@ -81,16 +81,19 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
   - Additionally, apply queue state chips (`Playing`, `Queued`) on top of readiness states.
 
 ## Up Next Queue Behavior – Spec
-- Base context: when the user taps a discovery to play, snapshot the current Discoveries ordering as `baseList` and set `baseIndex` to that item. This “session” ordering remains stable until the user starts playback from a different discovery; UI can still show live order, but playback traverses the snapshot for predictability.
+- Base context: when the user taps a discovery to play, initialise or update the base playlist to reflect the Discoveries ordering around that item. `baseList` is a sequence of discovery IDs and `baseIndex` points at the currently playing item. The base playlist is allowed to evolve over time (for example when new discoveries are captured and auto-generated voiceovers appear), but always represents “previous/next” around the current item, similar to a playlist in Spotify.
 - Queue layers (mirrors Spotify/Apple Music):
   - Immediate queue (front): items added via “Play Next” are enqueued FIFO here.
   - Deferred queue (tail): items added via “Add to End” are appended here.
   - Base fallback: after queues drain, advance through `baseList` starting at `baseIndex + 1`.
 - Next selection order: take head of Immediate; if empty, head of Deferred; if both empty, next item in `baseList` after `baseIndex`. When a queued item is consumed, remove it and push the current item into history.
 - Prev behavior: if current playback position > restartThreshold (2–3s), restart current; else pop from history stack (most recent first). If history is empty, step backward in `baseList` before `baseIndex`. History grows whenever we advance to a new item (queued or base).
-- History visibility: surfaced in UI under “Just Played”; trimming policy can cap length (e.g., 100) while persisting last N items.
-- Ad-hoc play while queue exists: tapping any discovery replaces current, pushes prior current to history, and keeps both queue layers intact; after the ad-hoc item ends, playback resumes Immediate → Deferred → base fallback. If we detect a stale session (see below) we may clear queues first.
-- Auto-generated/ready items: default insertion is Deferred tail; “Play Next” promotes to Immediate head. Skip non-ready items when autoplay is on; skipped items remain at queue head until ready/failed retry resolves.
+- History visibility: surfaced in UI under “Just Played” / “Last Played”; trimming policy can cap length (e.g., 100) while persisting last N items.
+- Ad-hoc play while queue exists: tapping any discovery (e.g., from Discoveries grid or My Discoveries) replaces current, pushes prior current to history, and keeps both queue layers intact. The base playlist is re-centred on the new discovery so that previous/next now reflect the items immediately before and after it in Discoveries ordering. After the ad-hoc item ends, playback resumes Immediate → Deferred → base fallback from this new base context. If we detect a stale session (see below) we may clear queues first.
+- Auto-generated/ready items:
+  - When auto-generate is enabled and new discoveries are created, their voiceovers are requested automatically. As these auto-generated assets transition to ready, their discoveries are inserted into the base playlist after the current item (in Discoveries recency order), so they appear as natural “next up” items even without manual queueing.
+  - Default insertion for manually enqueued items remains: “Play Next” enqueues into Immediate; “Add to End” appends to Deferred tail. Auto-generated items that the user explicitly queues follow the same Immediate/Deferred rules.
+  - Skip non-ready items (processing/failed) when autoplay is on; skipped items are kept at the front of the relevant section of Up Next so users can see and retry them, but playback moves on to the next ready item.
 - Persistence/staleness:
   - Persist: queue ordering (Immediate/Deferred), base snapshot identifiers, baseIndex, current item, history stack, autoplay toggle, and per-discovery progress.
   - Stale session rule: if no playback activity for 24h, prompt on return: “Resume your queue (N items)?” with Resume / Clear. If user opts Clear, drop Immediate/Deferred/baseIndex but keep per-discovery progress/history. Auto-clear if declined or on next launch after timeout.
@@ -105,17 +108,16 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
   - Persisted structures: `queueImmediate: [DiscoveryID]`, `queueDeferred: [DiscoveryID]`, `baseList: [DiscoveryID]`, `baseIndex: Int`, `history: [DiscoveryID]`, `current: DiscoveryID?`, `autoplayEnabled: Bool`.
   - Resume logic loads persisted structures; if any IDs are missing/absent, drop them with a soft notice in UI.
 
-## Discovery Detail Integration – To Hammer Out
-- Navigation contract:
-  - Discovery Detail → Audio Guides: tapping the Audio pill in Discovery Detail switches `MainTabView` to the Audio Guides tab and focuses the hero for that discovery, using the shared `VoiceoverPlaybackController` as the playback state source.
-  - Audio Guides → Discovery Detail: tapping the Text pill in the Audio Guides hero switches back to the Discoveries tab and opens the Discovery Detail overlay for the same discovery.
-  - One-way entry: Discovery Detail does not start playback for arbitrary discoveries; the Audio pill is present only for the discovery already active in the shared player so users can hop to text and back to audio for that one item.
+## Discovery Detail Integration
+- Navigation contract (no custom animation):
+  - Discovery Detail → Audio Guides: tapping the Audio pill in Discovery Detail switches `MainTabView` to the Audio Guides tab and focuses the hero for that discovery, using the shared `VoiceoverPlaybackController` as the playback state source. Standard tab / overlay transitions are used (no bespoke “page-flip”).
+  - Audio Guides → Discovery Detail: tapping the Text pill in the Audio Guides hero switches back to the Discoveries tab and opens the Discovery Detail overlay for the same discovery, again using standard transitions.
+  - One-way entry: Discovery Detail does not start playback for arbitrary discoveries via the pill; the Audio pill is present only for the discovery already active in the shared player so users can hop to text and back to audio for that one item.
   - Visibility: Text/Audio pill in Discovery Detail appears only when the open detail’s `discovery.id` matches the controller’s active discovery and the controller is playing/paused; hide it for other discoveries and when playback is idle/failed so only one detail screen shows the pill at a time.
-- Animation/transition: desired “page-flip” effect—where to implement (shared coordinator?) and how to keep mini/hero in sync during transition.
 - Data handoff: ensure detail view provides the discovery to the playback controller with correct asset state and image URL; avoid duplicate fetches when switching contexts.
-- Back stack: after opening from detail, back should return user to previous screen, not always Audio Guides tab root.
+- Back stack: after opening from detail, back returns the user to the previous screen (e.g., Discoveries grid or whatever was underneath), not always the Audio Guides tab root.
 - Discovery Detail voiceover UI:
-  - Replace the existing `VoiceoverDetailButton`-based playback/create UI with the new Text/Audio pill + global mini player pattern.
+  - The existing `VoiceoverDetailButton`-based playback/create UI remains; the Text/Audio pill is an additional affordance on top of it.
   - Discovery Detail Text/Audio pill visibility must be derived from the single shared `VoiceoverPlaybackController` state (no local flags): show the pill only when the open `discovery.id` matches the controller’s active discovery and the controller is in a playing or paused state; hide it for all other discoveries and when playback is idle, stopped, or failed, so the pill appears in exactly one Discovery Detail at a time and stays in sync with the global Audio Guides player.
 
 ## Generation & Credits – Alignment Tasks
@@ -146,43 +148,49 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 ## Playback UX Integration
 - Mini player must replace legacy voiceover mini globally (visible on all screens where legacy appears) and open Audio Guides page; back/close returns to prior screen.
 - Global mini host:
-  - Replace `VoiceoverPersistentPlayerView`/`VoiceoverPlayerBar`/`VoiceoverPlayerHost` with a single Audio Guides mini player host that uses the shared `VoiceoverPlaybackController` and is overlaid above existing content (no safe-area inset plumbing, no height reporting).
-  - The same mini instance is used everywhere (including inside the Audio Guides list mode); there is no separate “page-local” mini.
-  - Host once at the root (e.g., `RootContentView`/`MainTabView` overlay) so it floats above all tabs and overlays; remove `VoiceoverPlayerInsetStore` plumbing and safe-area inset adjustments.
-  - Mini hides when playback is idle/failed with no current discovery; tap opens Audio Guides page focused on the active discovery; system back/close returns to the previous screen without clearing queue/history.
+  - Replace `VoiceoverPersistentPlayerView`/`VoiceoverPlayerBar`/`VoiceoverPlayerHost` with a single Audio Guides mini player host that uses the shared `VoiceoverPlaybackController` and `AudioGuidesQueueStore`, and is overlaid above existing content (no safe-area inset plumbing, no height reporting).
+  - The same mini instance is used everywhere it appears; there is no separate “page-local” mini. Audio Guides list mode reuses this same mini host and placement.
+  - Host once at the root UI shell (e.g., in `RootContentView` as a ZStack overlay above `MainTabView`) so it can be shown/hidden based on screen context while remaining a single shared instance.
+  - Visibility rules:
+    - Visible on:
+      - Main Discoveries page.
+      - Discovery Detail overlay.
+      - Discovery streaming stage and post-discovery states (after capture/selection/confirmation).
+      - Audio Guides page in list mode (using the existing mini placement at the bottom of the overlay).
+    - Hidden on:
+      - Camera flow (capture).
+      - Upload flow (gallery selection).
+      - Confirm Image Selection.
+      - Settings.
+    - Hidden whenever playback is idle/failed with no current discovery.
+  - Tap on the mini opens the Audio Guides page focused on the active discovery; system back/close returns to the previous screen without clearing queue/history.
 - Hero/mini sync: both views bound to shared controller state; collapse/expand must not interrupt playback.
 - Controls to add:
   - ±5s buttons (tap) mapped to `VoiceoverPlaybackController` seek-by-5s helpers.
-  - Press-and-hold accelerated seek (define acceleration curve as repeated 5s steps while press is held).
+  - Press-and-hold accelerated seek: while the user holds the ±5s buttons, repeatedly seek ±5 seconds at a fixed cadence (every 0.2 seconds) until release, then resume normal playback at the new position.
   - Playback speed menu wired to `VoiceoverPlaybackController` playback rate, persisted via the new global playback-speed store.
   - Resume state reflected in both hero and mini using the shared per-discovery progress store.
 - Error surfacing: inline error + retry in mini/hero; dismissing mini while error visible stops playback and hides mini.
 
 ## My Discoveries (Data & UI)
-- Drive list from the same Discoveries feed data already used by the Discoveries tab; statuses mapped from `VoiceoverPlaybackController.normalizedAsset(for:)` (ready/processing/missing/failed) for each `discovery.id`.
+- Drive list from the same My Discoveries dataset already used elsewhere in the app (1:1 with existing My Discoveries content and ordering), grouped by day for display; statuses mapped from `VoiceoverPlaybackController.normalizedAsset(for:)` (ready/processing/missing/failed) for each `discovery.id`.
 - Chip rules: Ready/Generating/Failed/Empty plus `Queued` when in Up Next and `Playing` when active.
 - Queue actions: swipe/menu add to end or play next; block duplicate queueing when already queued.
 - Absent state triggers credit modal using shared generation path; failed state retry uses same; both flows must call `requestVoiceover(for:)` on the shared controller and rely on the global credits/edge-function behavior.
 
 ## Persisted Settings & Progress
-- Decide storage mechanism for:
-  - Queue ordering, current item, autoplay toggle. (Queue data store is Audio-Guides-specific and must later integrate with `VoiceoverPlaybackController`’s queue provider; detailed queue implementation is tracked separately.)
-  - Per-discovery progress and last-played timestamps (history), via a shared voiceover progress store used by both Discovery Detail and Audio Guides.
-  - Playback speed selection (new global store so the hero/mini and Discovery Detail share the same speed).
-- Consider migration from any existing voiceover preference store (e.g., `VoiceoverPreferencesStore`) for speed/auto before introducing new keys.
+- Storage mechanism:
+  - Queue ordering, current item, autoplay toggle: persisted via `AudioGuidesQueueStore` using `UserDefaults` as backing storage.
+  - Per-discovery progress and last-played timestamps (history): persisted via a shared `VoiceoverProgressStore` actor using `UserDefaults`, used by both Discovery Detail and Audio Guides.
+  - Playback speed selection: persisted via `VoiceoverPlaybackSpeedStore` using `UserDefaults`, so the hero/mini and Discovery Detail share the same speed.
 
 ## UI Removal/Replacement Plan (high level)
 - Remove usages of `VoiceoverPersistentPlayerView`, `VoiceoverPlayerBar`, `VoiceoverPlayerHost`, and related inset plumbing; replace with a single Audio Guides mini player host surfaced globally and overlaid on top of existing content (no bottom inset dependency).
-- Ensure tab layouts remain visually correct once the legacy inset logic is removed; the mini should appear above the tab bar/home indicator without requiring each screen to manage additional padding.
+- Remove `VoiceoverPlayerInsetStore`-based safe-area inset plumbing; individual screens should manage their own internal padding while the mini floats above the tab bar/home indicator.
+- Ensure tab layouts remain visually correct once the legacy inset logic is removed; the mini should appear in the same placement as the Audio Guides list mini (above the tab bar/home indicator) without requiring each screen to manage additional padding.
 
 ## Outstanding Questions / Decisions Needed
-- Exact Up Next behavior when playing ad-hoc items and how to merge/clear queues.
-- Where to persist queue/history/progress (UserDefaults vs. lightweight store) and retention limits.
-- Whether playback speed is global or per-discovery; default value on cold start.
-- Exact accelerated-seek interaction (hold threshold, step size growth, haptics).
-- Auto-generate insertion point in queue and dedupe rules for auto vs. manual items.
-- Navigation/animation implementation for Discovery Detail ↔ Audio Guides hero (“page-flip”) and how to handle deep links/back stack.
-- Whether to expose “Clear queue” and “Clear history” affordances; any UX gating.
+- Whether to expose a “Clear history” affordance (in addition to “Clear queue”) and any UX gating around trimming history length or confirming destructive actions.
 
 ## Next Steps
 - [ ] Complete deep-dive of `VoiceoverPlaybackController` to map required extension points (seek, rate, queue provider, error handling, progress persistence).

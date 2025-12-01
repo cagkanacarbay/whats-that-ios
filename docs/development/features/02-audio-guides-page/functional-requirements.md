@@ -6,11 +6,11 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 ## Audio Player (Hero)
 - [~] Controls: play/pause, next/prev, seek via ±5s; hold to repeat/accelerate seek.
   - [x] UI buttons for play/pause, next/prev, ±5s in hero (updates mock progress).
-  - [ ] Actual audio playback engine; long-press seek or accelerated seeking.
-- [~] Playback speed presets: 0.75x, 1.25x, 1.5x, 2x (no sleep timer).
+  - [ ] Actual audio playback engine; long-press seek that repeatedly steps ±5s every 0.2s while held.
+- [~] Playback speed presets: 0.75x, 1.25x, 1.5x, 2x (no sleep timer; global per user).
   - [x] Speed menu UI present in hero.
-  - [ ] Speed affects playback (actual audio engine rate changes).
-  - [ ] Speed selection is stored and restored across sessions/plays.
+  - [ ] Speed affects playback (actual audio engine rate changes) via a shared playback controller.
+  - [ ] Speed selection is stored and restored across sessions/plays using a global per-user playback speed store shared by all voiceover playback surfaces.
 - [~] States tracked: ready / playing / paused / stopped with position/duration display.
   - [x] UI shows play/pause state and position/duration.
   - [ ] Ready/stopped surfaced in UI.
@@ -21,19 +21,24 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
   - [ ] Resume works with real audio playback and surfaces in history.
 
 ## Mini Player (Global replacement)
-- [ ] Replace existing voiceover playback controller globally; mini opens Audio Guides page from anywhere (back returns). (Only lives within the Audio Guides tab today.)
-- [ ] Mini visible on all screens where legacy player appears; tap opens Audio Guides page; back returns. (No global mini or deep link into the page.)
+- [ ] Replace existing Voiceover UI (e.g., `VoiceoverPersistentPlayerView`, `VoiceoverPlayerBar`, `VoiceoverPlayerHost`) with a single global Audio Guides mini player backed by the shared `VoiceoverPlaybackController` and queue store.
+- [ ] Mini visible only on:
+  - Main Discoveries grid.
+  - Discovery Detail overlay.
+  - Discovery streaming stage and post-discovery states.
+  - Audio Guides page (list overlay mode), using the same placement and styling as the existing mini there.
+  - Not visible on: camera flow, upload flow, Confirm Image Selection, Settings.
 - [~] Hero and mini stay in sync; collapse/expand doesn’t interrupt playback.
   - [x] UI state syncs within Audio Guides page via shared view model.
-  - [ ] Real playback sync with shared audio engine across views/screens.
+  - [ ] Real playback sync with shared audio engine and queue across views/screens.
 
 ## List View (common shell for Up Next & My Discoveries)
 - [x] Toggle bar switches between Up Next and My Discoveries. (Tap only.)
 - [x] Hero↔list collapse/expand; mini sticky while browsing within Audio Guides page. (Works in-page; no global mini/dismiss.)
 
 ## Up Next
-- [ ] Single list combining history, current, and upcoming.
-- [ ] History UX: fresh design for presentation/interaction.
+- [ ] Single list combining current, upcoming, and last-played items in a unified Up Next view.
+- [ ] History UX: fresh design for presentation/interaction, surfacing “Just Played” / “Last Played” inline with the queue.
 - [~] Actions: tap history makes current; removing current advances; removing upcoming reflows.
   - [x] Tap-to-play works for Up Next items in the mock list.
   - [ ] History/removal/advance behaviors implemented with real queue.
@@ -42,7 +47,9 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
   - [ ] Enforced ordering rules for auto vs manual; aligns with real queue.
 - [~] Auto-play toggle: advance to next ready item; skip non-ready and continue.
   - [x] Toggle UI present.
-  - [ ] Functional auto-advance behavior wired to playback/queue.
+  - [ ] Functional auto-advance behavior wired to playback/queue so that:
+    - Generating or failed items are skipped for playback but kept visible at the front of Up Next as non-playable items (for awareness and retry).
+    - Ready items continue to play in order, using the Immediate/Deferred/base playlist model.
 - [ ] Persistence: queue ordering, history, current item, progress, auto-play toggle.
 - [x] Up Next reordering: drag-to-reorder allowed in Up Next. (Works in the mock list; no persistence.)
 - [ ] Queued items without guides trigger generation: any item queued/Play Next with no guide calls edge function to generate.
@@ -54,7 +61,7 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 - [ ] Offline state: when the device is offline and a queued item’s voiceover is not cached locally, show an “Offline – not downloaded” chip/badge on the row and block playback until the asset has been downloaded while online.
 
 ## My Discoveries
-- [ ] Mirrors existing My Discoveries content/ordering (real data, not mocks).
+- [ ] Mirrors existing My Discoveries content/ordering (real data, not mocks) 1:1 with the current My Discoveries list, grouped by day for display.
 - [~] Row states: ready / generating (ghosted + spinner) / absent (ghosted + “Create audio guide”) / failed (warning tint + retry overlay) / playing indicator.
   - [x] UI shows ready/generating/empty/failed/playing on mock data.
   - [ ] States driven by backend; absent copy/affordance polish.
@@ -97,7 +104,7 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 - [ ] Auto-generate setting feeds Up Next (generating → ready) for new discoveries.
 
 ## Error Handling
-- [ ] Playback errors: inline surface + retry; stop on unrecoverable.
+- [ ] Playback errors: inline surface + retry; for non-offline failures, show a per-row “Playback failed” chip and allow retry without blocking the rest of the queue.
 - [~] Generation failures: mark item failed and allow retry.
   - [x] Mock flow sets failed state and allows tap-to-retry.
   - [ ] Real error surfacing + retry behavior.
@@ -110,9 +117,9 @@ UI-only items are called out explicitly; anything not wired to real playback/gen
 - [ ] Stale session handling: if there is no playback activity for 24h, prompt to resume or clear; auto-clear queue/history payloads on user-decline or after timeout.
 
 ## Discovery Detail Integration
-- [ ] Text/Audio pill in Discovery Detail view; selecting Audio switches to the audio side (audio player); Text returns to discovery details. (Audio/Text pill exists only inside the Audio Guides page hero; no integration with Discovery Detail.)
-- [ ] Text pill tap triggers smooth “page-flip” animation into Discovery Detail for the selected discovery, and Audio pill in Discovery Detail triggers the inverse “page-flip” back to the audio player. (Animation + navigation not implemented.)
-- [ ] Discovery Detail Text/Audio pill visibility is driven by the single source of truth for the active audio guide: show the pill only when the open Discovery Detail corresponds to the same discovery currently loaded in the shared Audio Guides/voiceover player and that player is in a playing or paused state; hide it for all other discoveries and when playback is idle, stopped, or failed.
+- [ ] Text/Audio pill in `DiscoveryDetailView`; selecting Audio switches to the Audio Guides tab and focuses the hero for that discovery; Text returns to the discovery details (no special page-flip animation).
+- [ ] Discovery Detail Text/Audio pill is visible only when the open Discovery Detail corresponds to the same discovery currently loaded in the shared Audio Guides/voiceover player and that player is in a playing or paused state; hide it for all other discoveries and when playback is idle, stopped, or failed.
+- [ ] Existing `VoiceoverDetailButton` remains; the Text/Audio pill is an additional affordance that appears only when the current discovery matches the active audio guide.
 
 ## Nice to have (post-MVP)
 - Mini dismiss gesture: stops playback if active; hides when stopped.

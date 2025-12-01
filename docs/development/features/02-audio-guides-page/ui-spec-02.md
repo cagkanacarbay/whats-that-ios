@@ -17,8 +17,6 @@ A single vertical page with a collapsible hero player pinned at the top. Below i
    - Tiny prev/next thumbnails flanking the ring (tap to jump).  
    - Meta strip: title + duration (no language/source).  
    - Visual style: follow `time-next-up.png` for layout; take typography/weight cues from `playing.png`; refine ring legibility versus `time.png`.
-2) **Sneak Peek of Up Next**  
-   - Immediately beneath hero: the very next item (thumbnail + title + duration). Always shows the queue’s first upcoming item, even when Discover is later shown.
 3) **List Toggle Bar**  
    - Two tabs: `Up Next` (default) and `Discover`. Uses the tab styling from `list-view.png` (highlighted selected state). Swipe left/right on the list area also switches tabs.
 4) **List Area (shows one list at a time)**  
@@ -28,7 +26,7 @@ A single vertical page with a collapsible hero player pinned at the top. Below i
 ## Scroll & Collapse Behavior
 - On downward scroll, the hero compresses into a **mini player** anchored above the tab bar (size/style per `list-with-audio-player.png`). Ring shrinks to a small arc; controls reduce to play/pause + skip.  
 - The toggle and list remain; the mini stays visible while browsing.  
-- Tap (or double-tap) the mini to re-expand the hero at the top; hero expansion restores the sneak peek immediately beneath it.
+- Tap (or double-tap) the mini to re-expand the hero at the top.
 
 ## Playback & Queue Behavior
 - Any item played from any list updates both the hero and the mini player immediately.  
@@ -58,7 +56,7 @@ A single vertical page with a collapsible hero player pinned at the top. Below i
 ## Visual Guidance
 - Hero: use `time-next-up.png` structure; adapt the ring for clarity and reduce glow.  
 -,List density: use `list-with-audio-player.png`; spacing/feel inspired by `list-view.png` and `playing.png`.  
-- Keep the sneak peek of Up Next visible beneath the hero on expansion; when collapsed, the mini represents the player and Up Next remains the default list.
+-
 
 ## Persistence
 - Queue, current item, and progress persist across app sessions; mini player should rehydrate instantly with the last state on app launch.

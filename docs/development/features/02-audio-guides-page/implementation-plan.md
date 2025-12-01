@@ -148,8 +148,10 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 ## Playback UX Integration
 - Mini player must replace legacy voiceover mini globally (visible on all screens where legacy appears) and open Audio Guides page; back/close returns to prior screen.
 - Global mini host:
+  - Decision: host a single shared Audio Guides mini as a ZStack overlay in the root shell (e.g., wrapping `MainTabView`), pinned above the tab bar/home indicator. Do not inject per-screen safe-area insets.
   - Replace `VoiceoverPersistentPlayerView`/`VoiceoverPlayerBar`/`VoiceoverPlayerHost` with a single Audio Guides mini player host that uses the shared `VoiceoverPlaybackController` and `AudioGuidesQueueStore`, and is overlaid above existing content (no safe-area inset plumbing, no height reporting).
   - The same mini instance is used everywhere it appears; there is no separate “page-local” mini. Audio Guides list mode reuses this same mini host and placement.
+  - Retire `VoiceoverPlayerInsetStore` and related inset padding; layout must remain correct without bottom inset propagation.
   - Host once at the root UI shell (e.g., in `RootContentView` as a ZStack overlay above `MainTabView`) so it can be shown/hidden based on screen context while remaining a single shared instance.
   - Visibility rules:
     - Visible on:

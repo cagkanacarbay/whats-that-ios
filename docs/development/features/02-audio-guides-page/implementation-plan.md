@@ -24,7 +24,7 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 - Identify storage/persistence mechanism for queue/history/progress (UserDefaults-backed actors for this phase) and gaps to fill.
 
 ## Architecture & Data Model Draft
-- Identity: use stable `discovery.id` (`Int64`) everywhere; no transient UUIDs or Audio-Guides-specific IDs. Audio Guides must operate on the same discovery models already used in the Discoveries tab and detail view.
+- Identity: use stable `discovery.id` (`Int64`) everywhere; no transient UUIDs or Audio-Guides-specific IDs. Audio Guides must operate on the same discovery models already used in the Discoveries tab and detail view. Do NOT use a separate `AudioGuide` struct with UUID identity—use `DiscoverySummary` directly and compute voiceover status at render time.
 - Queue model (Up Next):
   - Ordered list of discovery IDs.
   - Each entry has status (ready/generating/failed/missing), progress, and insertion source (manual/auto) if needed.
@@ -41,21 +41,201 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
   - Playback speed presets (0.75/1/1.25/1.5/2x) stored as a global per-user setting (not per discovery), shared across all voiceover playback surfaces.
   - Autoplay toggle persisted.
 
-## Real Data Wiring (mock → production)
-- Replace `AudioGuidesViewModel` mock data with bindings to shared `VoiceoverPlaybackController` plus a new queue/history/progress store that operates on `DiscoverySummary` IDs. `AudioGuide` models should carry `DiscoverySummary` and rely on normalized assets from the controller for readiness/error.
-- Single source of truth: playback state, position, duration, and asset readiness come from `VoiceoverPlaybackController`; queue/history/autoplay come from the new store; UI only mirrors these sources (no local progress/credits/UUIDs).
-- Per-discovery progress: add a lightweight `VoiceoverProgressStore` (actor) that persists position and lastPlayedAt by discovery ID in `UserDefaults`. Drive updates from the controller’s time observer and pause/stop callbacks; hydrate when resuming a discovery.
-- Queue/history store: add `AudioGuidesQueueStore` (actor) that owns Immediate/Deferred/base snapshot, history stack, autoplay flag, current discovery ID, and lastActivityAt. Persist to `UserDefaults` with dedupe and trimming. On app launch, reload and drop missing discoveries; if `lastActivityAt` is older than 24h, prompt to resume or clear, and auto-clear if declined or after timeout. Auto-clear also runs if no playback activity for 24h.
-- Queue control flow: `AudioGuidesQueueStore` is the single source of truth for Up Next. It exposes `next()/previous()/playNow(id)/enqueue` helpers; hero/mini invoke these, and the store in turn calls `VoiceoverPlaybackController.togglePlayback(for:)` with the resolved `DiscoverySummary`. The controller’s `currentDiscovery` stays in sync with the store’s `current` item; any legacy queue providers are adapted once into the store and then discarded.
-- Playback speed: add a global `VoiceoverPlaybackSpeedStore` (actor/UserDefaults) storing the last chosen speed per user. Wire hero/mini speed menu to set/read it and call a new `VoiceoverPlaybackController.setRate(_:)` helper that updates AVPlayer rate immediately and on new items. This store is separate from `VoiceoverPreferences` (which govern voice creation, not playback).
-- Prefetch & offline guards: queue store calls `VoiceoverPlaybackController.prefetch(for:)` when items enter Immediate/Deferred/base snapshot. UI asks controller for `isDownloadPending` + reachability to show “Offline – not downloaded” and block playback; retries when online and cache available.
-- Generation path: My Discoveries absent/failed states call `requestVoiceover(for:)` on the controller; reuse `insufficient_credits` copy and retry semantics from `VoiceoverDetailButton`. No local credit math.
-- Error surfacing: playback errors surfaced from controller errorMessage; UI shows inline chip with retry → `togglePlayback`/`requestVoiceover` as appropriate. Clearing error hides mini if playback is idle/failed.
+## Data Layer Architecture
 
-## Playback Speed (new, global)
-- New store key (UserDefaults) for `playbackSpeed`, default 1.0. Exposed via `VoiceoverPlaybackSpeedStore` actor to keep concurrency safe.
-- `VoiceoverPlaybackController` gains `setRate(_:)` and persists current rate in memory; on player setup, it applies the stored rate from `VoiceoverPlaybackSpeedStore`. UI reads the store and updates the controller; the controller’s active rate is reflected in hero/mini and any other playback surfaces.
-- This store is distinct from `VoiceoverPreferences` (auto/voice/tts); no migration of prior keys is required and playback speed does not affect voiceover generation.
+### Shared Discovery Store
+
+Create a shared `DiscoveryStore` actor that both Discoveries and Audio Guides pages read from. This prevents re-renders in one page when the other fetches more data.
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                   DiscoveryStore (Actor)                      │
+│  - cache: [Int64: DiscoverySummary]  (normalized dictionary)  │
+│  - orderedIds: [Int64]               (maintains recency)      │
+│  - loadMore(limit:before:) async -> [DiscoverySummary]        │
+│  - get(id:) -> DiscoverySummary?                              │
+└────────────────────────────┬──────────────────────────────────┘
+                             │
+             ┌───────────────┴───────────────┐
+             ▼                               ▼
+┌─────────────────────────────┐   ┌─────────────────────────────┐
+│   DiscoveryFeedViewModel    │   │   AudioGuidesViewModel      │
+│  - localIds: [Int64]        │   │  - localIds: [Int64]        │
+│  - cursor, hasMore, etc.    │   │  - cursor, hasMore, etc.    │
+│  - owns grid pagination     │   │  - owns list pagination     │
+└─────────────────────────────┘   └─────────────────────────────┘
+```
+
+**File: `WhatsThatDomain/Discovery/DiscoveryStore.swift`** (NEW)
+
+```swift
+public actor DiscoveryStore {
+    private var cache: [Int64: DiscoverySummary] = [:]
+    private var orderedIds: [Int64] = []
+    private let repository: DiscoveryRepository
+    
+    public init(repository: DiscoveryRepository) {
+        self.repository = repository
+    }
+    
+    /// Fetches more discoveries and caches them. Returns newly fetched items.
+    public func loadMore(limit: Int, before cursor: Int64?) async throws -> [DiscoverySummary] {
+        let page = try await repository.fetchDiscoveries(limit: limit, before: cursor)
+        for item in page {
+            if cache[item.id] == nil {
+                orderedIds.append(item.id)
+            }
+            cache[item.id] = item
+        }
+        return page
+    }
+    
+    /// Returns cached discovery by ID, nil if not cached.
+    public func get(id: Int64) -> DiscoverySummary? {
+        cache[id]
+    }
+    
+    /// Returns all cached discoveries in recency order.
+    public func allCached() -> [DiscoverySummary] {
+        orderedIds.compactMap { cache[$0] }
+    }
+    
+    /// Returns all cached discovery IDs.
+    public func allCachedIds() -> [Int64] {
+        orderedIds
+    }
+    
+    /// Upserts a discovery (e.g., after creation).
+    public func upsert(_ summary: DiscoverySummary) {
+        if cache[summary.id] == nil {
+            orderedIds.insert(summary.id, at: 0)
+        }
+        cache[summary.id] = summary
+        // Re-sort by capturedAt descending
+        orderedIds.sort { 
+            (cache[$0]?.capturedAt ?? .distantPast) > (cache[$1]?.capturedAt ?? .distantPast)
+        }
+    }
+    
+    /// Removes a discovery from cache.
+    public func remove(id: Int64) {
+        cache.removeValue(forKey: id)
+        orderedIds.removeAll { $0 == id }
+    }
+}
+```
+
+**Update: `DiscoveryFeedViewModel`**
+
+- Inject `DiscoveryStore` instead of `DiscoveryFeedUseCase`
+- Maintain local `@Published var localIds: [Int64]` for what's visible in the grid
+- On pagination, call `store.loadMore()` and append new IDs to `localIds`
+- Computed property maps `localIds` → `[DiscoverySummary]` for grid display
+
+**Update: `AudioGuidesViewModel`** with voiceover prefetch:
+
+```swift
+@MainActor
+final class AudioGuidesViewModel: ObservableObject {
+    @Published private(set) var localIds: [Int64] = []
+    @Published private(set) var isLoadingVoiceoverStatus = false
+    
+    private let discoveryStore: DiscoveryStore
+    private let voiceoverController: VoiceoverPlaybackController
+    private var didInitialPrefetch = false
+    private var cursor: Int64?
+    private var hasMore = true
+    
+    func onAppear() async {
+        guard !didInitialPrefetch else { return }
+        didInitialPrefetch = true
+        
+        // Load IDs from shared store
+        let cachedIds = await discoveryStore.allCachedIds()
+        localIds = cachedIds
+        
+        // Batch prefetch voiceover status for all known discoveries
+        if !cachedIds.isEmpty {
+            isLoadingVoiceoverStatus = true
+            voiceoverController.prefetch(for: cachedIds)
+            // prefetch is fire-and-forget; status updates via assetStates publisher
+            isLoadingVoiceoverStatus = false
+        }
+    }
+    
+    func loadMoreIfNeeded(currentId: Int64?) async {
+        guard hasMore else { return }
+        guard let currentId, let index = localIds.firstIndex(of: currentId) else { return }
+        
+        // Trigger load when near end
+        let threshold = localIds.index(localIds.endIndex, offsetBy: -4, limitedBy: localIds.startIndex) ?? localIds.startIndex
+        guard index >= threshold else { return }
+        
+        do {
+            let newItems = try await discoveryStore.loadMore(limit: 10, before: cursor)
+            let newIds = newItems.map(\.id)
+            
+            // Append to local list
+            let existingSet = Set(localIds)
+            let filtered = newIds.filter { !existingSet.contains($0) }
+            localIds.append(contentsOf: filtered)
+            
+            // Update cursor
+            cursor = newItems.last?.id
+            hasMore = newItems.count == 10
+            
+            // Batch prefetch voiceover status for new items
+            if !filtered.isEmpty {
+                voiceoverController.prefetch(for: filtered)
+            }
+        } catch {
+            // Silent failure - user just sees end of list
+        }
+    }
+}
+```
+
+### Row State Computation (No AudioGuide Struct)
+
+Each row in My Discoveries / Up Next computes its display state from sources at render time:
+
+```swift
+struct MyDiscoveriesRowView: View {
+    let discoveryId: Int64
+    @ObservedObject var voiceoverController: VoiceoverPlaybackController
+    @ObservedObject var queueStore: AudioGuidesQueueStore
+    @ObservedObject var progressStore: VoiceoverProgressStore
+    
+    private var rowStatus: AudioGuideRowStatus {
+        guard let asset = voiceoverController.normalizedAsset(for: discoveryId) else {
+            return .empty
+        }
+        switch asset.status {
+        case .ready: return .ready
+        case .processing: return .generating
+        case .failed: return .failed
+        case .none, .missing: return .empty
+        }
+    }
+    
+    private var isQueued: Bool { queueStore.isQueued(discoveryId) }
+    private var isPlaying: Bool { queueStore.current == discoveryId }
+    private var progress: Double? { progressStore.position(for: discoveryId) }
+}
+
+enum AudioGuideRowStatus {
+    case ready, generating, failed, empty
+}
+```
+
+### Voiceover Status Fetching Strategy
+Voiceover metadata (ready/generating/failed/empty) is fetched via `VoiceoverPlaybackController.prefetch(for:)` with internal caching in `SupabaseVoiceoverRepository`.
+
+- **Discoveries tab**: Do NOT fetch voiceover status when loading discoveries. Keep the grid lightweight.
+- **Audio Guides page entry**: On first appearance, take all discovery IDs from `DiscoveryStore.allCachedIds()` and call `voiceoverController.prefetch(for: allCachedIds)` to batch-fetch statuses. Display rows with computed status from `voiceoverController.normalizedAsset(for:)`.
+- **Audio Guides pagination**: After new discoveries are fetched, immediately call `voiceoverController.prefetch(for: newIds)` for the new items.
+- **Return to Discoveries**: No change needed—Discoveries grid doesn't show voiceover status per-row; Discovery Detail reads from already-cached `assetStates`.
+- **Error handling**: Silent failures for fetch/prefetch errors—no toast, no banner. User just sees end of list if offline or fetch fails.
 
 ### Voiceover Asset Status Behaviour (Parity with Discovery Detail)
 - Source of truth: Audio Guides must use `VoiceoverPlaybackController.normalizedAsset(for:)` for all readiness/error states. Do not reimplement status ageing logic.
@@ -148,24 +328,30 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 ## Playback UX Integration
 - Mini player must replace legacy voiceover mini globally (visible on all screens where legacy appears) and open Audio Guides page; back/close returns to prior screen.
 - Global mini host:
-  - Decision: host a single shared Audio Guides mini as a ZStack overlay in the root shell (e.g., wrapping `MainTabView`), pinned above the tab bar/home indicator. Do not inject per-screen safe-area insets.
-  - Replace `VoiceoverPersistentPlayerView`/`VoiceoverPlayerBar`/`VoiceoverPlayerHost` with a single Audio Guides mini player host that uses the shared `VoiceoverPlaybackController` and `AudioGuidesQueueStore`, and is overlaid above existing content (no safe-area inset plumbing, no height reporting).
-  - The same mini instance is used everywhere it appears; there is no separate “page-local” mini. Audio Guides list mode reuses this same mini host and placement.
-  - Retire `VoiceoverPlayerInsetStore` and related inset padding; layout must remain correct without bottom inset propagation.
-  - Host once at the root UI shell (e.g., in `RootContentView` as a ZStack overlay above `MainTabView`) so it can be shown/hidden based on screen context while remaining a single shared instance.
+  - **Decision**: Host the global mini player in `MainTabView` as a ZStack overlay above the TabView. This provides direct access to `selectedTab`, `activeOverlayTab`, and `activeOverlayPhase` for visibility control.
+  - Replace `VoiceoverPersistentPlayerView`/`VoiceoverPlayerBar`/`VoiceoverPlayerHost` with a single Audio Guides mini player host that uses the shared `VoiceoverPlaybackController` and `AudioGuidesQueueStore`, and is overlaid above existing content.
+  - The same mini instance is used everywhere it appears; there is no separate "page-local" mini. Audio Guides list mode reuses this same mini host and placement.
   - Visibility rules:
     - Visible on:
-      - Main Discoveries page.
+      - Main Discoveries page (`selectedTab == .discoveries`).
       - Discovery Detail overlay.
-      - Discovery streaming stage and post-discovery states (after capture/selection/confirmation).
-      - Audio Guides page in list mode (using the existing mini placement at the bottom of the overlay).
+      - Discovery streaming stage and post-discovery states (`activeOverlayPhase == .analyzing`).
+      - Audio Guides page in list mode (`selectedTab == .audioGuides`).
     - Hidden on:
-      - Camera flow (capture).
-      - Upload flow (gallery selection).
-      - Confirm Image Selection.
-      - Settings.
+      - Camera flow (`activeOverlayPhase == .capturingInitial/Retake`).
+      - Upload flow (`activeOverlayPhase == .selectingInitial/Retake`).
+      - Confirm Image Selection (`activeOverlayPhase == .confirming`).
+      - Settings (presented as sheet—should slide over mini; **TODO**: verify this behavior after implementation).
     - Hidden whenever playback is idle/failed with no current discovery.
   - Tap on the mini opens the Audio Guides page focused on the active discovery; system back/close returns to the previous screen without clearing queue/history.
+- Scroll content padding:
+  - Create `MiniPlayerPresenceStore` that exposes `height: CGFloat` and `isVisible: Bool` with computed `effectiveInset`.
+  - Discovery Detail, creation overlay streaming/complete, and Audio Guides list apply `.padding(.bottom, miniPlayerPresence.effectiveInset)` to extend scroll area so content can scroll above mini player.
+  - Discoveries grid does NOT need padding—content scrolls naturally under mini, user can scroll more.
+  - **TODO**: After implementing, verify scroll padding behavior in Discovery Detail and creation overlay.
+- Legacy removal:
+  - Retire `VoiceoverPlayerInsetStore` and related safe-area inset plumbing.
+  - Remove `.safeAreaInset(edge: .bottom)` modifier from Discoveries tab in `MainTabView`.
 - Hero/mini sync: both views bound to shared controller state; collapse/expand must not interrupt playback.
 - Controls to add:
   - ±5s buttons (tap) mapped to `VoiceoverPlaybackController` seek-by-5s helpers.
@@ -181,15 +367,388 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 - Absent state triggers credit modal using shared generation path; failed state retry uses same; both flows must call `requestVoiceover(for:)` on the shared controller and rely on the global credits/edge-function behavior.
 
 ## Persisted Settings & Progress
-- Storage mechanism:
-  - Queue ordering, current item, autoplay toggle: persisted via `AudioGuidesQueueStore` using `UserDefaults` as backing storage.
-  - Per-discovery progress and last-played timestamps (history): persisted via a shared `VoiceoverProgressStore` actor using `UserDefaults`, used by both Discovery Detail and Audio Guides.
-  - Playback speed selection: persisted via `VoiceoverPlaybackSpeedStore` using `UserDefaults`, so the hero/mini and Discovery Detail share the same speed.
+
+### State Stores Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Shared Voiceover Stores                      │
+│  (Used by Discovery Detail, Audio Guides, any future surfaces) │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  VoiceoverProgressStore (Actor)    VoiceoverPlaybackSpeedStore  │
+│  ├── positions: [Int64: Double]    ├── speed: Double (1.0)     │
+│  ├── lastPlayed: [Int64: Date]     └── UserDefaults backed     │
+│  └── UserDefaults backed                                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  Audio Guides Specific Store                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  AudioGuidesQueueStore (Actor)                                  │
+│  ├── immediate: [Int64]        (Play Next queue)                │
+│  ├── deferred: [Int64]         (Add to End queue)               │
+│  ├── baseList: [Int64]         (Discovery ordering snapshot)    │
+│  ├── baseIndex: Int            (Current position in base)       │
+│  ├── history: [Int64]          (Just Played stack)              │
+│  ├── current: Int64?           (Now playing)                    │
+│  ├── autoplayEnabled: Bool                                      │
+│  ├── lastActivityAt: Date?     (For stale session detection)    │
+│  └── UserDefaults backed                                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### VoiceoverProgressStore
+
+**File: `WhatsThatPresentation/Shared/Stores/VoiceoverProgressStore.swift`** (NEW)
+
+```swift
+@MainActor
+public final class VoiceoverProgressStore: ObservableObject {
+    private static let positionsKey = "voiceover_positions"
+    private static let lastPlayedKey = "voiceover_last_played"
+    
+    @Published private(set) var positions: [Int64: Double] = [:]
+    @Published private(set) var lastPlayed: [Int64: Date] = [:]
+    
+    private let defaults: UserDefaults
+    
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        load()
+    }
+    
+    public func position(for discoveryId: Int64) -> Double? {
+        positions[discoveryId]
+    }
+    
+    public func updatePosition(_ position: Double, for discoveryId: Int64) {
+        positions[discoveryId] = position
+        lastPlayed[discoveryId] = Date()
+        save()
+    }
+    
+    public func clearPosition(for discoveryId: Int64) {
+        positions.removeValue(forKey: discoveryId)
+        save()
+    }
+    
+    private func load() { /* decode from UserDefaults */ }
+    private func save() { /* encode to UserDefaults */ }
+}
+```
+
+### VoiceoverPlaybackSpeedStore
+
+**File: `WhatsThatPresentation/Shared/Stores/VoiceoverPlaybackSpeedStore.swift`** (NEW)
+
+```swift
+@MainActor
+public final class VoiceoverPlaybackSpeedStore: ObservableObject {
+    private static let speedKey = "voiceover_playback_speed"
+    
+    @Published var speed: Double {
+        didSet { defaults.set(speed, forKey: Self.speedKey) }
+    }
+    
+    private let defaults: UserDefaults
+    
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let stored = defaults.double(forKey: Self.speedKey)
+        self.speed = stored > 0 ? stored : 1.0
+    }
+}
+```
+
+### AudioGuidesQueueStore
+
+**File: `WhatsThatPresentation/Features/AudioGuides/Stores/AudioGuidesQueueStore.swift`** (NEW)
+
+```swift
+@MainActor
+public final class AudioGuidesQueueStore: ObservableObject {
+    @Published private(set) var immediate: [Int64] = []      // Play Next
+    @Published private(set) var deferred: [Int64] = []       // Add to End
+    @Published private(set) var baseList: [Int64] = []       // Discovery ordering
+    @Published private(set) var baseIndex: Int = 0
+    @Published private(set) var history: [Int64] = []        // Just Played
+    @Published private(set) var current: Int64?
+    @Published var autoplayEnabled: Bool = false
+    
+    private var lastActivityAt: Date?
+    private let staleThreshold: TimeInterval = 24 * 60 * 60  // 24h
+    
+    // MARK: - Query Methods
+    
+    public func isQueued(_ id: Int64) -> Bool {
+        immediate.contains(id) || deferred.contains(id)
+    }
+    
+    public func isPlaying(_ id: Int64) -> Bool {
+        current == id
+    }
+    
+    // MARK: - Queue Operations
+    
+    public func playNow(_ id: Int64, recentering baseSnapshot: [Int64]) {
+        if let currentId = current {
+            history.insert(currentId, at: 0)
+            trimHistory()
+        }
+        current = id
+        baseList = baseSnapshot
+        baseIndex = baseSnapshot.firstIndex(of: id) ?? 0
+        lastActivityAt = Date()
+        save()
+    }
+    
+    public func playNext(_ id: Int64) {
+        guard !isQueued(id) && current != id else { return }
+        immediate.insert(id, at: 0)
+        save()
+    }
+    
+    public func addToEnd(_ id: Int64) {
+        guard !isQueued(id) && current != id else { return }
+        deferred.append(id)
+        save()
+    }
+    
+    public func next() -> Int64? {
+        lastActivityAt = Date()
+        
+        // Push current to history
+        if let currentId = current {
+            history.insert(currentId, at: 0)
+            trimHistory()
+        }
+        
+        // Take from immediate first, then deferred, then base
+        if let nextId = immediate.first {
+            immediate.removeFirst()
+            current = nextId
+        } else if let nextId = deferred.first {
+            deferred.removeFirst()
+            current = nextId
+        } else if baseIndex + 1 < baseList.count {
+            baseIndex += 1
+            current = baseList[baseIndex]
+        } else {
+            current = nil
+        }
+        
+        save()
+        return current
+    }
+    
+    public func previous(currentPosition: TimeInterval, restartThreshold: TimeInterval = 3.0) -> Int64? {
+        lastActivityAt = Date()
+        
+        // If past threshold, restart current (don't change current)
+        if currentPosition > restartThreshold {
+            return current
+        }
+        
+        // Pop from history
+        if let prevId = history.first {
+            history.removeFirst()
+            current = prevId
+        } else if baseIndex > 0 {
+            baseIndex -= 1
+            current = baseList[baseIndex]
+        }
+        
+        save()
+        return current
+    }
+    
+    public func remove(_ id: Int64) {
+        immediate.removeAll { $0 == id }
+        deferred.removeAll { $0 == id }
+        save()
+    }
+    
+    public func clearQueue() {
+        immediate.removeAll()
+        deferred.removeAll()
+        save()
+    }
+    
+    private func trimHistory() {
+        if history.count > 100 {
+            history = Array(history.prefix(100))
+        }
+    }
+    
+    // MARK: - Stale Session
+    
+    public var isStale: Bool {
+        guard let lastActivity = lastActivityAt else { return false }
+        return Date().timeIntervalSince(lastActivity) > staleThreshold
+    }
+    
+    // MARK: - Persistence
+    private func save() { /* encode to UserDefaults */ }
+    private func load() { /* decode from UserDefaults */ }
+}
+```
+
+### MiniPlayerPresenceStore
+
+**File: `WhatsThatPresentation/Shared/Stores/MiniPlayerPresenceStore.swift`** (NEW)
+
+```swift
+@MainActor
+public final class MiniPlayerPresenceStore: ObservableObject {
+    @Published var height: CGFloat = 0
+    @Published var isVisible: Bool = false
+    
+    public var effectiveInset: CGFloat {
+        isVisible ? height : 0
+    }
+}
+```
+
+### MainTabView Mini Player Hosting
+
+**File: `MainTabView.swift`** (MODIFY)
+
+```swift
+struct MainTabView: View {
+    @StateObject private var miniPlayerPresence = MiniPlayerPresenceStore()
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                // ... existing tabs
+            }
+            
+            // Creation overlay (existing)
+            if let overlayTab = activeOverlayTab, ... { ... }
+            
+            // Global mini player
+            if shouldShowMiniPlayer {
+                AudioGuidesMiniPlayerView(
+                    controller: voiceoverController,
+                    queueStore: queueStore
+                )
+                .padding(.bottom, bottomSafeAreaInset + tabBarHeight)
+                .background(GeometryReader { geo in
+                    Color.clear.preference(
+                        key: MiniPlayerHeightKey.self,
+                        value: geo.size.height
+                    )
+                })
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .environmentObject(miniPlayerPresence)
+        .onPreferenceChange(MiniPlayerHeightKey.self) { height in
+            miniPlayerPresence.height = height
+            miniPlayerPresence.isVisible = shouldShowMiniPlayer
+        }
+    }
+    
+    private var shouldShowMiniPlayer: Bool {
+        // Must have active playback
+        guard voiceoverController.currentDiscovery != nil else { return false }
+        
+        switch voiceoverController.playbackState {
+        case .idle, .failed:
+            return false
+        default:
+            break
+        }
+        
+        // Hide during capture/selection/confirmation phases
+        if let phase = activeOverlayPhase {
+            switch phase {
+            case .capturingInitial, .capturingRetake,
+                 .selectingInitial, .selectingRetake,
+                 .confirming, .requestingPermissions:
+                return false
+            case .analyzing, .idle, .cancelled, .error:
+                break
+            }
+        }
+        
+        // Note: Settings is presented as sheet and should slide over mini
+        // TODO: Verify this behavior after implementation
+        
+        return true
+    }
+}
+```
+
+### VoiceoverPlaybackController Extensions
+
+**New methods required:**
+
+```swift
+extension VoiceoverPlaybackController {
+    /// Seek forward/backward by seconds
+    func seek(by seconds: TimeInterval) {
+        guard let player = audioPlayer,
+              let duration = player.currentItem?.duration.seconds,
+              duration.isFinite else { return }
+        
+        let newTime = max(0, min(duration, player.currentTime().seconds + seconds))
+        player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
+    }
+    
+    /// Set playback rate (persisted via VoiceoverPlaybackSpeedStore)
+    func setRate(_ rate: Double) {
+        audioPlayer?.rate = Float(rate)
+        currentRate = rate
+    }
+    
+    /// Current rate
+    var currentRate: Double { get set }
+}
+```
+
+**Accelerated Seek (Press-and-Hold):**
+
+```swift
+// In hero/mini player controls:
+Button(action: { controller.seek(by: 5) })
+    .simultaneousGesture(
+        LongPressGesture(minimumDuration: 0.3)
+            .onEnded { _ in
+                startAcceleratedSeek(direction: .forward)
+            }
+    )
+
+func startAcceleratedSeek(direction: SeekDirection) {
+    // Every 0.2s, seek by 5s in direction
+    acceleratedSeekTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+        controller.seek(by: direction == .forward ? 5 : -5)
+    }
+}
+```
 
 ## UI Removal/Replacement Plan (high level)
-- Remove usages of `VoiceoverPersistentPlayerView`, `VoiceoverPlayerBar`, `VoiceoverPlayerHost`, and related inset plumbing; replace with a single Audio Guides mini player host surfaced globally and overlaid on top of existing content (no bottom inset dependency).
-- Remove `VoiceoverPlayerInsetStore`-based safe-area inset plumbing; individual screens should manage their own internal padding while the mini floats above the tab bar/home indicator.
-- Ensure tab layouts remain visually correct once the legacy inset logic is removed; the mini should appear in the same placement as the Audio Guides list mini (above the tab bar/home indicator) without requiring each screen to manage additional padding.
+
+### Components to Remove
+
+| Component | Location | Replacement |
+|-----------|----------|-------------|
+| `VoiceoverPersistentPlayerView` | `Shared/Voiceover/` | `AudioGuidesMiniPlayerView` |
+| `VoiceoverPlayerBar` | `Shared/Voiceover/` | `AudioGuidesMiniPlayerView` |
+| `VoiceoverPlayerHost` | `Shared/Voiceover/` | ZStack overlay in `MainTabView` |
+| `VoiceoverPlayerInsetStore` | `Shared/Voiceover/` | `MiniPlayerPresenceStore` |
+| `VoiceoverPlayerHeightPreferenceKey` | `Shared/Voiceover/` | `MiniPlayerHeightKey` |
+
+### Removal Steps
+
+1. Remove `.safeAreaInset(edge: .bottom)` modifier from Discoveries tab in `MainTabView`
+2. Remove `@StateObject private var playerInsetStore` from `MainTabView`
+3. Delete the four files listed above
+4. Update any views that read `playerInsetStore` to use `MiniPlayerPresenceStore` instead
 
 ## Outstanding Questions / Decisions Needed
 - Whether to expose a “Clear history” affordance (in addition to “Clear queue”) and any UX gating around trimming history length or confirming destructive actions.
@@ -197,6 +756,12 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 ## Next Steps
 - [ ] Complete deep-dive of `VoiceoverPlaybackController` to map required extension points (seek, rate, queue provider, error handling, progress persistence).
 - [ ] Inventory and mark all legacy voiceover UI entry points for removal/replacement.
-- [ ] Draft detailed Up Next queue behavior spec (ad-hoc play, clear queue policy, auto vs. manual ordering).
-- [ ] Define persistence layer for queue/history/progress and speed/autoplay settings.
-- [ ] Design navigation contract for Discovery Detail ↔ Audio Guides (including animation approach).
+- [x] ~~Draft detailed Up Next queue behavior spec~~ (done above).
+- [x] ~~Define persistence layer for queue/history/progress and speed/autoplay settings~~ (three stores defined: VoiceoverProgressStore, VoiceoverPlaybackSpeedStore, AudioGuidesQueueStore).
+- [x] ~~Design navigation contract for Discovery Detail ↔ Audio Guides~~ (no custom animation, standard tab transitions).
+- [x] ~~Define data layer architecture for shared discovery data~~ (DiscoveryStore actor with separate view model localIds).
+- [x] ~~Define mini player hosting location~~ (MainTabView ZStack overlay with MiniPlayerPresenceStore for scroll padding).
+- [ ] Implement `DiscoveryStore` actor and update `DiscoveryFeedViewModel` and `AudioGuidesViewModel`.
+- [ ] Implement the three state stores.
+- [ ] Verify Settings sheet correctly covers mini player.
+- [ ] Verify scroll padding behavior in Discovery Detail after implementation.

@@ -25,7 +25,6 @@ struct DiscoveryStreamingStageView: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject private var playerInsetStore: VoiceoverPlayerInsetStore
     @State private var displayedMarkdown: String = ""
     @State private var loaderCleared: Bool = false
     @State private var shuffledMessages: [String] = DiscoveryStreamingStageView.loadingMessages.shuffled()
@@ -137,6 +136,7 @@ struct DiscoveryStreamingStageView: View {
                 }
                 // Image/header drawn inside content overlay, so the whole page scrolls.
                 .background(palette.background.ignoresSafeArea())
+                .miniPlayerScrollInset()
                 .onAppear {
                     resetStateForInitialRender()
                     if loaderCleared {

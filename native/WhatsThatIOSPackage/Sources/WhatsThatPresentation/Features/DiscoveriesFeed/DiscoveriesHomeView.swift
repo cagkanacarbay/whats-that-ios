@@ -135,6 +135,7 @@ struct DiscoveriesHomeView: View {
                     }
                 }
                 .coordinateSpace(name: "discoveriesScroll")
+                .miniPlayerScrollInset()
                 .refreshable {
                     await viewModel.refresh()
                 }
@@ -223,7 +224,7 @@ struct DiscoveriesHomeView: View {
                         isDeletingDiscovery: isDeletionInProgress,
                         onDelete: { handleDeleteRequest(for: $0) },
                         onShowOptions: nil,
-                        onOpenAudioGuide: isDetailFromAudioGuides ? onOpenAudioGuide : nil,
+                        onOpenAudioGuide: onOpenAudioGuide,
                         onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
                     )
                     .ignoresSafeArea(edges: .top)

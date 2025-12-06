@@ -85,6 +85,7 @@ struct SettingsView: View {
                 accountSection
                 onboardingSection
                 devSection
+                cacheDebugSection
             }
             .task {
                 await viewModel.refreshCreditBalance()
@@ -441,6 +442,123 @@ struct SettingsView: View {
                 makeNearbyCacheInspector()
             }
         }
+    }
+    
+    @Environment(\.audioServices) private var audioServices
+    @State private var cacheAlertMessage: String?
+    @State private var showCacheAlert = false
+    
+    private var cacheDebugSection: some View {
+        Section(header: Text("Cache Management (Dev)")) {
+            // Audio Files Cache
+            Button(role: .destructive) {
+                Task {
+                    await VoiceoverFileCache.shared.clearAll()
+                    cacheAlertMessage = "Cleared voiceover audio files cache"
+                    showCacheAlert = true
+                }
+            } label: {
+                cacheButtonLabel(
+                    icon: "waveform",
+                    title: "Clear Audio Files Cache",
+                    subtitle: "Downloaded voiceover audio files"
+                )
+            }
+            
+            // Discovery Images Cache
+            Button(role: .destructive) {
+                Task {
+                    await DiscoveryAssetCache.shared.clearAll()
+                    cacheAlertMessage = "Cleared discovery images cache"
+                    showCacheAlert = true
+                }
+            } label: {
+                cacheButtonLabel(
+                    icon: "photo.stack",
+                    title: "Clear Discovery Images Cache",
+                    subtitle: "Cached discovery thumbnails and images"
+                )
+            }
+            
+            // Clear All Audio Data (combined button)
+            Button(role: .destructive) {
+                Task {
+                    await clearAllAudioData()
+                    cacheAlertMessage = "Cleared all audio data: files, queue, history, and progress"
+                    showCacheAlert = true
+                }
+            } label: {
+                cacheButtonLabel(
+                    icon: "speaker.slash",
+                    title: "Clear All Audio Data",
+                    subtitle: "Audio files, queue, history, progress - everything"
+                )
+            }
+            
+            // Clear All Caches
+            Button(role: .destructive) {
+                Task {
+                    await VoiceoverFileCache.shared.clearAll()
+                    await DiscoveryAssetCache.shared.clearAll()
+                    await clearAllAudioData()
+                    cacheAlertMessage = "Cleared all caches"
+                    showCacheAlert = true
+                }
+            } label: {
+                cacheButtonLabel(
+                    icon: "trash",
+                    title: "Clear All Caches",
+                    subtitle: "Audio files, images, queue, and progress"
+                )
+            }
+        }
+        .alert("Cache Cleared", isPresented: $showCacheAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(cacheAlertMessage ?? "Cache cleared successfully")
+        }
+    }
+    
+    private func cacheButtonLabel(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .foregroundStyle(Color.red)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+    
+    /// Clears all audio-related data including queue, history, and progress.
+    /// Uses audioServices if available, otherwise falls back to direct UserDefaults removal.
+    private func clearAllAudioData() async {
+        // Clear voiceover audio files
+        await VoiceoverFileCache.shared.clearAll()
+        
+        // Try to clear via audioServices first (updates in-memory state)
+        if let services = audioServices {
+            services.queueStore.clearAll()
+            services.progressStore.clearAll()
+        }
+        
+        // Also directly remove from UserDefaults to ensure persistence is cleared
+        // This handles cases where audioServices might not be available or state wasn't synced
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "audio_guides_queue_store")
+        defaults.removeObject(forKey: "voiceover_positions")
+        defaults.removeObject(forKey: "voiceover_last_played")
+        defaults.synchronize()
     }
 
     private var appearance: AppAppearance {

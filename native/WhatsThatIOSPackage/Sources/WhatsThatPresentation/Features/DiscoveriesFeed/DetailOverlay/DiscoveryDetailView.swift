@@ -426,6 +426,7 @@ private struct DiscoveryDetailContentView: View {
         }
         .id(discovery.id)
         .coordinateSpace(name: "hero-scroll")
+        .miniPlayerScrollInset()
         .frame(width: containerWidth)
         .contentMargins(.all, 0, for: .scrollContent)
         .conditionalScrollDisabled(isScrollDisabled)
@@ -464,13 +465,10 @@ private struct DiscoveryDetailContentView: View {
     }
 
     private var shouldShowAudioPill: Bool {
-        // If we have an explicit Audio Guides callback for this discovery,
-        // prefer showing the pill (used when navigating from Audio Guides).
-        if onOpenAudioGuide != nil {
-            return true
-        }
-
-        // Otherwise, fall back to the global voiceover playback controller.
+        // Only show the pill when this discovery is currently playing or paused in the audio player.
+        // This ensures only one discovery detail shows the pill at a time (the one in "Now Playing").
+        guard onOpenAudioGuide != nil else { return false }
+        
         switch voiceoverController.playbackState {
         case let .playing(id), let .paused(id):
             return id == discovery.id

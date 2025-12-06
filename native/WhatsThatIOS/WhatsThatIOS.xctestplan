@@ -25,6 +25,20 @@
     {
       "target" : {
         "containerPath" : "container:WhatsThatIOSPackage",
+        "identifier" : "WhatsThatPresentationTests",
+        "name" : "WhatsThatPresentationTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:WhatsThatIOSPackage",
+        "identifier" : "WhatsThatDomainTests",
+        "name" : "WhatsThatDomainTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:WhatsThatIOSPackage",
         "identifier" : "WhatsThatIOSFeatureTests",
         "name" : "WhatsThatIOSFeatureTests"
       }

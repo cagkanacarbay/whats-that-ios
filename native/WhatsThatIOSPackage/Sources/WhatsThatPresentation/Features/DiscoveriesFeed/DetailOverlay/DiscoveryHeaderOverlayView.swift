@@ -22,8 +22,6 @@ struct DiscoveryHeaderOverlayView: View {
     private let topControlsBottomPadding: CGFloat = BrandSpacing.small
     var onOpenAudioGuide: (() -> Void)? = nil
 
-    @State private var selectedMode: String = "Text"
-
     var body: some View {
         ZStack(alignment: .bottom) {
             backgroundGradient
@@ -64,18 +62,29 @@ struct DiscoveryHeaderOverlayView: View {
         .frame(width: contentWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .overlay(alignment: .top) {
-            if showTopControls || onOpenAudioGuide != nil {
-                VStack(spacing: BrandSpacing.small) {
-                    if showTopControls {
-                        topControls
+            // Top controls (back button, options button) - at very top
+            if showTopControls {
+                HStack {
+                    if let onClose {
+                        DiscoveryOverlayButton(
+                            systemName: "chevron.left",
+                            action: onClose,
+                            accessibilityLabel: "Back"
+                        )
+                        .recordOverlayInteractiveRegion()
                     }
-
-                    if onOpenAudioGuide != nil {
-                        HStack {
-                            Spacer()
-                            modePill
-                            Spacer()
-                        }
+                    
+                    Spacer()
+                    
+                    if let onShowOptions {
+                        DiscoveryOverlayButton(
+                            systemName: "ellipsis",
+                            action: onShowOptions,
+                            rotation: .degrees(90),
+                            accessibilityLabel: "More options",
+                            isDisabled: !isOptionsEnabled
+                        )
+                        .recordOverlayInteractiveRegion()
                     }
                 }
                 .frame(maxWidth: contentWidth ?? .infinity)
@@ -84,6 +93,24 @@ struct DiscoveryHeaderOverlayView: View {
                 .padding(.bottom, topControlsBottomPadding)
                 .frame(maxWidth: .infinity)
                 .ignoresSafeArea()
+            }
+        }
+        .overlay(alignment: .top) {
+            // Pill - positioned at fixed offset from safe area top
+            // Must match HeroPlayerView.pillTopOffset (12pt) for consistent placement
+            if onOpenAudioGuide != nil {
+                HStack {
+                    Spacer()
+                    modePill
+                    Spacer()
+                }
+                .padding(.top, resolvedTopPadding(from: topControlsSafeAreaInsets) + 10)
+                .ignoresSafeArea()
+                .onAppear {
+                    print("🔍 DiscoveryHeader: insets.top = \(topControlsSafeAreaInsets.top)")
+                    print("🔍 DiscoveryHeader: resolved = \(resolvedTopPadding(from: topControlsSafeAreaInsets))")
+                    print("🔍 DiscoveryHeader: final = \(resolvedTopPadding(from: topControlsSafeAreaInsets) + 10)")
+                }
             }
         }
     }
@@ -133,96 +160,43 @@ struct DiscoveryHeaderOverlayView: View {
 
     @ViewBuilder
     private var modePill: some View {
+        // On Discovery Detail, "Text" is always selected since we're viewing text content
         HStack(spacing: 0) {
             Button(action: {
-                selectedMode = "Text"
+                // Already on Text - no action needed
             }) {
                 Text("Text")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .frame(width: 80, height: 32)
-                    .foregroundColor(
-                        selectedMode == "Text"
-                            ? BrandColors.logo
-                            : palette.textSecondary
-                    )
+                    .foregroundColor(BrandColors.logo)
                     .background(
-                        ZStack {
-                            if selectedMode == "Text" {
-                                Capsule()
-                                    .fill(palette.surface)
-                                    .shadow(
-                                        color: Color.black.opacity(0.1),
-                                        radius: 2,
-                                        x: 0,
-                                        y: 1
-                                    )
-                            }
-                        }
+                        Capsule()
+                            .fill(palette.surface)
+                            .shadow(
+                                color: Color.black.opacity(0.1),
+                                radius: 2,
+                                x: 0,
+                                y: 1
+                            )
                     )
             }
             .recordOverlayInteractiveRegion()
 
             Button(action: {
-                selectedMode = "Audio"
                 onOpenAudioGuide?()
             }) {
                 Text("Audio")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .frame(width: 80, height: 32)
-                    .foregroundColor(
-                        selectedMode == "Audio"
-                            ? BrandColors.logo
-                            : palette.textSecondary
-                    )
-                    .background(
-                        ZStack {
-                            if selectedMode == "Audio" {
-                                Capsule()
-                                    .fill(palette.surface)
-                                    .shadow(
-                                        color: Color.black.opacity(0.1),
-                                        radius: 2,
-                                        x: 0,
-                                        y: 1
-                                    )
-                            }
-                        }
-                    )
+                    .foregroundColor(palette.textSecondary)
             }
             .recordOverlayInteractiveRegion()
         }
         .padding(2)
-        .background(Color.black.opacity(0.65))
+        .background(palette.surface.opacity(0.95))
         .clipShape(Capsule())
-    }
-
-    @ViewBuilder
-    private var topControls: some View {
-        HStack {
-            if let onClose {
-                DiscoveryOverlayButton(
-                    systemName: "chevron.left",
-                    action: onClose,
-                    accessibilityLabel: "Back"
-                )
-                .recordOverlayInteractiveRegion()
-            }
-
-            Spacer()
-
-            if let onShowOptions {
-                DiscoveryOverlayButton(
-                    systemName: "ellipsis",
-                    action: onShowOptions,
-                    rotation: .degrees(90),
-                    accessibilityLabel: "More options",
-                    isDisabled: !isOptionsEnabled
-                )
-                .recordOverlayInteractiveRegion()
-            }
-        }
     }
 
     private var backgroundGradient: some View {

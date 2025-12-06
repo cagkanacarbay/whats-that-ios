@@ -21,7 +21,7 @@ struct MainTabView: View {
     @State private var selectedTab: Tab
     @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
-    @StateObject private var voiceoverController: VoiceoverPlaybackController
+    @StateObject private var audioServices: AudioServicesContainer
     @State private var feedRefreshToken = UUID()
     @State private var pendingDiscoveryId: Int64?
     @State private var pendingCreatedSummary: DiscoverySummary?
@@ -29,7 +29,7 @@ struct MainTabView: View {
     @State private var awaitingSummaryId: Int64?
     @State private var summaryFallbackTask: Task<Void, Never>?
     @State private var activeOverlayTab: Tab?
-    @StateObject private var playerInsetStore = VoiceoverPlayerInsetStore()
+    @State private var audioGuidesMode: AudioGuidesDisplayMode = .hero
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
     @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
@@ -45,7 +45,7 @@ struct MainTabView: View {
         deletionUseCase: DiscoveryDeletionUseCase,
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
-        voiceoverControllerFactory: @escaping () -> VoiceoverPlaybackController,
+        audioServicesFactory: @escaping () -> AudioServicesContainer,
         initialTab: MainTabDestination = .discoveries,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
@@ -59,11 +59,16 @@ struct MainTabView: View {
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
-        _voiceoverController = StateObject(wrappedValue: voiceoverControllerFactory())
+        _audioServices = StateObject(wrappedValue: audioServicesFactory())
     }
 
+    // Convenience accessor
+    private var voiceoverController: VoiceoverPlaybackController {
+        audioServices.playbackController
+    }
+    
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 DiscoveryCreationFlowView(
                     viewModel: cameraViewModel,
@@ -99,31 +104,18 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Discoveries", systemImage: "square.grid.2x2")
                 }
-                // Attach the voiceover bar within the Discoveries tab so it
-                // appears above the tab bar rather than covering it.
-                .safeAreaInset(edge: .bottom) {
-                    if shouldShowPlayerInset {
-                        VoiceoverPlayerHost(
-                            controller: voiceoverController,
-                            overlayPhase: activeOverlayPhase,
-                            imageURLResolver: imageURL(for:)
-                        )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
 
                 AudioGuidesPageView(
-                    fetchDiscoveries: {
-                        (try? await feedUseCase.loadPage(limit: 12, before: nil)) ?? []
-                    },
+                    mode: $audioGuidesMode,
+                    audioServices: audioServices,
                     onTextSelected: { discovery in
                         handleAudioGuideTextSelected(discovery)
                     }
                 )
-                    .tag(Tab.audioGuides)
-                    .tabItem {
-                        Label("Audio Guides", systemImage: "headphones")
-                    }
+                .tag(Tab.audioGuides)
+                .tabItem {
+                    Label("Audio Guides", systemImage: "headphones")
+                }
 
                 DiscoveryCreationFlowView(
                     viewModel: uploadViewModel,
@@ -138,6 +130,7 @@ struct MainTabView: View {
                 }
             }
         
+            // Creation overlay
             if let overlayTab = activeOverlayTab,
                let overlayViewModel = viewModel(for: overlayTab),
                shouldShowOverlay(for: overlayViewModel.flowState)
@@ -152,8 +145,30 @@ struct MainTabView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+            
+            // Global mini player overlay - wrapped to properly observe controller changes
+            MiniPlayerVisibilityWrapper(
+                controller: audioServices.playbackController,
+                isAudioGuidesTab: selectedTab == .audioGuides,
+                audioGuidesMode: audioGuidesMode,
+                activeOverlayPhase: activeOverlayPhase,
+                miniPlayerPresence: audioServices.miniPlayerPresence
+            ) {
+                VStack {
+                    Spacer()
+                    MiniPlayerView {
+                        // Tap mini player -> switch to Audio Guides in hero mode
+                        selectedTab = .audioGuides
+                        audioGuidesMode = .hero
+                    }
+                    .padding(.horizontal, 16)
+                }
+                // Position above tab bar: standard tab bar height (49) + spacing
+                .padding(.bottom, 49 + 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        .environmentObject(playerInsetStore)
+        .audioServices(audioServices)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
             uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
@@ -331,13 +346,25 @@ struct MainTabView: View {
         }
     }
 
-    private var shouldShowPlayerInset: Bool {
-        // Only in the Discoveries tab context.
-        guard selectedTab == .discoveries else { return false }
-        // Hide while a detail overlay is active to avoid double bars.
-        guard !voiceoverController.isDetailOverlayActive else { return false }
-
-        // Hide during capture/selection/confirmation stages of the creation overlay.
+    /// Whether to show the global mini player
+    private var shouldShowMiniPlayer: Bool {
+        // Must have something playing
+        guard voiceoverController.currentDiscovery != nil else { return false }
+        
+        // Only show in active playback states
+        switch voiceoverController.playbackState {
+        case .idle, .failed:
+            return false
+        default:
+            break
+        }
+        
+        // Audio Guides: show in list mode, hide in hero mode (hero has its own full player)
+        if selectedTab == .audioGuides {
+            return audioGuidesMode == .list
+        }
+        
+        // Hide during capture/selection/confirmation stages of the creation overlay
         if let phase = activeOverlayPhase {
             switch phase {
             case .capturingInitial, .capturingRetake, .selectingInitial, .selectingRetake, .confirming, .requestingPermissions:
@@ -346,14 +373,13 @@ struct MainTabView: View {
                 break
             }
         }
-
-        // Only when the player has something to show.
-        switch voiceoverController.playbackState {
-        case .idle, .failed:
-            return false
-        default:
-            return voiceoverController.currentDiscovery != nil
+        
+        // Update mini player presence for scroll insets
+        DispatchQueue.main.async {
+            audioServices.miniPlayerPresence.updateVisibility(true)
         }
+        
+        return true
     }
 
     private func imageURL(for discovery: DiscoverySummary) -> URL? {
@@ -374,5 +400,58 @@ struct MainTabView: View {
         case .audioGuides:
             return .audioGuides
         }
+    }
+}
+
+// MARK: - Mini Player Visibility Wrapper
+
+/// Wrapper view that properly observes VoiceoverPlaybackController to reactively show/hide the mini player.
+/// This solves the issue where reading controller properties via computed properties doesn't trigger SwiftUI re-renders.
+private struct MiniPlayerVisibilityWrapper<Content: View>: View {
+    @ObservedObject var controller: VoiceoverPlaybackController
+    let isAudioGuidesTab: Bool
+    let audioGuidesMode: AudioGuidesDisplayMode
+    let activeOverlayPhase: DiscoveryCreationPhase?
+    let miniPlayerPresence: MiniPlayerPresenceStore
+    @ViewBuilder let content: () -> Content
+    
+    var body: some View {
+        if shouldShow {
+            content()
+                .animation(.easeInOut(duration: 0.25), value: shouldShow)
+                .onAppear {
+                    miniPlayerPresence.updateVisibility(true)
+                }
+        }
+    }
+    
+    private var shouldShow: Bool {
+        // Must have something playing
+        guard controller.currentDiscovery != nil else { return false }
+        
+        // Only show in active playback states
+        switch controller.playbackState {
+        case .idle, .failed:
+            return false
+        default:
+            break
+        }
+        
+        // Audio Guides: show in list mode, hide in hero mode (hero has its own full player)
+        if isAudioGuidesTab {
+            return audioGuidesMode == .list
+        }
+        
+        // Hide during capture/selection/confirmation stages of the creation overlay
+        if let phase = activeOverlayPhase {
+            switch phase {
+            case .capturingInitial, .capturingRetake, .selectingInitial, .selectingRetake, .confirming, .requestingPermissions:
+                return false
+            case .analyzing, .idle, .cancelled, .error:
+                break
+            }
+        }
+        
+        return true
     }
 }

@@ -7,7 +7,8 @@ final class IPoPPreferencesTests: XCTestCase {
         let store = IPoPPreferencesStore(suiteName: suite)
         await store.reset()
 
-        XCTAssertNil(await store.load())
+        let nilCheck1 = await store.load()
+        XCTAssertNil(nilCheck1)
 
         let expected = IPoPPreferences(ordered: [.ideas, .people, .objects, .physical])
         XCTAssertNotNil(expected)
@@ -17,7 +18,8 @@ final class IPoPPreferencesTests: XCTestCase {
         XCTAssertEqual(loaded, expected)
 
         await store.reset()
-        XCTAssertNil(await store.load())
+        let nilCheck2 = await store.load()
+        XCTAssertNil(nilCheck2)
     }
 
     func testStoreReturnsNilForInvalidData() async {

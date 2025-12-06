@@ -7,7 +7,9 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 - Remove/replace old Voiceover UI (e.g., `VoiceoverPersistentPlayerView`, `VoiceoverPlayerBar`, `VoiceoverPlayerHost`) with the Audio Guides hero + mini player UI.
 - Extend playback controls with ±5s seek buttons and press-and-hold accelerated seek (±5s every **0.1s** while held).
 - Playback speed presets: **0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2x** (global per user).
-- History is append-only with timestamps; every played discovery is added once per completion/start event. **Max 50 items** in history.
+- **History is display-only**: stored for "Last Played" UI display, but **NOT used for Previous button navigation**. **Max 50 items** in history.
+- **Previous button traverses baseList only**: Previous goes to chronologically older items in the list (Spotify-like behavior), not based on play order.
+- **Skipped stack for bidirectional navigation**: When Previous is pressed, current item is pushed to `skipped` stack. Next pops from `skipped` first, then queues, then baseList.
 - Progress is display-only: persist last-played position per discovery for UI display ("you listened until here"), but playback always starts from position 0.
 - Queue model: Play Next = LIFO (most recent plays first), Add to End = FIFO (first added plays first).
 - Autoplay: when enabled, skip items that are not ready; skipped non-ready items are moved to Play Next queue. Failed requires user retry before playback.
@@ -15,6 +17,9 @@ Purpose: migrate Audio Guides to use the existing Voiceover playback backend (en
 - Use existing "generate voiceover" edge function for Audio Guides; reuse credits behavior and storage/caching policies.
 - Voiceover status fetched on Discoveries tab immediately after loading discoveries.
 - Stale session handling: auto-clear queue/history after 24h of inactivity (no user prompt).
+- **baseList is audio-ready filtered**: When populating baseList, only discoveries with ready voiceover status are included.
+- **baseList uses full snapshot with lazy expansion**: No fixed 20-item window. Full list of audio-ready items is used, with lazy expansion via `needsExpansion` signal when approaching edges.
+- **Validate on app launch**: `validateBaseList()` removes deleted discoveries from all queues on startup.
 
 ## Completed Investigation Tasks
 - ✅ Audited `VoiceoverFileCache`: 150MB max, LRU eviction by `lastAccessedAt`. Policy sufficient for Audio Guides.
@@ -593,62 +598,238 @@ public actor DiscoveryStore {
 
 **Update: `AudioGuidesViewModel`** with voiceover prefetch:
 
+> [!IMPORTANT]
+> **SwiftUI Observation Pattern**: `VoiceoverPlaybackController` properties like `currentDiscovery`, `position`, and `playbackState` are `@Published` on the controller, but computed properties that passthrough to the controller (e.g., `var currentDiscovery: DiscoverySummary? { voiceoverController.currentDiscovery }`) do **NOT trigger SwiftUI re-renders** in views that observe the ViewModel but not the controller. 
+>
+> **Required pattern**: Republish controller state as `@Published` properties on the ViewModel via Combine subscriptions in `setupBindings()`.
+
+> [!IMPORTANT]
+> **Audio-Ready Filtering**: The `baseList` passed to `queueStore.playNow()` must be filtered to only include discoveries with ready audio guides. Otherwise, the `next()` method may advance to items without audio, and those items can get pushed to history. Similarly, `historyItems` and `nextBaseItems` should filter by ready status.
+
 ```swift
 @MainActor
 final class AudioGuidesViewModel: ObservableObject {
     @Published private(set) var localIds: [Int64] = []
     @Published private(set) var isLoadingVoiceoverStatus = false
     
+    // MARK: - Playback State (republished for SwiftUI observation)
+    
+    /// The currently playing discovery - republished from VoiceoverPlaybackController
+    @Published public private(set) var nowPlayingDiscovery: DiscoverySummary?
+    
+    /// Items from baseList after the current index (shown in Up Next when queues are empty)
+    /// Filtered to only include audio-ready items
+    @Published public private(set) var nextBaseItems: [Int64] = []
+    
+    /// Version counter to trigger row re-renders when states change
+    @Published public private(set) var rowStateVersion: Int = 0
+    
     private let discoveryStore: DiscoveryStore
+    private let queueStore: AudioGuidesQueueStore
     private let voiceoverController: VoiceoverPlaybackController
+    private var cancellables = Set<AnyCancellable>()
     private var didInitialPrefetch = false
     private var cursor: Int64?
     private var hasMore = true
     
-    func onAppear() async {
-        guard !didInitialPrefetch else { return }
-        didInitialPrefetch = true
-        
-        // Load IDs from shared store
-        let cachedIds = await discoveryStore.allCachedIds()
-        localIds = cachedIds
-        
-        // Batch prefetch voiceover status for all known discoveries
-        if !cachedIds.isEmpty {
-            isLoadingVoiceoverStatus = true
-            voiceoverController.prefetch(for: cachedIds)
-            // prefetch is fire-and-forget; status updates via assetStates publisher
-            isLoadingVoiceoverStatus = false
+    /// Current discovery being played (convenience accessor)
+    public var currentDiscovery: DiscoverySummary? {
+        nowPlayingDiscovery  // Use republished @Published property
+    }
+    
+    /// Up Next queue: immediate + deferred queues (user-added items only)
+    public var upNextItems: [Int64] {
+        queueStore.upNextQueue
+    }
+    
+    /// Combined Up Next: queued items + base list fallback (for display in UpNextListView)
+    public var allUpNextItems: [Int64] {
+        let queued = queueStore.upNextQueue
+        if queued.isEmpty {
+            return nextBaseItems
+        }
+        return queued + nextBaseItems
+    }
+    
+    /// History items filtered to only show items with audio guides
+    public var historyItems: [Int64] {
+        let assetStates = voiceoverController.assetStates
+        return queueStore.history
+            .filter { id in
+                guard let asset = assetStates[id] else { return false }
+                return asset.status == .ready
+            }
+            .prefix(historyLimit)
+            .map { $0 }
+    }
+    
+    /// Returns discovery IDs that have ready audio guides
+    /// Used when building baseList for queue navigation
+    private var audioReadyIds: [Int64] {
+        let assetStates = voiceoverController.assetStates
+        return localIds.filter { id in
+            guard let asset = assetStates[id] else { return false }
+            return asset.status == .ready
         }
     }
     
-    func loadMoreIfNeeded(currentId: Int64?) async {
-        guard hasMore else { return }
-        guard let currentId, let index = localIds.firstIndex(of: currentId) else { return }
+    // MARK: - Playback Actions
+    
+    public func play(discovery: DiscoverySummary) {
+        // Get base list for queue context - ONLY include audio-ready items
+        // This ensures next()/previous() only navigates to playable discoveries
+        let baseList = audioReadyIds
         
-        // Trigger load when near end
-        let threshold = localIds.index(localIds.endIndex, offsetBy: -4, limitedBy: localIds.startIndex) ?? localIds.startIndex
-        guard index >= threshold else { return }
-        
-        do {
-            let newItems = try await discoveryStore.loadMore(limit: 10, before: cursor)
-            let newIds = newItems.map(\.id)
-            
-            // Append to local list
-            let existingSet = Set(localIds)
-            let filtered = newIds.filter { !existingSet.contains($0) }
-            localIds.append(contentsOf: filtered)
-            
-            // Update cursor
-            cursor = newItems.last?.id
-            hasMore = newItems.count == 10
-            
-            // Batch prefetch voiceover status for new items
-            if !filtered.isEmpty {
-                voiceoverController.prefetch(for: filtered)
+        // playNow will trim to ~20 items on each side of current
+        queueStore.playNow(discovery.id, recentering: baseList)
+        voiceoverController.togglePlayback(for: discovery)
+    }
+    
+    // MARK: - Combine Bindings
+    
+    private func setupBindings() {
+        // Invalidate row states and increment version counter on queue changes
+        queueStore.$current
+            .sink { [weak self] _ in
+                self?.rowStateProvider.invalidateAll()
+                self?.rowStateVersion += 1
             }
-        } catch {
-            // Silent failure - user just sees end of list
+            .store(in: &cancellables)
+        
+        // Republish currentDiscovery from controller for SwiftUI observation
+        voiceoverController.$currentDiscovery
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] discovery in
+                self?.nowPlayingDiscovery = discovery
+            }
+            .store(in: &cancellables)
+        
+        // Observe baseList, baseIndex, and assetStates to update nextBaseItems
+        // Filter to only include discoveries with ready audio guides
+        Publishers.CombineLatest4(
+            queueStore.$baseList,
+            queueStore.$baseIndex,
+            queueStore.$current,
+            voiceoverController.$assetStates
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] baseList, baseIndex, _, assetStates in
+            guard let self else { return }
+            if baseIndex + 1 < baseList.count {
+                let candidateIds = Array(baseList[(baseIndex + 1)...])
+                // Filter to only include items with ready audio guides
+                let readyItems = candidateIds.filter { id in
+                    guard let asset = assetStates[id] else { return false }
+                    return asset.status == .ready
+                }
+                // Limit to ~10 items for display
+                self.nextBaseItems = Array(readyItems.prefix(10))
+            } else {
+                self.nextBaseItems = []
+            }
+        }
+        .store(in: &cancellables)
+    }
+    
+    // ... loadMoreIfNeeded, etc.
+}
+```
+
+> [!TIP]
+> **Row Highlight State**: To ensure rows correctly show the "now playing" highlight state, the ViewModel exposes a `@Published rowStateVersion: Int` counter that increments whenever row states are invalidated. Row views should use `.id("row-\(discoveryId)-\(viewModel.rowStateVersion)")` to force SwiftUI to recreate the view when states change. Without this, computed `rowState(for:)` values may not trigger re-renders.
+
+### Queue Base List Filtering
+
+When `play()` is called:
+1. `audioReadyIds` filters `localIds` to only discoveries with `.ready` voiceover status
+2. `queueStore.playNow(id, recentering: audioReadyIds)` is called with this filtered list
+3. Inside `playNow`, `trimBaseList()` creates a window of **~20 audio-ready items on each side** of the current item
+4. This ensures `next()`/`previous()` only navigates to playable discoveries
+
+### Navigation Direction
+
+> [!IMPORTANT]
+> **baseList ordering**: `localIds` (and therefore `baseList`) is ordered **newest-first** (index 0 = most recent discovery). This affects navigation direction:
+> - **`next()`**: Decrements `baseIndex` → goes towards newer items (lower indices)
+> - **`previous()`**: Increments `baseIndex` → goes towards older items (higher indices)
+>
+> **`nextBaseItems`** must show items **before** `baseIndex` (the upcoming newer items), not after.
+
+### Navigation Availability
+
+`AudioGuidesQueueStore` provides computed properties to check if navigation is possible:
+
+```swift
+/// Returns true if there is a next item to play
+/// Priority: skipped stack, immediate queue, deferred queue, or baseList items before current (newer items)
+public var hasNext: Bool {
+    !skipped.isEmpty || !immediate.isEmpty || !deferred.isEmpty || baseIndex > 0
+}
+
+/// Returns true if there is a previous item to go back to
+/// Only checks baseList items after current (older items) - history is display-only
+public var hasPrevious: Bool {
+    baseIndex + 1 < baseList.count
+}
+```
+
+> [!IMPORTANT]
+> **History is display-only**: `hasPrevious` does NOT check history. The Previous button only traverses the baseList (chronologically older items). History is used exclusively for the "Last Played" UI section.
+
+### Button Disable States
+
+`MiniPlayerView` and `HeroPlayerView` observe the `queueStore` to disable and grey out buttons:
+
+```swift
+@ObservedObject var queueStore: AudioGuidesQueueStore
+
+private var canPlayNext: Bool {
+    queueStore.hasNext
+}
+
+private var canPlayPrevious: Bool {
+    // Always allow previous if playing (for restart functionality)
+    controller.position > 3.0 || queueStore.hasPrevious
+}
+```
+
+Button styling when disabled:
+```swift
+Button(action: playNext) {
+    Image(systemName: "forward.end.fill")
+        .foregroundColor(canPlayNext
+            ? BrandTheme.palette(for: colorScheme).textPrimary
+            : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
+}
+.disabled(!canPlayNext)
+```
+
+### Previous Button Behavior
+
+The previous button has dual behavior based on playback position:
+
+1. **Position > 3 seconds**: Restart current track (seek to 0)
+2. **Position ≤ 3 seconds**: Go to chronologically older track in baseList (NOT history)
+
+> [!IMPORTANT]
+> Previous traverses the **baseList** only, moving to older items (incrementing `baseIndex`). It does **NOT** pop from history. Before moving, the current item is pushed to the `skipped` stack so that Next can return to it.
+
+```swift
+private func playPrevious() {
+    let currentPosition = controller.position
+    let currentId = queueStore.current
+    
+    if let prevId = queueStore.previous(currentPosition: currentPosition) {
+        // If previous() returns the same ID, it means "restart current"
+        if prevId == currentId {
+            controller.seek(to: 0) {}
+        } else {
+            // Different track - switch to it (this was pushed to skipped stack)
+            Task {
+                if let discovery = await audioServices.discoveryStore.get(id: prevId) {
+                    controller.togglePlayback(for: discovery)
+                }
+            }
         }
     }
 }
@@ -781,33 +962,41 @@ The Up Next tab header contains:
 
 
 ## Up Next Queue Behavior – Spec
-- Base context: when the user taps a discovery to play, initialise or update the base playlist to reflect the Discoveries ordering around that item. `baseList` is a sequence of discovery IDs (**~20 items on each side** of current) and `baseIndex` points at the currently playing item. The base playlist is allowed to evolve over time (for example when new discoveries are captured and auto-generated voiceovers appear), but always represents "previous/next" around the current item, similar to a playlist in Spotify.
+- Base context: when the user taps a discovery to play, initialise or update the base playlist to reflect the **audio-ready** discoveries around that item. `baseList` contains **all audio-ready discovery IDs** (no fixed window), and `baseIndex` points at the currently playing item. The base playlist is allowed to evolve over time via `insertVoiceoverReady()` when voiceovers become ready.
+- **baseList ordering**: Ordered **newest-first** (index 0 = most recent discovery).
+- **Lazy expansion**: When approaching edges (within 5 items of either end), `needsExpansion` signal is published. ViewModel fetches more discoveries and calls `expandBaseList()`.
 - Queue layers (mirrors Spotify/Apple Music):
   - **Immediate queue (front)**: items added via "Play Next" are enqueued **LIFO** (most recent plays first).
   - **Deferred queue (tail)**: items added via "Add to End" are appended **FIFO** (first added plays first).
   - **Queue limit**: Maximum **100 items** across immediate + deferred.
-  - Base fallback: after queues drain, advance through `baseList` starting at `baseIndex + 1`.
-- Next selection order: take head of Immediate; if empty, head of Deferred; if both empty, next item in `baseList` after `baseIndex`. When a queued item is consumed, remove it and push the current item into history.
-- Prev behavior: if current playback position > restartThreshold (3s), restart current; else pop from history stack (most recent first). If history is empty, step backward in `baseList` before `baseIndex`. History grows whenever we advance to a new item (queued or base).
-- History visibility: surfaced in UI under "Just Played" / "Last Played"; **max 50 items** in history, oldest pruned when exceeded.
-- Ad-hoc play while queue exists: tapping any discovery (e.g., from Discoveries grid or My Discoveries) replaces current, pushes prior current to history, and keeps both queue layers intact. The base playlist is re-centred on the new discovery so that previous/next now reflect the items immediately before and after it in Discoveries ordering. After the ad-hoc item ends, playback resumes Immediate → Deferred → base fallback from this new base context.
+  - Base fallback: after queues drain, advance through `baseList` (decrementing `baseIndex` for newer items).
+- **Skipped stack for bidirectional navigation**:
+  - When Previous is pressed, current item is pushed to `skipped` stack before moving.
+  - Next pops from `skipped` first, allowing return traversal.
+  - `playNow()` clears the skipped stack (user made explicit choice).
+- Next selection order: **skipped** (if any) → head of Immediate → head of Deferred → baseList (decrement baseIndex for newer). When a queued item is consumed, push the prior current item into history.
+- **Prev behavior (list traversal only)**: if current playback position > restartThreshold (3s), restart current; else push current to skipped and increment `baseIndex` (go to older item in baseList). **Does NOT pop from history** – history is display-only.
+- History visibility: surfaced in UI under "Just Played" / "Last Played"; **max 50 items** in history, oldest pruned when exceeded. History is populated whenever we advance to a new item but is **never consulted for navigation**.
+- Ad-hoc play while queue exists: tapping any discovery (e.g., from Discoveries grid or My Discoveries) replaces current, pushes prior current to history, clears skipped, and keeps both queue layers intact. The base playlist is re-centred on the new discovery. After the ad-hoc item ends, playback resumes skipped → Immediate → Deferred → base fallback from this new base context.
 - Auto-generated/ready items:
-  - When auto-play is enabled and base list has fewer than 20 items on the "next" side, newly auto-generated voiceovers for recent discoveries are added to fill the base list (up to 20 items each side). Do not auto-add if user is playing older discoveries far from the top.
+  - `insertVoiceoverReady()` inserts newly-ready voiceovers at their correct chronological position in baseList.
+  - Works symmetrically for both newer items (reachable via Next) and older items (reachable via Previous).
   - Default insertion for manually enqueued items remains: "Play Next" enqueues into Immediate (LIFO); "Add to End" appends to Deferred tail (FIFO).
   - Skip non-ready items (processing/failed) when autoplay is on; skipped items are **silently** moved to Play Next queue (no visual indicator, no toast). Playback moves on to the next ready item.
 - Persistence/staleness:
-  - Persist: queue ordering (Immediate/Deferred), base snapshot identifiers, baseIndex, current item, history stack, autoplay toggle, and per-discovery progress.
+  - Persist: queue ordering (Immediate/Deferred), base snapshot identifiers, baseIndex, current item, history stack, **skipped stack**, autoplay toggle, and per-discovery progress.
   - **Stale session rule**: if no playback activity for 24h, **auto-clear** queue/history without prompting user.
   - Auto-prune completed items from queue/history as they are consumed; dedupe queued items by discovery ID.
-- Clear affordance: explicit "Clear queue" action removes Immediate/Deferred while leaving history and current intact; current continues and will fall back to base traversal when done. **Requires confirmation dialog** before clearing.
+- **Validate on app launch**: `validateBaseList(validIds:)` removes deleted discoveries from all lists (baseList, immediate, deferred, history, skipped) and recalculates baseIndex.
+- Clear affordance: explicit "Clear queue" action removes Immediate/Deferred only, while leaving **baseList**, history, skipped, and current intact; current continues and will fall back to base traversal when done. **Requires confirmation dialog** before clearing.
 - Duplicate prevention: if an item is already in Immediate or Deferred, do not add again; "Play Next" on already-queued item **moves it to front** instead. If playing, mark as `Playing`; if queued, mark as `Queued` in My Discoveries chips.
 - Layout implications (list):
   - Sections: Now Playing (pinned row, **cannot be removed**) → Up Next (Immediate then Deferred in order) → Last Played (show 3 items, "Expand history" shows 10 more).
   - Swipe-to-remove on Up Next rows (excluding Now Playing) removes from the corresponding queue.
 - Data model needs:
   - Stable discovery IDs; queue entries carry ID only (status derived from `VoiceoverPlaybackController.normalizedAsset()`).
-  - Persisted structures: `immediate: [Int64]`, `deferred: [Int64]`, `baseList: [Int64]`, `baseIndex: Int`, `history: [Int64]`, `current: Int64?`, `autoplayEnabled: Bool`, `lastActivityAt: Date?`.
-  - Resume logic loads persisted structures; if any IDs are missing/absent, drop them silently.
+  - Persisted structures: `immediate: [Int64]`, `deferred: [Int64]`, `baseList: [Int64]`, `baseIndex: Int`, `history: [Int64]`, `skipped: [Int64]`, `current: Int64?`, `autoplayEnabled: Bool`, `lastActivityAt: Date?`.
+  - Resume logic loads persisted structures; if any IDs are missing/absent, drop them silently via `validateBaseList()`.
 
 ## Discovery Detail Integration
 - Navigation contract (no custom animation):
@@ -1032,12 +1221,61 @@ struct MainTabView: View {
 
 **Current state:** Uses mock data and local state.
 
-**Rewrite to:** Wire to `VoiceoverPlaybackController` and `AudioServicesContainer`.
+**Rewrite to:** Wire to `VoiceoverPlaybackController` via `AudioServicesContainer`.
+
+> [!IMPORTANT]
+> **Implementation Decision: Wrapper View with `@ObservedObject`**
+> 
+> The original plan suggested using `@EnvironmentObject private var controller: VoiceoverPlaybackController`. However, during implementation we discovered that reading `@Published` properties via environment computed properties (e.g., `services?.playbackController.currentDiscovery`) does **not** reliably trigger SwiftUI re-renders. 
+> 
+> **Solution:** Use a wrapper pattern where the outer view extracts the controller from the environment and passes it to an inner content view that uses `@ObservedObject`. This ensures SwiftUI properly observes changes to `currentDiscovery`, `playbackState`, `position`, etc.
 
 ```swift
 struct MiniPlayerView: View {
     @Environment(\.audioServices) private var services
-    @EnvironmentObject private var controller: VoiceoverPlaybackController
+    @Environment(\.colorScheme) var colorScheme
+    
+    var onExpand: () -> Void = {}
+    
+    // Layout constants
+    private let artworkDiameter: CGFloat = 110
+    private let backgroundHeight: CGFloat = 84
+    private let progressLineWidth: CGFloat = 3
+    
+    var body: some View {
+        // Extract controller and pass to inner view that properly observes it
+        if let services {
+            MiniPlayerContentView(
+                controller: services.playbackController,
+                audioServices: services,
+                colorScheme: colorScheme,
+                artworkDiameter: artworkDiameter,
+                backgroundHeight: backgroundHeight,
+                progressLineWidth: progressLineWidth,
+                onExpand: onExpand,
+                onHeightChange: { height in
+                    services.miniPlayerPresence.updateHeight(height)
+                }
+            )
+        }
+    }
+}
+
+/// Inner view that properly observes the playback controller via @ObservedObject
+private struct MiniPlayerContentView: View {
+    @ObservedObject var controller: VoiceoverPlaybackController
+    let audioServices: AudioServicesContainer
+    let colorScheme: ColorScheme
+    // ... other parameters
+    
+    private var discovery: DiscoverySummary? {
+        controller.currentDiscovery  // Now properly observed
+    }
+    
+    private var isPlaying: Bool {
+        if case .playing = controller.playbackState { return true }
+        return false
+    }
     
     var body: some View {
         // Discovery info from controller.currentDiscovery
@@ -1049,6 +1287,13 @@ struct MiniPlayerView: View {
 }
 ```
 
+> [!TIP]
+> **Image Update Fix:** The `DiscoveryCachedImage` component may not reload when the discovery changes because SwiftUI reuses the view identity. Fix this by adding an `.id()` modifier:
+> ```swift
+> DiscoveryCachedImage(discoveryId: discovery.id, remoteURL: imageURL) { ... }
+>     .id("artwork-\(discovery.id)-\(imagePath)")  // Force recreation
+> ```
+
 ---
 
 ## 3.3 HeroPlayerView Rewrite
@@ -1057,17 +1302,60 @@ struct MiniPlayerView: View {
 
 **Current state:** Uses mock ViewModel.
 
-**Rewrite to:**
+**Rewrite to:** Uses the same wrapper pattern as `MiniPlayerView` for proper observation.
 
 ```swift
 struct HeroPlayerView: View {
     @Environment(\.audioServices) private var services
-    @EnvironmentObject private var controller: VoiceoverPlaybackController
+    @Environment(\.colorScheme) var colorScheme
     
-    // Seek controls
-    @State private var isSeekingForward = false
-    @State private var isSeekingBackward = false
+    var onTextSelected: (DiscoverySummary?) -> Void = { _ in }
+    
+    var body: some View {
+        // Extract controller and pass to inner view
+        if let services {
+            HeroPlayerContentView(
+                controller: services.playbackController,
+                audioServices: services,
+                colorScheme: colorScheme,
+                onTextSelected: onTextSelected
+            )
+        }
+    }
+}
+
+/// Inner view that properly observes the playback controller
+private struct HeroPlayerContentView: View {
+    @ObservedObject var controller: VoiceoverPlaybackController
+    let audioServices: AudioServicesContainer
+    let colorScheme: ColorScheme
+    var onTextSelected: (DiscoverySummary?) -> Void
+    
+    @State private var selectedMode = "Audio"
     @State private var seekTimer: Timer?
+    
+    // Computed properties now properly observed
+    private var discovery: DiscoverySummary? {
+        controller.currentDiscovery
+    }
+    
+    private var progress: Double {
+        guard let duration = controller.duration, duration > 0 else { return 0 }
+        return controller.position / duration
+    }
+    
+    private var isPlaying: Bool {
+        if case .playing = controller.playbackState { return true }
+        return false
+    }
+    
+    private var speedStore: VoiceoverPlaybackSpeedStore {
+        audioServices.speedStore
+    }
+    
+    private var queueStore: AudioGuidesQueueStore {
+        audioServices.queueStore
+    }
     
     var body: some View {
         VStack {
@@ -1080,8 +1368,8 @@ struct HeroPlayerView: View {
                 seekButton(direction: .backward)
                 
                 // Play/pause
-                Button(action: { controller.togglePlayback(for: discovery) }) {
-                    // Play/pause icon based on controller.playbackState
+                Button(action: { togglePlayPause() }) {
+                    // Play/pause icon based on isPlaying
                 }
                 
                 // +5s button with press-and-hold
@@ -1090,15 +1378,26 @@ struct HeroPlayerView: View {
             
             // Speed picker
             Menu {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    Button("\(rate)x") {
+                ForEach(VoiceoverPlaybackSpeedStore.validRates, id: \.self) { rate in
+                    Button {
                         controller.setRate(rate)
+                    } label: {
+                        if speedStore.speed == rate {
+                            Label(formatSpeed(rate), systemImage: "checkmark")
+                        } else {
+                            Text(formatSpeed(rate))
+                        }
                     }
                 }
             } label: {
-                Text("\(controller.currentRate, specifier: "%.2g")x")
+                Text(formatSpeed(speedStore.speed))
             }
         }
+    }
+    
+    private func togglePlayPause() {
+        guard let discovery else { return }
+        controller.togglePlayback(for: discovery)
     }
     
     @ViewBuilder

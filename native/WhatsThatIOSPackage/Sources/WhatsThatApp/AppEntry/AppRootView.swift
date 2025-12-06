@@ -33,8 +33,8 @@ public struct AppRootView: View {
         #endif
 
         #if os(iOS)
-        let voiceoverFactory: (() -> VoiceoverPlaybackController)? = {
-            container.makeVoiceoverPlaybackController()
+        let audioServicesFactory: (() -> AudioServicesContainer)? = {
+            container.makeAudioServicesContainer()
         }
         let creditsFactory: (() -> CreditsViewModel)? = {
             container.makeCreditsViewModel()
@@ -67,7 +67,7 @@ public struct AppRootView: View {
             await container.resetIPoPPreferences()
         }
         #else
-        let voiceoverFactory: (() -> VoiceoverPlaybackController)? = nil
+        let audioServicesFactory: (() -> AudioServicesContainer)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
         let balanceFetcher: () async -> Result<Int, Error> = {
             .failure(AuthError.unknown)
@@ -107,7 +107,7 @@ public struct AppRootView: View {
             onboardingUseCase: container.onboardingUseCase,
             flowResolver: container.flowResolver,
             makeCreationViewModel: makeViewModel,
-            makeVoiceoverController: voiceoverFactory,
+            makeAudioServicesContainer: audioServicesFactory,
             makeCreditsViewModel: creditsFactory,
             fetchCreditBalance: balanceFetcher,
             clearAppStoreLocal: clearAppStoreLocal,

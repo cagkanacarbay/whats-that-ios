@@ -5,6 +5,9 @@ import SwiftUI
 import UIKit
 import WhatsThatDomain
 import WhatsThatShared
+import os
+
+private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "VoiceoverPlaybackController")
 
 @MainActor
 public final class VoiceoverPlaybackController: ObservableObject {
@@ -45,6 +48,9 @@ public final class VoiceoverPlaybackController: ObservableObject {
     @Published public private(set) var activePreferences: VoiceoverPreferences
     @Published public var isDetailOverlayActive: Bool = false
     @Published public var suppressProgressUpdates: Bool = false
+    
+    /// Current playback rate (persisted via VoiceoverPlaybackSpeedStore)
+    @Published public private(set) var currentRate: Double = 1.0
     @Published private var downloadedIds: Set<Int64> = []
     private var pendingIds: Set<Int64> = []
     private var pollingTask: Task<Void, Never>?
@@ -72,6 +78,11 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private let processingStaleThreshold: TimeInterval = 60 * 5
     private let artworkTargetSide: CGFloat = 800
     private var lastNowPlayingInfo: [String: Any]?
+    
+    // MARK: - Audio Guides Store References (set via configure())
+    private var queueStore: AudioGuidesQueueStore?
+    private var speedStore: VoiceoverPlaybackSpeedStore?
+    private var progressStore: VoiceoverProgressStore?
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -160,28 +171,81 @@ public extension VoiceoverPlaybackController {
             }
         }
     }
+    
+    /// Async prefetch that returns when all assets have been fetched and applied.
+    /// Use this when you need to ensure voiceover states are loaded before rendering UI.
+    func prefetchAsync(for discoveryIds: [Int64]) async {
+        guard !discoveryIds.isEmpty else { return }
+        let assets = await repository.fetchVoiceovers(for: discoveryIds)
+        for asset in assets {
+            let normalized = normalize(asset)
+            applyFetchedAsset(normalized)
+        }
+        startPollingIfNeeded()
+    }
 
     func togglePlayback(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
+        log.debug("[togglePlayback] Called for id=\(discovery.id), title='\(discovery.title)', imagePath=\(discovery.imagePath ?? "nil")")
+        log.debug("[togglePlayback] Current state: playbackState=\(String(describing: self.playbackState)), currentDiscovery.id=\(self.currentDiscovery?.id ?? -1)")
+        
         let asset = normalizedAsset(for: discovery.id)
         let resolvedPreferences = preferences ?? activePreferences
+        log.debug("[togglePlayback] Asset status: \(String(describing: asset?.status))")
 
         switch asset?.status {
         case .ready?:
             if case let .playing(id) = playbackState, id == discovery.id {
+                log.debug("[togglePlayback] Already playing this discovery, pausing")
                 pause()
                 return
             }
             if case let .paused(id) = playbackState, id == discovery.id {
+                log.debug("[togglePlayback] Was paused on this discovery, resuming")
                 resume()
                 return
             }
             guard let readyAsset = asset else { return }
+            
+            // Set up queue navigation context for Previous/Next buttons
+            // Update if:
+            // - Current item is changing (user is playing something new)
+            // - OR baseList is empty (e.g., after app restart with persisted current but no baseList)
+            if let queueStore = queueStore,
+               queueStore.current != discovery.id || queueStore.baseList.isEmpty {
+                // Get discovery IDs from discoveryQueueProvider (all discoveries from feed)
+                // Filter to only include discoveries with READY audio guides
+                let audioReadyIds: [Int64]
+                if let provider = discoveryQueueProvider {
+                    // Use all discoveries from feed (maintains proper order)
+                    let allDiscoveries = provider()
+                    // Filter to only audio-ready items
+                    audioReadyIds = allDiscoveries.compactMap { disc -> Int64? in
+                        guard let asset = assetStates[disc.id], asset.status == .ready else {
+                            return nil
+                        }
+                        return disc.id
+                    }
+                    log.debug("[togglePlayback] Using discoveryQueueProvider: total=\(allDiscoveries.count), audioReady=\(audioReadyIds.count)")
+                } else {
+                    // Fallback: just use current item
+                    audioReadyIds = [discovery.id]
+                    log.debug("[togglePlayback] No discoveryQueueProvider, using single item")
+                }
+                
+                queueStore.playNow(discovery.id, recentering: audioReadyIds)
+                log.debug("[togglePlayback] Queue after playNow: current=\(queueStore.current ?? -1), baseList.count=\(queueStore.baseList.count)")
+            }
+            
+            log.debug("[togglePlayback] Asset ready, calling play()")
             play(discovery: discovery, asset: readyAsset)
         case .processing?:
+            log.debug("[togglePlayback] Asset processing, setting state to preparing")
             playbackState = .preparing(discoveryId: discovery.id)
         case .failed?, .none?, .missing?:
+            log.debug("[togglePlayback] Asset failed/none/missing, requesting voiceover")
             requestVoiceover(for: discovery, preferences: resolvedPreferences)
         case nil:
+            log.debug("[togglePlayback] No asset found, requesting voiceover")
             requestVoiceover(for: discovery, preferences: resolvedPreferences)
         }
     }
@@ -192,6 +256,12 @@ public extension VoiceoverPlaybackController {
 
     func setDiscoveryQueueProvider(_ provider: @escaping () -> [DiscoverySummary]) {
         discoveryQueueProvider = provider
+    }
+    
+    /// Gets a discovery by ID from the discovery queue provider
+    /// This is useful when the discovery might not be in the DiscoveryStore cache
+    func getDiscovery(id: Int64) -> DiscoverySummary? {
+        discoveryQueueProvider?().first { $0.id == id }
     }
 
     @discardableResult
@@ -209,8 +279,12 @@ public extension VoiceoverPlaybackController {
     }
 
     func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
+        log.debug("[requestVoiceover] CALLED for id=\(discovery.id), title='\(discovery.title)'")
         Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                log.error("[requestVoiceover] self is nil, aborting")
+                return
+            }
             let resolvedPreferences: VoiceoverPreferences
             if let preferences {
                 resolvedPreferences = preferences
@@ -231,7 +305,9 @@ public extension VoiceoverPlaybackController {
                 resolvedPreferences = self.activePreferences
             }
 
+            log.debug("[requestVoiceover] voiceModelId='\(resolvedPreferences.voiceModelId)', ttsModel='\(resolvedPreferences.ttsModel ?? "nil")'")
             guard !resolvedPreferences.voiceModelId.isEmpty else {
+                log.error("[requestVoiceover] voiceModelId is EMPTY, showing error")
                 await MainActor.run {
                     self.errorMessage = "Choose a voice to generate audio."
                 }
@@ -259,11 +335,13 @@ public extension VoiceoverPlaybackController {
             markPending(discovery.id)
             startPollingIfNeeded()
 
+            log.debug("[requestVoiceover] CALLING repository.requestVoiceover for id=\(discovery.id)")
             let asset = await self.repository.requestVoiceover(
                 for: discovery.id,
                 voiceModelId: resolvedPreferences.voiceModelId,
                 ttsModel: resolvedPreferences.ttsModel
             )
+            log.debug("[requestVoiceover] repository.requestVoiceover RETURNED status=\(String(describing: asset.status)), audioURL=\(asset.audioURL?.absoluteString ?? "nil"), errorReason=\(asset.errorReason ?? "nil")")
 
             let normalized = normalize(asset)
             await MainActor.run {
@@ -330,16 +408,20 @@ public extension VoiceoverPlaybackController {
     }
 
     func seek(to seconds: TimeInterval, completion: (() -> Void)? = nil) {
+        print("[VoiceoverPlaybackController.seek] Called with seconds=\(seconds), duration=\(String(describing: duration))")
         guard let duration, duration > 0 else {
+            print("[VoiceoverPlaybackController.seek] EARLY RETURN - duration is nil or 0")
             completion?()
             return
         }
 
         let clamped = max(0, min(seconds, duration))
         let time = CMTime(seconds: clamped, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        print("[VoiceoverPlaybackController.seek] Seeking to clamped=\(clamped)")
         isSeeking = true
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             guard let self else { return }
+            print("[VoiceoverPlaybackController.seek] Seek completed, finished=\(finished)")
             Task { @MainActor in
                 self.position = clamped
                 self.isSeeking = false
@@ -368,6 +450,82 @@ public extension VoiceoverPlaybackController {
 
     func updatePreferences(_ preferences: VoiceoverPreferences) {
         activePreferences = preferences
+    }
+    
+    // MARK: - Audio Guides Configuration
+    
+    /// Called once by AudioServicesContainer after creation.
+    /// Wires up stores for queue integration, speed persistence, and progress tracking.
+    func configure(
+        queueStore: AudioGuidesQueueStore,
+        speedStore: VoiceoverPlaybackSpeedStore,
+        progressStore: VoiceoverProgressStore
+    ) {
+        self.queueStore = queueStore
+        self.speedStore = speedStore
+        self.progressStore = progressStore
+        
+        // Initialize rate from persisted value
+        self.currentRate = speedStore.speed
+        player.rate = Float(speedStore.speed)
+    }
+    
+    // MARK: - Seek Controls
+    
+    /// Seek forward/backward by a number of seconds
+    func seek(by seconds: TimeInterval) {
+        guard let duration = self.duration, duration > 0 else { return }
+        
+        let currentTime = player.currentTime().seconds
+        let newTime = max(0, min(duration, currentTime + seconds))
+        
+        isSeeking = true
+        player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600)) { [weak self] finished in
+            guard let self, finished else { return }
+            Task { @MainActor in
+                self.position = newTime
+                self.isSeeking = false
+                
+                // Persist position for display
+                if let discoveryId = self.currentDiscovery?.id {
+                    self.progressStore?.updatePosition(newTime / duration, for: discoveryId)
+                }
+            }
+        }
+    }
+    
+    /// Seek to a specific fraction of the track (0.0 to 1.0)
+    func seek(toFraction fraction: Double) {
+        guard let duration = self.duration, duration > 0 else { return }
+        
+        let newTime = duration * max(0, min(1, fraction))
+        seek(to: newTime)
+    }
+    
+    // MARK: - Rate Control
+    
+    /// Set playback rate and persist
+    func setRate(_ rate: Double) {
+        let validRates = VoiceoverPlaybackSpeedStore.validRates
+        guard validRates.contains(rate) else { return }
+        
+        // Only update rate if currently playing
+        if case .playing = playbackState {
+            player.rate = Float(rate)
+        }
+        currentRate = rate
+        speedStore?.speed = rate
+    }
+    
+    /// Cycle to next playback speed
+    func cycleRate() {
+        let validRates = VoiceoverPlaybackSpeedStore.validRates
+        guard let currentIndex = validRates.firstIndex(of: currentRate) else {
+            setRate(1.0)
+            return
+        }
+        let nextIndex = (currentIndex + 1) % validRates.count
+        setRate(validRates[nextIndex])
     }
 }
 
@@ -456,29 +614,38 @@ extension VoiceoverPlaybackController {
     }
 
     func play(discovery: DiscoverySummary, asset: DiscoveryVoiceoverAsset) {
+        log.debug("[play] Starting playback for id=\(discovery.id), title='\(discovery.title)'")
+        log.debug("[play] Discovery imagePath=\(discovery.imagePath ?? "nil")")
+        
         playTask?.cancel()
         playTask = Task { [weak self] in
             guard let self else { return }
             guard let audioURL = await self.resolvePlayableURL(for: asset) else {
+                log.error("[play] Failed to resolve playable URL for id=\(discovery.id)")
                 await MainActor.run {
                     self.playbackState = .failed(discoveryId: discovery.id, message: "Audio unavailable.")
                     self.errorMessage = "Audio unavailable."
                 }
                 return
             }
+            
+            log.debug("[play] Got audioURL, setting currentDiscovery and state")
 
             await MainActor.run {
+                log.debug("[play] Setting currentDiscovery to id=\(discovery.id), title='\(discovery.title)'")
                 self.playbackState = .preparing(discoveryId: discovery.id)
                 self.currentDiscovery = discovery
                 self.errorMessage = nil
                 self.position = 0
                 self.duration = nil
+                log.debug("[play] currentDiscovery set. id=\(self.currentDiscovery?.id ?? -1), title='\(self.currentDiscovery?.title ?? "nil")'")
             }
 
             await self.prepareAudioSession()
             await self.configurePlayer(with: audioURL, discovery: discovery)
             _ = await MainActor.run {
                 self.downloadedIds.insert(discovery.id)
+                log.debug("[play] Playback configured. Final state: \(String(describing: self.playbackState)), currentDiscovery.id=\(self.currentDiscovery?.id ?? -1)")
             }
         }
     }

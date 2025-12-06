@@ -20,6 +20,7 @@ public struct AppDependencyContainer: Sendable {
     public let flowResolver: AppFlowResolver
 #if os(iOS)
     private let discoveryCreationProvider: DiscoveryCreationDependencyProvider
+    private let discoveryRepository: DiscoveryRepository
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
     private let voiceInventoryRepository: VoiceInventoryRepository
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
@@ -53,6 +54,7 @@ public struct AppDependencyContainer: Sendable {
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
         self.flowResolver = AppFlowResolver()
         self.discoveryCreationProvider = discoveryCreationProvider
+        self.discoveryRepository = discoveryRepository
         self.voiceoverRepository = voiceoverRepository
         self.voiceInventoryRepository = voiceInventoryRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
@@ -259,6 +261,14 @@ public extension AppDependencyContainer {
             }
         }
         return controller
+    }
+    
+    @MainActor
+    func makeAudioServicesContainer() -> AudioServicesContainer {
+        AudioServicesContainer(
+            repository: discoveryRepository,
+            voiceoverRepository: voiceoverRepository
+        )
     }
 
     func loadVoiceoverPreferences() async -> VoiceoverPreferences {

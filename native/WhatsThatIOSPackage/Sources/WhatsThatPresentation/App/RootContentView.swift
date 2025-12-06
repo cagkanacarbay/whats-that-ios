@@ -19,7 +19,7 @@ public struct RootContentView: View {
     private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
-    private let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
+    private let makeAudioServicesContainer: (() -> AudioServicesContainer)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
     private let clearAppStoreLocal: () async -> Result<Void, Error>
@@ -43,7 +43,7 @@ public struct RootContentView: View {
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver = AppFlowResolver(),
         makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel,
-        makeVoiceoverController: (() -> VoiceoverPlaybackController)? = nil,
+        makeAudioServicesContainer: (() -> AudioServicesContainer)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
         fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) },
         clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) },
@@ -61,7 +61,7 @@ public struct RootContentView: View {
         self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
-        self.makeVoiceoverController = makeVoiceoverController
+        self.makeAudioServicesContainer = makeAudioServicesContainer
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
         self.clearAppStoreLocal = clearAppStoreLocal
@@ -391,13 +391,13 @@ public struct RootContentView: View {
             )
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         case .main:
-            if let makeVoiceoverController {
+            if let makeAudioServicesContainer {
                 MainTabView(
                     feedUseCase: feedUseCase,
                     deletionUseCase: deletionUseCase,
                     cameraViewModel: makeCreationViewModel(.camera),
                     uploadViewModel: makeCreationViewModel(.upload),
-                    voiceoverControllerFactory: makeVoiceoverController,
+                    audioServicesFactory: makeAudioServicesContainer,
                     initialTab: mainTabDestination,
                     onSignOut: {
                         Task { try? await viewModel.signOut() }
@@ -411,7 +411,7 @@ public struct RootContentView: View {
                     mainTabDestination = .discoveries
                 }
             } else {
-                Text("Voiceover playback is available on iOS builds only.")
+                Text("Audio services are available on iOS builds only.")
                     .font(.headline)
             }
         }

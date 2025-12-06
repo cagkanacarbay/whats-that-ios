@@ -1,21 +1,33 @@
 import SwiftUI
 import WhatsThatShared
+import WhatsThatDomain
 
+/// Row view for an audio guide, using DiscoverySummary and AudioGuideRowState
 struct AudioGuideRowView<MenuContent: View>: View {
-    let guide: AudioGuide
-    let isPlaying: Bool
-    let progress: Double?
+    let discovery: DiscoverySummary
+    let state: AudioGuideRowState
     var showMenu: Bool = true
     var isRecentlyQueued: Bool = false
+    
+    /// Tap on ready guide to play
     let onPlay: () -> Void
+    /// Long-press on ready guide to open hero player (accessibility replacement for double-tap)
     let onOpenPlayer: () -> Void
+    /// Tap on empty/failed state to trigger generation
     var onCreate: (() -> Void)? = nil
+    /// Menu content builder
     @ViewBuilder let menuContent: () -> MenuContent
     
     @Environment(\.colorScheme) var colorScheme
     
+    // MARK: - Computed Properties
+    
+    private var isReady: Bool {
+        state.voiceoverStatus.isPlayable
+    }
+    
     private var backgroundColor: Color {
-        if isPlaying {
+        if state.isPlaying {
             return BrandColors.logo.opacity(0.08)
         } else {
             return Color.clear
@@ -23,116 +35,52 @@ struct AudioGuideRowView<MenuContent: View>: View {
     }
 
     private var contentOpacity: Double {
-        (guide.status == .empty || guide.status == .failed || guide.status == .generating) ? 0.5 : 1.0
+        switch state.voiceoverStatus {
+        case .empty, .failed, .generating, .generationQueued, .checking:
+            return 0.5
+        case .ready:
+            return 1.0
+        }
     }
+    
+    private var durationString: String? {
+        if case .ready(let duration) = state.voiceoverStatus, let duration {
+            let minutes = Int(duration) / 60
+            let secs = Int(duration) % 60
+            return String(format: "%d:%02d", minutes, secs)
+        }
+        return nil
+    }
+    
+    // MARK: - Body
     
     var body: some View {
         let thumbnailSize: CGFloat = 56
-        let isReady = guide.status == .ready
-        
-        // Gestures for Ready state
-        let doubleTap = TapGesture(count: 2)
-            .onEnded { if isReady { onOpenPlayer() } }
-        let singleTap = TapGesture()
-            .onEnded { if isReady { onPlay() } }
         
         HStack(spacing: 12) {
-            // Thumbnail
-            ZStack {
-                Image(guide.image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: thumbnailSize, height: thumbnailSize)
-                
-                if isPlaying {
-                    Color.black.opacity(0.3)
-                    Image(systemName: "waveform")
-                        .font(.title3)
-                        .foregroundColor(.white)
-                } else if guide.status == .generating {
-                    Color.black.opacity(0.4)
-                    ProgressView()
-                        .tint(.white)
-                        .controlSize(.large)
-                } else if guide.status == .failed {
-                    Color.black.opacity(0.4)
-                    Image(systemName: "arrow.clockwise")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                } else if guide.status == .empty {
-                    Color.black.opacity(0.2)
-                    Image(systemName: "sparkles")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                }
-            }
-            .frame(width: thumbnailSize, height: thumbnailSize)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            // Thumbnail with overlay for status
+            thumbnailView(size: thumbnailSize)
             
             // Text Info
             VStack(alignment: .leading, spacing: 4) {
-                Text(guide.title)
+                Text(discovery.title)
                     .font(.body)
                     .fontWeight(.medium)
-                    .foregroundColor(isPlaying ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textPrimary)
+                    .foregroundColor(state.isPlaying ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textPrimary)
                     .lineLimit(2)
                 
-                HStack(spacing: 6) {
-                    if isReady {
-                        Text(guide.durationString)
-                            .font(.caption)
-                            .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                    } else if guide.status == .generating {
-                        Text("Generating...")
-                             .font(.caption)
-                             .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                    } else if guide.status == .empty {
-                        Text("No audio guide")
-                             .font(.caption)
-                             .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                    } else if guide.status == .failed {
-                         Text("Failed to generate")
-                             .font(.caption)
-                             .foregroundColor(.red.opacity(0.8))
-                    }
-                }
+                statusLabel
                 
-                if isReady, let progress = progress, progress > 0 {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.gray.opacity(0.2))
-                                .frame(height: 3)
-                            Capsule()
-                                .fill(BrandColors.logo)
-                                .frame(width: geo.size.width * progress, height: 3)
-                        }
-                    }
-                    .frame(height: 3)
-                    .padding(.top, 2)
+                // Progress bar for ready items with progress
+                if isReady, let progress = state.progress, progress > 0 {
+                    progressBar(progress: progress)
                 }
             }
             
             Spacer()
             
-            // More Action
-            if isRecentlyQueued {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(BrandColors.logo)
-                    .padding(8)
-                    .transition(.scale.combined(with: .opacity))
-            } else if showMenu && isReady {
-                Menu {
-                    menuContent()
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .rotationEffect(Angle(degrees: 90))
-                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
-                        .padding(8)
-                        .contentShape(Rectangle())
-                }
-            }
+            // Trailing action
+            trailingAction
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 16)
@@ -143,12 +91,219 @@ struct AudioGuideRowView<MenuContent: View>: View {
         .opacity(contentOpacity)
         .contentShape(Rectangle())
         .onTapGesture {
-            if guide.status == .empty || guide.status == .failed {
-                onCreate?()
+            handleTap()
+        }
+        .onLongPressGesture(minimumDuration: 0.4) {
+            if isReady {
+                onOpenPlayer()
             }
         }
-        .gesture(
-            isReady ? doubleTap.exclusively(before: singleTap) : nil
-        )
+    }
+    
+    // MARK: - Thumbnail View
+    
+    @ViewBuilder
+    private func thumbnailView(size: CGFloat) -> some View {
+        ZStack {
+            // Image from discovery with caching
+            if let imagePath = discovery.imagePath,
+               let imageURL = URL(string: imagePath) {
+                DiscoveryCachedImage(
+                    discoveryId: discovery.id,
+                    remoteURL: imageURL
+                ) { phase in
+                    switch phase {
+                    case .success(let platformImage):
+                        Image(uiImage: platformImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: size, height: size)
+                    case .loading, .empty, .failure:
+                        placeholderImage(size: size)
+                    }
+                }
+            } else {
+                placeholderImage(size: size)
+            }
+            
+            // Status overlay
+            statusOverlay
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    
+    private func placeholderImage(size: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.3))
+            .frame(width: size, height: size)
+    }
+    
+    @ViewBuilder
+    private var statusOverlay: some View {
+        if state.isPlaying {
+            Color.black.opacity(0.3)
+            Image(systemName: "waveform")
+                .font(.title3)
+                .foregroundColor(.white)
+        } else {
+            switch state.voiceoverStatus {
+            case .generating, .generationQueued:
+                Color.black.opacity(0.4)
+                ProgressView()
+                    .tint(.white)
+                    .controlSize(.large)
+            case .checking:
+                Color.black.opacity(0.3)
+                ProgressView()
+                    .tint(.white)
+                    .controlSize(.small)
+            case .failed:
+                Color.black.opacity(0.4)
+                Image(systemName: "arrow.clockwise")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            case .empty:
+                Color.black.opacity(0.2)
+                Image(systemName: "sparkles")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            case .ready:
+                EmptyView()
+            }
+        }
+    }
+    
+    // MARK: - Status Label
+    
+    @ViewBuilder
+    private var statusLabel: some View {
+        HStack(spacing: 6) {
+            switch state.voiceoverStatus {
+            case .ready:
+                if let duration = durationString {
+                    Text(duration)
+                        .font(.caption)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                }
+                
+                // Show "Queued" chip if in queue but not playing
+                if state.isQueued && !state.isPlaying {
+                    Text("Queued")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(BrandColors.logo.opacity(0.15))
+                        .foregroundColor(BrandColors.logo)
+                        .clipShape(Capsule())
+                }
+                
+            case .generating:
+                Text("Generating...")
+                    .font(.caption)
+                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                    
+            case .generationQueued:
+                Text("Generation queued")
+                    .font(.caption)
+                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                    
+            case .checking:
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Checking...")
+                        .font(.caption)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                }
+                    
+            case .empty:
+                Text("No audio guide")
+                    .font(.caption)
+                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                    
+            case .failed:
+                Text("Failed to generate")
+                    .font(.caption)
+                    .foregroundColor(.red.opacity(0.8))
+            }
+        }
+    }
+    
+    // MARK: - Progress Bar
+    
+    private func progressBar(progress: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(BrandColors.logo)
+                    .frame(width: geo.size.width * progress, height: 3)
+            }
+        }
+        .frame(height: 3)
+        .padding(.top, 2)
+    }
+    
+    // MARK: - Trailing Action
+    
+    @ViewBuilder
+    private var trailingAction: some View {
+        if isRecentlyQueued {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 22))
+                .foregroundColor(BrandColors.logo)
+                .padding(8)
+                .transition(.scale.combined(with: .opacity))
+        } else if showMenu && isReady {
+            Menu {
+                menuContent()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .rotationEffect(Angle(degrees: 90))
+                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                    .padding(8)
+                    .contentShape(Rectangle())
+            }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func handleTap() {
+        switch state.voiceoverStatus {
+        case .ready:
+            onPlay()
+        case .empty, .failed:
+            onCreate?()
+        case .generating, .generationQueued, .checking:
+            // No action while generating or checking
+            break
+        }
+    }
+}
+
+// MARK: - Convenience Initializer (no menu)
+
+extension AudioGuideRowView where MenuContent == EmptyView {
+    init(
+        discovery: DiscoverySummary,
+        state: AudioGuideRowState,
+        showMenu: Bool = false,
+        isRecentlyQueued: Bool = false,
+        onPlay: @escaping () -> Void,
+        onOpenPlayer: @escaping () -> Void,
+        onCreate: (() -> Void)? = nil
+    ) {
+        self.discovery = discovery
+        self.state = state
+        self.showMenu = showMenu
+        self.isRecentlyQueued = isRecentlyQueued
+        self.onPlay = onPlay
+        self.onOpenPlayer = onOpenPlayer
+        self.onCreate = onCreate
+        self.menuContent = { EmptyView() }
     }
 }

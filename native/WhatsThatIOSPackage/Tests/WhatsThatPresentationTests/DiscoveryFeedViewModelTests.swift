@@ -67,4 +67,8 @@ private actor QueueingDiscoveryRepository: DiscoveryRepository {
             throw error
         }
     }
+    
+    func deleteDiscovery(_ summary: DiscoverySummary) async throws {
+        // No-op for test repository
+    }
 }

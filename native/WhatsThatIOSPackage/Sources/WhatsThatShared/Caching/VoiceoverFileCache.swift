@@ -33,6 +33,9 @@ public actor VoiceoverFileCache: Sendable {
 
     private var entries: [Int64: Entry] = [:]
     private let log = voiceoverFileCacheLogger
+    
+    /// Tracks in-flight download tasks to prevent duplicate downloads for the same discoveryId
+    private var inFlightDownloads: [Int64: Task<URL?, Error>] = [:]
 
     public init(
         cachesDirectory: URL? = nil,
@@ -174,6 +177,64 @@ public extension VoiceoverFileCache {
         entries.removeAll()
         persistMetadata()
         log.notice("Cleared all cached voiceovers")
+    }
+    
+    // MARK: - In-Flight Download Tracking
+    
+    /// Downloads and caches a voiceover file, coalescing concurrent requests.
+    /// If a download is already in flight for this discoveryId, returns the existing task's result.
+    func downloadAndCache(
+        discoveryId: Int64,
+        fileName: String,
+        downloadURL: URL,
+        urlSession: URLSession = .shared
+    ) async throws -> URL? {
+        // Return existing in-flight task if present
+        if let existingTask = inFlightDownloads[discoveryId] {
+            log.debug("Coalescing download for discovery \(discoveryId, privacy: .public)")
+            return try await existingTask.value
+        }
+        
+        // Check cache first
+        if let cached = await cachedFileURL(discoveryId: discoveryId, fileName: fileName) {
+            return cached
+        }
+        
+        // Create new download task
+        let task = Task<URL?, Error> { [weak self] in
+            guard let self else { return nil }
+            defer { 
+                Task { await self.removeInFlightDownload(for: discoveryId) }
+            }
+            
+            let (data, response) = try await urlSession.data(from: downloadURL)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            
+            return try await self.store(data: data, discoveryId: discoveryId, fileName: fileName)
+        }
+        
+        inFlightDownloads[discoveryId] = task
+        return try await task.value
+    }
+    
+    private func removeInFlightDownload(for discoveryId: Int64) {
+        inFlightDownloads.removeValue(forKey: discoveryId)
+    }
+    
+    /// Cancels an in-flight download if one exists
+    func cancelDownload(for discoveryId: Int64) {
+        inFlightDownloads[discoveryId]?.cancel()
+        inFlightDownloads.removeValue(forKey: discoveryId)
+        log.debug("Cancelled download for discovery \(discoveryId, privacy: .public)")
+    }
+    
+    /// Returns true if a download is in progress for this discoveryId
+    func isDownloading(_ discoveryId: Int64) -> Bool {
+        inFlightDownloads[discoveryId] != nil
     }
 }
 

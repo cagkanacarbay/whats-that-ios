@@ -10,7 +10,7 @@ import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import Anthropic from 'npm:@anthropic-ai/sdk';
 import OpenAI from 'npm:openai';
 import { SignJWT, importPKCS8 } from 'npm:jose';
-import { assemblePrompt } from './promptLoader.ts'; 
+import { assemblePrompt } from './promptLoader.ts';
 import { extractLocationInfo, HandleNearbyPlacesLocation, Place } from './places.ts';
 import { systemPromptMetadata } from './prompts/system-prompt.ts';
 import { userPromptMetadata } from './prompts/user-prompt.ts';
@@ -22,7 +22,7 @@ import type { Logger } from '../_shared/logger.ts';
 // --- Constants ---
 const CREDITS_PER_DISCOVERY = 1;
 const GEMINI_MODEL = "gemini-2.5-flash";
-const OPENAI_MODEL = "gpt-5-mini"; 
+const OPENAI_MODEL = "gpt-5-mini";
 const CLAUDE_MODEL = "claude-3-5-sonnet-20241022";
 const STREAM_RETRY_LIMIT = 3;
 
@@ -114,14 +114,33 @@ async function sendApnsPushNotification(
   title: string,
   body: string,
   discoveryId: string,
-  logger: Logger
+  logger: Logger,
+  requestBundleId?: string // Optional: if provided and valid, use it; otherwise use default
 ): Promise<boolean> {
-  const bundleId = Deno.env.get('APNS_BUNDLE_ID');
+  // Support comma-separated list of bundle IDs for multi-app support
+  const allowedBundleIds = (Deno.env.get('APNS_BUNDLE_ID') || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(id => id.length > 0);
   const environment = (Deno.env.get('APNS_ENVIRONMENT') || 'sandbox').toLowerCase();
 
-  if (!bundleId) {
+  if (allowedBundleIds.length === 0) {
     logger.error('APNs bundle ID not configured');
     return false;
+  }
+
+  // Use the requested bundle ID if provided and valid; otherwise use the first (default/old app)
+  let bundleId: string;
+  if (requestBundleId && allowedBundleIds.includes(requestBundleId)) {
+    bundleId = requestBundleId;
+  } else {
+    bundleId = allowedBundleIds[0]; // Default to first (old app)
+    if (requestBundleId) {
+      logger.warn('Requested bundle ID not in allowed list, using default', {
+        requestBundleId,
+        defaultBundleId: bundleId
+      });
+    }
   }
 
   const host =
@@ -205,11 +224,12 @@ async function sendPushNotification(
   title: string,
   body: string,
   discoveryId: string,
-  logger: Logger
+  logger: Logger,
+  bundleId?: string
 ): Promise<boolean> {
   if (!pushToken) return false;
 
-  return sendApnsPushNotification(pushToken, title, body, discoveryId, logger);
+  return sendApnsPushNotification(pushToken, title, body, discoveryId, logger, bundleId);
 }
 
 // --- Helper: Format GPS coordinates ---
@@ -240,6 +260,7 @@ interface RequestBody {
   location?: HandleNearbyPlacesLocation;
   pushToken?: string;
   customContext?: string;
+  bundleId?: string; // Optional: for multi-app support, defaults to first ID in APNS_BUNDLE_ID
 }
 
 serve(async (req: Request) => {
@@ -309,7 +330,7 @@ serve(async (req: Request) => {
         throw new Error('No authorization header');
       }
 
-      const { base64Image, location, pushToken, customContext } = requestBody;
+      const { base64Image, location, pushToken, customContext, bundleId } = requestBody;
       if (!base64Image) {
         throw new Error('Missing base64Image.');
       }
@@ -372,7 +393,7 @@ serve(async (req: Request) => {
           distanceParts.push(`accuracy ±${Math.round(nearbyPlacesContext.horizontalAccuracyMeters)}m`);
         }
         if (typeof nearbyPlacesContext.distanceUncertaintyMeters === 'number' &&
-            nearbyPlacesContext.distanceUncertaintyMeters !== nearbyPlacesContext.horizontalAccuracyMeters) {
+          nearbyPlacesContext.distanceUncertaintyMeters !== nearbyPlacesContext.horizontalAccuracyMeters) {
           distanceParts.push(`uncertainty ±${Math.round(nearbyPlacesContext.distanceUncertaintyMeters)}m`);
         }
         if (distanceParts.length > 0) {
@@ -1182,7 +1203,8 @@ serve(async (req: Request) => {
           "Discovery Complete! 🎉",
           `Your discovery "${titleForStorage}" is ready to view.`,
           String(discoveryId),
-          pushLogger
+          pushLogger,
+          bundleId
         );
       }
 

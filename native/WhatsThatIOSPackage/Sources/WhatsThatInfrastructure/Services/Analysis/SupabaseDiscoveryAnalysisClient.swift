@@ -167,6 +167,12 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
             body["pushToken"] = pushToken
         }
 
+        // Send bundle ID so Edge Function knows which app is making the request
+        // (for push notification topic and future multi-app support)
+        if let bundleId = Bundle.main.bundleIdentifier {
+            body["bundleId"] = bundleId
+        }
+
         // Note: ask-ai-v7 reads nearby places only from within the nested `location`
         // object. We intentionally omit top-level nearbyPlaces/nearbyPlacesContext to
         // avoid duplication and match server expectations.

@@ -238,6 +238,28 @@ struct DiscoveryDetailOverlayView: View {
                 .id(context.sessionId)
 
                 heroCard
+                    .overlay(alignment: .top) {
+                        // Text/Audio mode pill - part of heroCard so it moves with gestures
+                        // Get safe area from UIWindow since view context ignores safe area
+                        let globalSafeAreaTop: CGFloat = UIApplication.shared
+                            .connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap { $0.windows }
+                            .first(where: { $0.isKeyWindow })?
+                            .safeAreaInsets.top ?? 59  // 59 is typical iPhone with notch
+                        
+                        if isChromeReady && !snapshot.isClosing {
+                            DiscoveryDetailModePill(
+                                discovery: context.discovery,
+                                controller: voiceoverController,
+                                onAudioSelected: {
+                                    onOpenAudioGuide?(context.discovery)
+                                }
+                            )
+                            .padding(.top, globalSafeAreaTop + 6)
+                            .animation(.easeInOut(duration: 0.2), value: voiceoverController.playbackState)
+                        }
+                    }
                     .allowsHitTesting(!isImageSheetPresented)
                     .zIndex(5)
                     .shadow(

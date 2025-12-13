@@ -212,7 +212,8 @@ struct DiscoveriesHomeView: View {
 
                 let detailSnapshot = detailCoordinator.snapshot
                 if detailSnapshot.hasActiveOverlay, let context = detailSnapshot.context {
-                    let targetCloseFrame = cardFrames[context.discovery.id] ?? context.startFrame
+                    let targetCloseFrame = cardFrames[context.discovery.id] 
+                        ?? offScreenCloseFrame(for: context.discovery.id)
                     DiscoveryDetailOverlayView(
                         snapshot: detailSnapshot,
                         destinationFrame: targetCloseFrame,
@@ -384,6 +385,54 @@ struct DiscoveriesHomeView: View {
         )
         discoveriesHomeLogger.info("Using fallback start frame for discovery detail")
         return CGRect(origin: origin, size: CGSize(width: width, height: height))
+    }
+
+    /// Returns a frame for an imaginary card positioned at the screen edge with just 1 pixel visible.
+    /// - If above: card is positioned so only its bottom pixel is at the top of the screen (y = -cardHeight + 1)
+    /// - If below: card is positioned so only its top pixel is at the bottom of the screen (y = screenHeight - 1)
+    /// This produces the same animation as closing to a card that's 99% off-screen.
+    private func offScreenCloseFrame(for discoveryId: Int64) -> CGRect {
+        let screen = UIScreen.main.bounds
+        
+        // Get card dimensions from an actual visible card, or calculate if none available
+        let cardSize: CGSize
+        if let referenceFrame = cardFrames.values.first {
+            cardSize = referenceFrame.size
+        } else {
+            let cardWidth = max((screen.width - gridHorizontalPadding * 2 - gridSpacing) / 2, 120)
+            cardSize = CGSize(width: cardWidth, height: cardWidth * 1.2)
+        }
+        
+        // Find the discovery's position in the list
+        let discoveryIndex = viewModel.discoveries.firstIndex { $0.id == discoveryId }
+        
+        // Find visible card indices
+        let visibleIds = Set(cardFrames.keys)
+        let visibleIndices = viewModel.discoveries.enumerated()
+            .filter { visibleIds.contains($0.element.id) }
+            .map { $0.offset }
+        
+        let isAbove: Bool
+        if let index = discoveryIndex, let minVisible = visibleIndices.min() {
+            isAbove = index < minVisible
+        } else {
+            isAbove = false  // Default to animating down
+        }
+        
+        // Position with just 1 pixel visible at the screen edge
+        let yPosition: CGFloat
+        if isAbove {
+            // Card's bottom pixel at y=0 (top of screen)
+            yPosition = -cardSize.height + 1
+        } else {
+            // Card's top pixel at screen bottom
+            yPosition = screen.height - 1
+        }
+        
+        // Center horizontally like grid cards
+        let xPosition = gridHorizontalPadding
+        
+        return CGRect(origin: CGPoint(x: xPosition, y: yPosition), size: cardSize)
     }
 
     private func resolveOpenFromAudioGuidesIfNeeded() {

@@ -361,8 +361,38 @@ private struct HeroPlayerContentView: View {
     // MARK: - Actions
     
     private func togglePlayPause() {
-        guard let discovery else { return }
-        controller.togglePlayback(for: discovery)
+        if let discovery {
+            controller.togglePlayback(for: discovery)
+        } else {
+            // No discovery selected - play the first audio-ready discovery
+            playFirstAudioReadyDiscovery()
+        }
+    }
+    
+    private func playFirstAudioReadyDiscovery() {
+        // Find the first audio-ready discovery from the baseList
+        let assetStates = controller.assetStates
+        
+        for discoveryId in queueStore.baseList {
+            if let asset = assetStates[discoveryId], asset.status == .ready {
+                // Found an audio-ready discovery, try to get it and play
+                if let discovery = controller.getDiscovery(id: discoveryId) {
+                    controller.togglePlayback(for: discovery)
+                    return
+                } else {
+                    // Fall back to fetching from discovery store
+                    Task {
+                        if let discovery = await audioServices.discoveryStore.get(id: discoveryId) {
+                            controller.togglePlayback(for: discovery)
+                        }
+                    }
+                    return
+                }
+            }
+        }
+        
+        // No audio-ready discovery found in baseList
+        log.debug("[togglePlayPause] No audio-ready discovery found to play")
     }
     
     private func playNext() {

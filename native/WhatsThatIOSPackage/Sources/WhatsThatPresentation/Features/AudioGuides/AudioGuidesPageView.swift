@@ -22,6 +22,7 @@ struct AudioGuidesPageView: View {
     @StateObject private var viewModel: AudioGuidesViewModel
     @Namespace private var toggleNamespace
     @State private var overlayDragOffset: CGFloat = 0
+    @State private var creditBalance: Int?
     
     private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "AudioGuidesPageView")
     private let transitionDuration: Double = 0.3
@@ -58,12 +59,6 @@ struct AudioGuidesPageView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(1)
             }
-            
-            if viewModel.showCreateAlert {
-                creationAlertOverlay
-                    .transition(.opacity)
-                    .zIndex(2)
-            }
         }
         .animation(.easeInOut(duration: transitionDuration), value: mode)
         .sheet(isPresented: $viewModel.showHistory) {
@@ -72,8 +67,32 @@ struct AudioGuidesPageView: View {
                 audioServices: audioServices
             )
         }
+        .alert(
+            "Generate an audio guide?",
+            isPresented: $viewModel.showCreateAlert,
+            actions: {
+                Button("Cancel", role: .cancel) {
+                    viewModel.discoveryForAlert = nil
+                }
+                Button("Generate") {
+                    viewModel.confirmCreation()
+                }
+                .keyboardShortcut(.defaultAction)
+            },
+            message: {
+                if let balance = creditBalance {
+                    Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                } else {
+                    Text("This will use 1 credit.")
+                }
+            }
+        )
         .task {
             await viewModel.onAppear()
+            // Fetch cached credit balance for the confirmation dialog
+            if let store = audioServices?.creditBalanceStore {
+                creditBalance = await store.getCached()
+            }
         }
     }
 }
@@ -172,7 +191,6 @@ private extension AudioGuidesPageView {
     var listOverlay: some View {
         GeometryReader { proxy in
             let topInset = proxy.safeAreaInsets.top
-            let bottomInset = proxy.safeAreaInsets.bottom
             let dragGesture = DragGesture(minimumDistance: 12)
                 .onChanged {
                     overlayDragOffset = max(0, $0.translation.height)
@@ -322,29 +340,6 @@ private extension AudioGuidesPageView {
         viewModel.play(discovery: discovery)
         exitListMode(reason: "play from list")
         log.debug("Requested full player for discovery \(discovery.id, privacy: .public)")
-    }
-}
-
-// MARK: - Creation Alert
-
-private extension AudioGuidesPageView {
-    var creationAlertOverlay: some View {
-        CustomAlertView(
-            title: "Generate an audio guide?",
-            message: "The audio guide takes one credit.",
-            onCancel: {
-                withAnimation {
-                    viewModel.showCreateAlert = false
-                    viewModel.discoveryForAlert = nil
-                }
-            },
-            onConfirm: {
-                withAnimation {
-                    viewModel.confirmCreation()
-                    viewModel.showCreateAlert = false
-                }
-            }
-        )
     }
 }
 

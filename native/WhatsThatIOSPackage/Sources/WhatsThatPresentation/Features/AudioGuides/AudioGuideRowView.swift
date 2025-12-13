@@ -152,7 +152,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
                 Color.black.opacity(0.4)
                 ProgressView()
                     .tint(.white)
-                    .controlSize(.large)
+                    .scaleEffect(0.85)
             case .checking:
                 Color.black.opacity(0.3)
                 ProgressView()

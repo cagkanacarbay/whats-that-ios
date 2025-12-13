@@ -34,6 +34,9 @@ public final class AudioServicesContainer: ObservableObject {
     /// User's voiceover preferences (voice model, auto-generate, etc.)
     public let preferencesStore: VoiceoverPreferencesStore
     
+    /// Credit balance store (optional, for showing credits in confirmation dialogs)
+    public let creditBalanceStore: CreditBalanceStore?
+    
     // MARK: - Playback Controller
     
     /// Shared playback controller (created with container dependencies)
@@ -59,6 +62,7 @@ public final class AudioServicesContainer: ObservableObject {
     public init(
         repository: DiscoveryRepository,
         voiceoverRepository: DiscoveryVoiceoverRepository,
+        creditBalanceStore: CreditBalanceStore? = nil,
         defaults: UserDefaults = .standard
     ) {
         // Create stores
@@ -70,6 +74,7 @@ public final class AudioServicesContainer: ObservableObject {
         self.fileCache = VoiceoverFileCache.shared
         self.networkMonitor = NetworkMonitor()
         self.preferencesStore = VoiceoverPreferencesStore()
+        self.creditBalanceStore = creditBalanceStore
         
         // Create playback controller with store references
         self.playbackController = VoiceoverPlaybackController(

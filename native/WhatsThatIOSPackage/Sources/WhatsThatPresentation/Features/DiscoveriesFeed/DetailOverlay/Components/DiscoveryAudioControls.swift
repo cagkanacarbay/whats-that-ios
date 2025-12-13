@@ -13,6 +13,7 @@ struct DiscoveryAudioControls: View {
     private let voiceoverController: VoiceoverPlaybackController
     private let queueStore: AudioGuidesQueueStore
     private let progressStore: VoiceoverProgressStore
+    private let creditBalanceStore: CreditBalanceStore?
     
     // MARK: - Scroll Animation Constants
     private let scrollTransitionThreshold: CGFloat = 60
@@ -49,6 +50,10 @@ struct DiscoveryAudioControls: View {
     @State private var showPlayNextConfirmation = false
     @State private var showAddToEndConfirmation = false
     
+    // Generation confirmation state
+    @State private var showGenerateConfirmation = false
+    @State private var creditBalance: Int?
+    
     init(
         discovery: DiscoverySummary,
         voiceoverStatus: AudioGuideRowStatus,
@@ -63,6 +68,7 @@ struct DiscoveryAudioControls: View {
         self.voiceoverController = audioServices.playbackController
         self.queueStore = audioServices.queueStore
         self.progressStore = audioServices.progressStore
+        self.creditBalanceStore = audioServices.creditBalanceStore
     }
     
     private var palette: BrandTheme.Palette {
@@ -129,6 +135,29 @@ struct DiscoveryAudioControls: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: voiceoverStatus)
             
             Spacer()
+        }
+        .alert(
+            "Generate an audio guide?",
+            isPresented: $showGenerateConfirmation,
+            actions: {
+                Button("Cancel", role: .cancel) { }
+                Button("Generate") {
+                    voiceoverController.requestVoiceover(for: discovery)
+                }
+                .keyboardShortcut(.defaultAction)
+            },
+            message: {
+                if let balance = creditBalance {
+                    Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                } else {
+                    Text("This will use 1 credit.")
+                }
+            }
+        )
+        .task {
+            if let store = creditBalanceStore {
+                creditBalance = await store.getCached()
+            }
         }
     }
     
@@ -230,7 +259,13 @@ struct DiscoveryAudioControls: View {
         switch voiceoverStatus {
         case .ready:
             voiceoverController.togglePlayback(for: discovery)
-        case .empty, .failed:
+        case .empty:
+            // Show confirmation for new generation
+            withAnimation {
+                showGenerateConfirmation = true
+            }
+        case .failed:
+            // Retry immediately without confirmation
             voiceoverController.requestVoiceover(for: discovery)
         default:
             break

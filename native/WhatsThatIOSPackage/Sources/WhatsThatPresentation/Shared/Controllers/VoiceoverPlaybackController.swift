@@ -308,7 +308,7 @@ public extension VoiceoverPlaybackController {
                 resolvedPreferences = self.activePreferences
             }
 
-            log.debug("[requestVoiceover] voiceModelId='\(resolvedPreferences.voiceModelId)', ttsModel='\(resolvedPreferences.ttsModel ?? "nil")'")
+            log.debug("[requestVoiceover] voiceModelId='\(resolvedPreferences.voiceModelId)', ttsModel='\(resolvedPreferences.ttsModel)'")
             guard !resolvedPreferences.voiceModelId.isEmpty else {
                 log.error("[requestVoiceover] voiceModelId is EMPTY, showing error")
                 await MainActor.run {
@@ -332,8 +332,9 @@ public extension VoiceoverPlaybackController {
                     wasExistingResponse: false,
                     wasRefunded: false
                 )
-                self.currentDiscovery = discovery
-                self.playbackState = .preparing(discoveryId: discovery.id)
+                // NOTE: We intentionally do NOT set currentDiscovery or playbackState here.
+                // Generation should not affect the mini player in any way - it should only
+                // update the assetStates for UI feedback (e.g., showing "Generating..." status).
             }
             markPending(discovery.id)
             startPollingIfNeeded()
@@ -360,29 +361,18 @@ public extension VoiceoverPlaybackController {
 
             if normalized.status == .ready, let _ = normalized.audioURL {
                 clearPending(discovery.id)
-                // Don't auto-play - notify via callback for toast
-                await MainActor.run {
-                    self.playbackState = .idle
-                    // Clear currentDiscovery if it was set during preparing state
-                    if self.currentDiscovery?.id == discovery.id {
-                        self.currentDiscovery = nil
-                    }
-                }
-                // Notify that generation completed (for toast)
+                // Notify that generation completed (for toast) - don't affect playback state
                 await MainActor.run {
                     self.onGenerationComplete?(discovery)
                 }
             } else if normalized.status == .failed {
                 clearPending(discovery.id)
+                // Only set error message, don't affect playback state
                 await MainActor.run {
-                    self.playbackState = .failed(discoveryId: discovery.id, message: normalized.errorReason)
                     self.errorMessage = normalized.errorReason
                 }
-            } else {
-                await MainActor.run {
-                    self.playbackState = .idle
-                }
             }
+            // No else case needed - we don't modify playbackState during generation
         }
     }
 
@@ -561,6 +551,13 @@ extension VoiceoverPlaybackController {
                 if let existingUpdated = existing.updatedAt,
                    let incomingUpdated = normalized.updatedAt,
                    incomingUpdated < existingUpdated {
+                    return
+                }
+            }
+            // Protect .processing status - only overwrite with terminal states (.ready or .failed)
+            if existing.status == .processing {
+                if normalized.status != .ready && normalized.status != .failed {
+                    // Keep the current .processing state, don't overwrite with .none or .processing
                     return
                 }
             }

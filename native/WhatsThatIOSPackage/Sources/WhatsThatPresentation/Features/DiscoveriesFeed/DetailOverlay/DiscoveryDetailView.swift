@@ -406,11 +406,7 @@ private struct DiscoveryDetailContentView: View {
                             .animation(.easeOut(duration: 0.15), value: audioControlsScrollOffset)
                         }
                         
-                        // DEBUG: Test toast placement - REMOVE AFTER TESTING
-                        #if DEBUG
-                        DebugToastTriggerButton(discovery: discovery)
-                            .padding(.bottom, BrandSpacing.medium)
-                        #endif
+
 
                         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
                             // Title is already shown in the image overlay; avoid repeating here.
@@ -672,40 +668,4 @@ private struct ShareSheetModifier: ViewModifier {
     }
 }
 
-// MARK: - Debug Toast Trigger (REMOVE AFTER TESTING)
 
-#if DEBUG
-/// Debug button to trigger the generation complete toast for testing placement
-struct DebugToastTriggerButton: View {
-    let discovery: DiscoverySummary
-    @Environment(\.audioServices) private var audioServices
-    @Environment(\.colorScheme) private var colorScheme
-    
-    private var palette: BrandTheme.Palette {
-        BrandTheme.palette(for: colorScheme)
-    }
-    
-    var body: some View {
-        Button(action: triggerToast) {
-            HStack(spacing: BrandSpacing.small) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Text("🧪 Test Toast")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.orange)
-            .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-    
-    private func triggerToast() {
-        audioServices?.showGenerationCompleteToast(for: discovery)
-    }
-}
-#endif

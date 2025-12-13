@@ -267,7 +267,8 @@ public extension AppDependencyContainer {
     func makeAudioServicesContainer() -> AudioServicesContainer {
         AudioServicesContainer(
             repository: discoveryRepository,
-            voiceoverRepository: voiceoverRepository
+            voiceoverRepository: voiceoverRepository,
+            creditBalanceStore: creditBalanceStore
         )
     }
 

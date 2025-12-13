@@ -75,14 +75,14 @@ public struct CreditPackDefinition: Identifiable, Equatable, Sendable {
 public enum CreditPackCatalog {
     public static let standardPacks: [CreditPackDefinition] = [
         CreditPackDefinition(
-            id: "100credits",
+            id: "100.credits",
             creditAmount: 100,
             fallbackTitle: "Explorer Pack",
             fallbackDescription: "Unlock 100 discoveries for your next adventures.",
             iconSystemName: "sparkles"
         ),
         CreditPackDefinition(
-            id: "1000credits",
+            id: "1000.credits",
             creditAmount: 1000,
             fallbackTitle: "Trailblazer Pack",
             fallbackDescription: "Fuel a thousand discoveries with our best value bundle.",

@@ -165,37 +165,45 @@ serve(async (req) => {
       }
 
       // Check for successful status (0) and matching bundle ID
-      const expectedBundleId = Deno.env.get('IOS_BUNDLE_ID');
-      if (!expectedBundleId) {
-          appleLogger.error('IOS_BUNDLE_ID is not set');
-          return new Response(JSON.stringify({ success: false, message: 'Server configuration error' }), {
-            headers: { ...baseHeaders, 'Content-Type': 'application/json' },
-            status: 500,
-          });
+      // Support comma-separated list of bundle IDs for multi-app support
+      const allowedBundleIds = (Deno.env.get('IOS_BUNDLE_ID') || '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(id => id.length > 0);
+
+      if (allowedBundleIds.length === 0) {
+        appleLogger.error('IOS_BUNDLE_ID is not set');
+        return new Response(JSON.stringify({ success: false, message: 'Server configuration error' }), {
+          headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
       }
 
-      if (appleResponse?.status === 0 && appleResponse.receipt?.bundle_id === expectedBundleId) {
-         // Find the specific transaction within the receipt
-         // Check both `in_app` (older style) and `latest_receipt_info` (newer style/subscriptions)
-         const allPurchases = [
-           ...(appleResponse.receipt?.in_app || []),
-           ...(appleResponse.latest_receipt_info || [])
-         ];
+      const receiptBundleId = appleResponse?.receipt?.bundle_id;
+      const bundleIdMatches = receiptBundleId && allowedBundleIds.includes(receiptBundleId);
 
-         const relevantPurchase = allPurchases.find(p =>
-             p.product_id === productId &&
-             p.original_transaction_id === storeTransactionId // Match original ID for consumables
-         );
+      if (appleResponse?.status === 0 && bundleIdMatches) {
+        // Find the specific transaction within the receipt
+        // Check both `in_app` (older style) and `latest_receipt_info` (newer style/subscriptions)
+        const allPurchases = [
+          ...(appleResponse.receipt?.in_app || []),
+          ...(appleResponse.latest_receipt_info || [])
+        ];
 
-         if (relevantPurchase) {
-             appleLogger.info('Matching purchase found', { productId, storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
-             isValid = true;
-         } else {
-             appleLogger.warn('Receipt valid but transaction not found', { productId, storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
-         }
+        const relevantPurchase = allPurchases.find(p =>
+          p.product_id === productId &&
+          p.original_transaction_id === storeTransactionId // Match original ID for consumables
+        );
+
+        if (relevantPurchase) {
+          appleLogger.info('Matching purchase found', { productId, storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
+          isValid = true;
+        } else {
+          appleLogger.warn('Receipt valid but transaction not found', { productId, storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
+        }
 
       } else {
-        appleLogger.warn('Apple validation failed', { status: appleResponse?.status, responseBundleId: appleResponse?.receipt?.bundle_id, expectedBundleId });
+        appleLogger.warn('Apple validation failed', { status: appleResponse?.status, responseBundleId: appleResponse?.receipt?.bundle_id, allowedBundleIds });
       }
 
     } catch (fetchError) {
@@ -221,18 +229,18 @@ serve(async (req) => {
         .single(); // Use single() to get null if not found, or the row if found
 
       if (checkError && checkError.code !== 'PGRST116') { // PGRST116 means no rows found, which is good
-          dbLogger.error('Error checking for existing transaction', { errorMessage: checkError.message });
-          return new Response(JSON.stringify({ success: false, message: 'Database error checking transaction history' }), {
-            headers: { ...baseHeaders, 'Content-Type': 'application/json' },
-            status: 500,
-          });
+        dbLogger.error('Error checking for existing transaction', { errorMessage: checkError.message });
+        return new Response(JSON.stringify({ success: false, message: 'Database error checking transaction history' }), {
+          headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
       }
 
       if (existingTx) {
-          handlerLogger.warn('Transaction already processed', { storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
-          return new Response(JSON.stringify({ success: true, message: 'Transaction already processed' }), {
-            headers: { ...baseHeaders, 'Content-Type': 'application/json' },
-          });
+        handlerLogger.warn('Transaction already processed', { storeTransactionIdSuffix: storeTransactionId?.slice(-6) });
+        return new Response(JSON.stringify({ success: true, message: 'Transaction already processed' }), {
+          headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       // Grant credits by calling the DB function

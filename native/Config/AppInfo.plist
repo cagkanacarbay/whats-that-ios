@@ -20,8 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
-		<string>$(PLATFORM_NAME)</string>
+		<string>iPhoneOS</string>
 	</array>
+	<key>DTPlatformName</key>
+	<string>iphoneos</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

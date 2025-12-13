@@ -250,10 +250,12 @@ private struct DiscoveryDetailContentView: View {
     let onShowMap: (() -> Void)?
     let onScrollViewContentOffsetChange: ((CGFloat) -> Void)?
     let onOpenAudioGuide: (() -> Void)?
+    @Environment(\.audioServices) private var audioServices
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     // Player inset store is not required when using a bottom safeAreaInset.
     @Binding var scrollOffset: CGFloat
     @State private var baselineOffset: CGFloat?
+    @State private var audioControlsScrollOffset: CGFloat = 0
     // Scrolling/dismiss gating has no need for persistent local state
     @State private var overlayInteractiveAnchors: [Anchor<CGRect>] = []
     // no external measurement needed
@@ -367,7 +369,7 @@ private struct DiscoveryDetailContentView: View {
                         onClose: onClose,
                         onShowOptions: onShowOptions,
                         isOptionsEnabled: isOptionsEnabled,
-                        onOpenAudioGuide: shouldShowAudioPill ? onOpenAudioGuide : nil
+                        onCreateAudioGuide: onOpenAudioGuide
                     )
                     .frame(height: heroVisibleHeight)
                     .offset(y: overlayYOffset)
@@ -388,22 +390,34 @@ private struct DiscoveryDetailContentView: View {
                 }
 
                 if isChromeReady {
-                    VStack(alignment: .leading, spacing: BrandSpacing.large) {
-                        // Only show voiceover when available or when a retry is possible
-                        if shouldShowVoiceoverButton {
-                            VoiceoverDetailButton(
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        
+                        // Audio Controls replacing the old voiceover button
+                        if let audioServices {
+                            DiscoveryAudioControls(
                                 discovery: discovery,
-                                controller: voiceoverController,
-                                palette: palette
+                                voiceoverStatus: voiceoverStatus,
+                                isPlaying: isPlaying,
+                                audioServices: audioServices,
+                                scrollOffset: $audioControlsScrollOffset
                             )
+                            .padding(.bottom, BrandSpacing.medium)
+                            .animation(.easeOut(duration: 0.15), value: audioControlsScrollOffset)
                         }
+                        
+                        // DEBUG: Test toast placement - REMOVE AFTER TESTING
+                        #if DEBUG
+                        DebugToastTriggerButton(discovery: discovery)
+                            .padding(.bottom, BrandSpacing.medium)
+                        #endif
 
                         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
                             // Title is already shown in the image overlay; avoid repeating here.
                             detailDescriptionView(isReady: isMarkdownReady)
                         }
                     }
-                    .padding(.top, BrandSpacing.large)
+                    .padding(.top, -6)
                     .padding(.horizontal, BrandSpacing.large)
                     .padding(
                         .bottom,
@@ -419,6 +433,10 @@ private struct DiscoveryDetailContentView: View {
             // representable sits within the UIScrollView's view hierarchy.
             .background(
                 ScrollViewContentOffsetObserver { offset in
+                    // Defer state update to avoid "Modifying state during view update" warning
+                    DispatchQueue.main.async {
+                        audioControlsScrollOffset = offset
+                    }
                     updateGatedDistanceFromTop(distance: offset)
                 }
                 .allowsHitTesting(false)
@@ -456,30 +474,27 @@ private struct DiscoveryDetailContentView: View {
     // - asset is available, or
     // - an error occurred and a retry makes sense, or
     // - playback previously failed for this discovery (retry)
-    private var shouldShowVoiceoverButton: Bool {
-        if isPlaybackFailedForThisDiscovery {
-            return true
+
+
+    private var voiceoverStatus: AudioGuideRowStatus {
+        guard let asset = voiceoverController.normalizedAsset(for: discovery.id) else {
+            return .empty
         }
-        // Always show to allow creating when nothing exists yet (missing/none)
-        return true
+        switch asset.status {
+        case .ready:
+            return .ready(duration: nil)
+        case .processing:
+            return .generating
+        case .failed:
+            return .failed
+        case .none, .missing:
+            return .empty
+        }
     }
 
-    private var shouldShowAudioPill: Bool {
-        // Only show the pill when this discovery is currently playing or paused in the audio player.
-        // This ensures only one discovery detail shows the pill at a time (the one in "Now Playing").
-        guard onOpenAudioGuide != nil else { return false }
-        
-        switch voiceoverController.playbackState {
-        case let .playing(id), let .paused(id):
+    private var isPlaying: Bool {
+        if case .playing(let id) = voiceoverController.playbackState {
             return id == discovery.id
-        default:
-            return false
-        }
-    }
-
-    private var isPlaybackFailedForThisDiscovery: Bool {
-        if case let .failed(id, _) = voiceoverController.playbackState, id == discovery.id {
-            return true
         }
         return false
     }
@@ -656,3 +671,41 @@ private struct ShareSheetModifier: ViewModifier {
         }
     }
 }
+
+// MARK: - Debug Toast Trigger (REMOVE AFTER TESTING)
+
+#if DEBUG
+/// Debug button to trigger the generation complete toast for testing placement
+struct DebugToastTriggerButton: View {
+    let discovery: DiscoverySummary
+    @Environment(\.audioServices) private var audioServices
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
+    
+    var body: some View {
+        Button(action: triggerToast) {
+            HStack(spacing: BrandSpacing.small) {
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Text("🧪 Test Toast")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.orange)
+            .clipShape(RoundedRectangle(cornerRadius: BrandCornerRadius.large, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func triggerToast() {
+        audioServices?.showGenerationCompleteToast(for: discovery)
+    }
+}
+#endif

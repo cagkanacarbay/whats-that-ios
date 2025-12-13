@@ -269,7 +269,7 @@ struct DiscoveryDetailOverlayView: View {
 
             }
         }
-        // Note: Mini player is rendered globally in MainTabView, not here
+        // Global mini player remains visible in MainTabView - text will scroll behind it
         .onChange(of: snapshot.isClosing) { _, closing in
             if closing {
                 dismissFullscreen()

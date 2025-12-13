@@ -621,6 +621,7 @@ struct SettingsView: View {
                     .foregroundStyle(Color.accentColor)
             }
         }
+        .dynamicTypeSize(.large)
     }
 
     private func confirmVoiceSelection() {

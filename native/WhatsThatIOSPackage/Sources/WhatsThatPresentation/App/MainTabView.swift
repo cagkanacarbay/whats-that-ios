@@ -149,10 +149,10 @@ struct MainTabView: View {
             // Global mini player overlay - wrapped to properly observe controller changes
             MiniPlayerVisibilityWrapper(
                 controller: audioServices.playbackController,
+                miniPlayerPresence: audioServices.miniPlayerPresence,
                 isAudioGuidesTab: selectedTab == .audioGuides,
                 audioGuidesMode: audioGuidesMode,
-                activeOverlayPhase: activeOverlayPhase,
-                miniPlayerPresence: audioServices.miniPlayerPresence
+                activeOverlayPhase: activeOverlayPhase
             ) {
                 VStack {
                     Spacer()
@@ -164,9 +164,12 @@ struct MainTabView: View {
                     .padding(.horizontal, 16)
                 }
                 // Position above tab bar: standard tab bar height (49) + spacing
-                .padding(.bottom, 49 + 8)
+                .padding(.bottom, 49 + 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            
+            // Generation complete toast - positioned above mini player
+            GenerationToastOverlay(audioServices: audioServices)
         }
         .audioServices(audioServices)
         .onAppear {
@@ -335,8 +338,20 @@ struct MainTabView: View {
     }
 
     private var activeOverlayPhase: DiscoveryCreationPhase? {
-        guard let tab = activeOverlayTab else { return nil }
-        switch tab {
+        // First check if there's an active overlay (used during analysis when overlaid on discoveries)
+        if let tab = activeOverlayTab {
+            switch tab {
+            case .camera:
+                return cameraViewModel.flowState.phase
+            case .upload:
+                return uploadViewModel.flowState.phase
+            case .discoveries, .audioGuides:
+                return nil
+            }
+        }
+        
+        // Also check current tab for camera/upload - covers confirming/selecting phases before analysis starts
+        switch selectedTab {
         case .camera:
             return cameraViewModel.flowState.phase
         case .upload:
@@ -409,10 +424,10 @@ struct MainTabView: View {
 /// This solves the issue where reading controller properties via computed properties doesn't trigger SwiftUI re-renders.
 private struct MiniPlayerVisibilityWrapper<Content: View>: View {
     @ObservedObject var controller: VoiceoverPlaybackController
+    @ObservedObject var miniPlayerPresence: MiniPlayerPresenceStore
     let isAudioGuidesTab: Bool
     let audioGuidesMode: AudioGuidesDisplayMode
     let activeOverlayPhase: DiscoveryCreationPhase?
-    let miniPlayerPresence: MiniPlayerPresenceStore
     @ViewBuilder let content: () -> Content
     
     var body: some View {
@@ -426,6 +441,10 @@ private struct MiniPlayerVisibilityWrapper<Content: View>: View {
     }
     
     private var shouldShow: Bool {
+        // FIRST: Check if visibility has been explicitly disabled
+        // This allows other views (like DiscoveryDetailOverlayView) to hide the global player
+        guard miniPlayerPresence.isVisible else { return false }
+        
         // Must have something playing
         guard controller.currentDiscovery != nil else { return false }
         
@@ -455,3 +474,80 @@ private struct MiniPlayerVisibilityWrapper<Content: View>: View {
         return true
     }
 }
+
+// MARK: - Generation Toast Overlay
+
+/// Wrapper that observes AudioServicesContainer to show generation complete toast
+private struct GenerationToastOverlay: View {
+    @ObservedObject var audioServices: AudioServicesContainer
+    @Environment(\.colorScheme) private var colorScheme
+    
+    // Mini player constants (from MiniPlayerView)
+    private let miniPlayerHeight: CGFloat = 110  // artworkDiameter
+    private let miniPlayerBottomPadding: CGFloat = 49 + 2  // tab bar + spacing
+    // Tab bar height + spacing
+    private let tabBarOffset: CGFloat = 49 + 8
+    // Small gap between toast and mini player
+    private let toastMiniPlayerGap: CGFloat = 8
+    
+    private var isMiniPlayerVisible: Bool {
+        guard audioServices.playbackController.currentDiscovery != nil else { return false }
+        // Check if playback state is active (not idle or failed)
+        switch audioServices.playbackController.playbackState {
+        case .idle, .failed:
+            return false
+        default:
+            return true
+        }
+    }
+    
+    private var bottomPadding: CGFloat {
+        isMiniPlayerVisible 
+            ? miniPlayerBottomPadding + miniPlayerHeight + toastMiniPlayerGap
+            : tabBarOffset
+    }
+    
+    var body: some View {
+        let toasts = audioServices.pendingGenerationToasts
+        let toastCount = toasts.count
+        
+        if let frontToast = toasts.first {
+            ZStack(alignment: .topTrailing) {
+                GenerationCompleteToastView(
+                    toast: frontToast,
+                    onPlayNow: { audioServices.handleToastPlayNow() },
+                    onPlayNext: { audioServices.handleToastPlayNext() },
+                    onAddToQueue: { audioServices.handleToastAddToQueue() },
+                    onDismiss: { audioServices.dismissGenerationToast() }
+                )
+                
+                // Badge showing remaining toast count (if more than 1)
+                if toastCount > 1 {
+                    pendingCountBadge(count: toastCount)
+                        .offset(x: -8, y: -8)
+                }
+            }
+            // Force view refresh when toast changes to update image and content
+            .id(frontToast.id)
+            .padding(.bottom, bottomPadding)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.25), value: frontToast.id)
+            .zIndex(10)
+        }
+    }
+    
+    /// Badge showing how many toasts are pending
+    @ViewBuilder
+    private func pendingCountBadge(count: Int) -> some View {
+        Text("\(count)")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white)
+            .frame(minWidth: 22, minHeight: 22)
+            .background(
+                Circle()
+                    .fill(BrandColors.logo)
+            )
+            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+    }
+}
+

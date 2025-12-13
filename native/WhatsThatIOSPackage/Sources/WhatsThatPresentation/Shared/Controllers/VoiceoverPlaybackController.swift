@@ -83,6 +83,9 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var queueStore: AudioGuidesQueueStore?
     private var speedStore: VoiceoverPlaybackSpeedStore?
     private var progressStore: VoiceoverProgressStore?
+    
+    /// Called when voiceover generation completes successfully (for toast notification)
+    public var onGenerationComplete: ((DiscoverySummary) -> Void)?
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -355,10 +358,20 @@ public extension VoiceoverPlaybackController {
                 self.prefetch(for: [discovery.id])
             }
 
-            if normalized.status == .ready, let audioURL = normalized.audioURL {
+            if normalized.status == .ready, let _ = normalized.audioURL {
                 clearPending(discovery.id)
-                await prepareAudioSession()
-                await configurePlayer(with: audioURL, discovery: discovery)
+                // Don't auto-play - notify via callback for toast
+                await MainActor.run {
+                    self.playbackState = .idle
+                    // Clear currentDiscovery if it was set during preparing state
+                    if self.currentDiscovery?.id == discovery.id {
+                        self.currentDiscovery = nil
+                    }
+                }
+                // Notify that generation completed (for toast)
+                await MainActor.run {
+                    self.onGenerationComplete?(discovery)
+                }
             } else if normalized.status == .failed {
                 clearPending(discovery.id)
                 await MainActor.run {

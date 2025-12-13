@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 public final class MiniPlayerPresenceStore: ObservableObject {
     @Published public var height: CGFloat = 0
-    @Published public var isVisible: Bool = false
+    @Published public var isVisible: Bool = true
     
     public init() {}
     

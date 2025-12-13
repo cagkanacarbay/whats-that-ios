@@ -20,7 +20,18 @@ struct DiscoveryHeaderOverlayView: View {
     var onShowOptions: (() -> Void)? = nil
     var isOptionsEnabled: Bool = true
     private let topControlsBottomPadding: CGFloat = BrandSpacing.small
-    var onOpenAudioGuide: (() -> Void)? = nil
+    
+    // Dependencies needed for audio controls
+    @Environment(\.audioServices) private var audioServices
+    
+    // Optional callback for creation trigger if parent wants to handle it specially,
+    // though the controls can often handle it via VM.
+    // For now we can keep a simple callback if we want to bubble up the "show alert" event.
+    // But DiscoveryAudioControls might not expose it easily out of the box without binding.
+    // Let's assume we can trigger creation directly or pass a closure.
+    // The previous implementation had `onOpenAudioGuide` which was for the simple pill.
+    // Let's rename/reuse `onCreateAudioGuide` if we want to handle alerts in parent.
+    var onCreateAudioGuide: (() -> Void)? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -95,24 +106,6 @@ struct DiscoveryHeaderOverlayView: View {
                 .ignoresSafeArea()
             }
         }
-        .overlay(alignment: .top) {
-            // Pill - positioned at fixed offset from safe area top
-            // Must match HeroPlayerView.pillTopOffset (12pt) for consistent placement
-            if onOpenAudioGuide != nil {
-                HStack {
-                    Spacer()
-                    modePill
-                    Spacer()
-                }
-                .padding(.top, resolvedTopPadding(from: topControlsSafeAreaInsets) + 10)
-                .ignoresSafeArea()
-                .onAppear {
-                    print("🔍 DiscoveryHeader: insets.top = \(topControlsSafeAreaInsets.top)")
-                    print("🔍 DiscoveryHeader: resolved = \(resolvedTopPadding(from: topControlsSafeAreaInsets))")
-                    print("🔍 DiscoveryHeader: final = \(resolvedTopPadding(from: topControlsSafeAreaInsets) + 10)")
-                }
-            }
-        }
     }
 
     private var gradientStops: [Gradient.Stop] {
@@ -156,47 +149,6 @@ struct DiscoveryHeaderOverlayView: View {
 
     private var shouldShowActionRow: Bool {
         hasActionRow && !isClosing
-    }
-
-    @ViewBuilder
-    private var modePill: some View {
-        // On Discovery Detail, "Text" is always selected since we're viewing text content
-        HStack(spacing: 0) {
-            Button(action: {
-                // Already on Text - no action needed
-            }) {
-                Text("Text")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
-                    .foregroundColor(BrandColors.logo)
-                    .background(
-                        Capsule()
-                            .fill(palette.surface)
-                            .shadow(
-                                color: Color.black.opacity(0.1),
-                                radius: 2,
-                                x: 0,
-                                y: 1
-                            )
-                    )
-            }
-            .recordOverlayInteractiveRegion()
-
-            Button(action: {
-                onOpenAudioGuide?()
-            }) {
-                Text("Audio")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
-                    .foregroundColor(palette.textSecondary)
-            }
-            .recordOverlayInteractiveRegion()
-        }
-        .padding(2)
-        .background(palette.surface.opacity(0.95))
-        .clipShape(Capsule())
     }
 
     private var backgroundGradient: some View {

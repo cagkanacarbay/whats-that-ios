@@ -1,0 +1,347 @@
+import SwiftUI
+import WhatsThatDomain
+import WhatsThatShared
+
+struct DiscoveryAudioControls: View {
+    let discovery: DiscoverySummary
+    let voiceoverStatus: AudioGuideRowStatus
+    let isPlaying: Bool
+    @Binding var scrollOffset: CGFloat
+    
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private let voiceoverController: VoiceoverPlaybackController
+    private let queueStore: AudioGuidesQueueStore
+    private let progressStore: VoiceoverProgressStore
+    
+    // MARK: - Scroll Animation Constants
+    private let scrollTransitionThreshold: CGFloat = 60
+    
+    /// Progress from 0 (at top) to 1 (scrolled past threshold)
+    private var scrollProgress: CGFloat {
+        min(1.0, max(0.0, scrollOffset / scrollTransitionThreshold))
+    }
+    
+    /// Shadow fully disappears when scrolled for "pop-down" effect
+    private var animatedShadowOpacity: Double {
+        0.15 * (1 - scrollProgress)
+    }
+    
+    private var animatedShadowRadius: CGFloat {
+        10 * (1 - scrollProgress)
+    }
+    
+    private var animatedShadowY: CGFloat {
+        4 * (1 - scrollProgress)
+    }
+    
+    /// Border fades out when scrolled
+    private var animatedBorderOpacity: Double {
+        1.0 - scrollProgress
+    }
+    
+    /// Pill shifts down when scrolled to embed into content
+    private var animatedVerticalOffset: CGFloat {
+        scrollProgress * 12
+    }
+    
+    // Feedback state for queue buttons
+    @State private var showPlayNextConfirmation = false
+    @State private var showAddToEndConfirmation = false
+    
+    init(
+        discovery: DiscoverySummary,
+        voiceoverStatus: AudioGuideRowStatus,
+        isPlaying: Bool,
+        audioServices: AudioServicesContainer,
+        scrollOffset: Binding<CGFloat>
+    ) {
+        self.discovery = discovery
+        self.voiceoverStatus = voiceoverStatus
+        self.isPlaying = isPlaying
+        self._scrollOffset = scrollOffset
+        self.voiceoverController = audioServices.playbackController
+        self.queueStore = audioServices.queueStore
+        self.progressStore = audioServices.progressStore
+    }
+    
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
+    
+    var body: some View {
+        // Center the bar horizontally
+        HStack {
+            Spacer()
+            
+            // Unified audio control bar - matches mini player styling
+            Button(action: handleMainAction) {
+                HStack(spacing: 16) {
+                    // Left side: Play icon + text
+                    HStack(spacing: 10) {
+                        mainButtonIcon
+                            .transition(.scale.combined(with: .opacity))
+                        
+                        mainButtonText
+                            .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                    }
+                    
+                    // Right side: Queue actions (only when audio is ready)
+                    if voiceoverStatus.isPlayable {
+                        HStack(spacing: 4) {
+                            queueActionButton(
+                                iconName: "text.insert",
+                                label: "Next",
+                                isConfirmed: showPlayNextConfirmation,
+                                action: playNext
+                            )
+                            
+                            queueActionButton(
+                                iconName: "text.append",
+                                label: "Queue",
+                                isConfirmed: showAddToEndConfirmation,
+                                action: addToEnd
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(palette.surface.opacity(0.95))
+                        .shadow(
+                            color: Color.black.opacity(animatedShadowOpacity),
+                            radius: animatedShadowRadius,
+                            x: 0,
+                            y: animatedShadowY
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(palette.border.opacity(animatedBorderOpacity), lineWidth: 0.5)
+                        )
+                )
+                .offset(y: animatedVerticalOffset)
+            }
+            .buttonStyle(UnifiedBarButtonStyle())
+            .disabled(isButtonDisabled)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPlaying)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: voiceoverStatus)
+            
+            Spacer()
+        }
+    }
+    
+    // Inline queue action button for the unified bar
+    @ViewBuilder
+    private func queueActionButton(
+        iconName: String,
+        label: String,
+        isConfirmed: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                if isConfirmed {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(BrandColors.logo)
+                        .transition(.scale.combined(with: .opacity))
+                } else {
+                    Image(systemName: iconName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(palette.textSecondary)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(isConfirmed ? BrandColors.logo : palette.textSecondary)
+            }
+            .frame(width: 44, height: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    @ViewBuilder
+    private var mainButtonIcon: some View {
+        ZStack {
+            Circle()
+                .fill(BrandColors.logo)
+                .frame(width: 36, height: 36)
+            
+            Group {
+                if isPlaying {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .transition(.scale.combined(with: .opacity))
+                } else {
+                    switch voiceoverStatus {
+                    case .ready:
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .offset(x: 2) // Optical center adjustment
+                            .transition(.scale.combined(with: .opacity))
+                    case .generating, .generationQueued, .checking:
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(0.9)
+                            .transition(.opacity)
+                    case .empty, .failed:
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 16, weight: .bold))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+            }
+            .foregroundColor(.white)
+            .id(isPlaying ? "playing" : String(describing: voiceoverStatus)) // Unique ID for transitions
+        }
+    }
+    
+    @ViewBuilder
+    private var mainButtonText: some View {
+        Group {
+            if isPlaying {
+                Text("Pause")
+            } else {
+                switch voiceoverStatus {
+                case .ready:
+                    Text("Play")
+                case .generating, .generationQueued:
+                    Text("Generating...")
+                case .checking:
+                    Text("Checking...")
+                case .empty, .failed:
+                    Text("Generate Audio")
+                }
+            }
+        }
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundColor(palette.textPrimary)
+    }
+    
+    private func handleMainAction() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+        
+        switch voiceoverStatus {
+        case .ready:
+            voiceoverController.togglePlayback(for: discovery)
+        case .empty, .failed:
+            voiceoverController.requestVoiceover(for: discovery)
+        default:
+            break
+        }
+    }
+    
+    private var isButtonDisabled: Bool {
+        switch voiceoverStatus {
+        case .generating, .generationQueued, .checking:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    private func playNext() {
+        queueStore.playNext(discovery.id)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            showPlayNextConfirmation = true
+        }
+        
+        // Reset confirmation after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                showPlayNextConfirmation = false
+            }
+        }
+    }
+    
+    private func addToEnd() {
+        queueStore.addToEnd(discovery.id)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            showAddToEndConfirmation = true
+        }
+        
+        // Reset confirmation after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                showAddToEndConfirmation = false
+            }
+        }
+    }
+}
+
+// MARK: - Helper Components
+
+struct QueueActionButton: View {
+    let iconName: String
+    let label: String
+    let isConfirmed: Bool
+    let action: () -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
+    
+    var body: some View {
+        Button(action: action) {
+             VStack(spacing: 4) {
+                 if isConfirmed {
+                     Image(systemName: "checkmark")
+                         .font(.system(size: 18, weight: .bold))
+                         .foregroundColor(BrandColors.logo) // Use brand color for tick
+                         .transition(.scale.combined(with: .opacity))
+                 } else {
+                     Image(systemName: iconName)
+                         .font(.system(size: 18, weight: .semibold))
+                         .foregroundColor(palette.textSecondary)
+                         .transition(.scale.combined(with: .opacity))
+                 }
+                 
+                 Text(label)
+                     .font(.system(size: 10, weight: .medium))
+                     .foregroundColor(isConfirmed ? BrandColors.logo : palette.textSecondary)
+             }
+             .frame(width: 60)
+        }
+        .buttonStyle(PressedBackgroundButtonStyle(palette: palette, isConfirmed: isConfirmed))
+    }
+}
+
+struct PressedBackgroundButtonStyle: ButtonStyle {
+    let palette: BrandTheme.Palette
+    let isConfirmed: Bool
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed || isConfirmed ? palette.surface.opacity(0.8) : Color.clear)
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+struct UnifiedBarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}

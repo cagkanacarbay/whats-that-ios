@@ -86,7 +86,10 @@ public final class AudioGuideRowStateProvider: ObservableObject {
             return cached
         }
         let computed = computeRowState(for: discoveryId)
-        rowStates[discoveryId] = computed
+        // Defer cache write to avoid "Publishing changes from within view updates" warning
+        DispatchQueue.main.async { [weak self] in
+            self?.rowStates[discoveryId] = computed
+        }
         return computed
     }
     

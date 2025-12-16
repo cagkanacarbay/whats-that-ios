@@ -32,4 +32,24 @@ public extension AppConfiguration {
         googleReversedClientID: nil,
         passwordResetRedirectURL: nil
     )
+
+    // MARK: - Website & Legal URLs
+
+    /// The app's website domain (single source of truth for all web URLs).
+    static let websiteDomain = "whats-that.app"
+
+    /// Base URL for the website.
+    static var websiteBaseURL: URL {
+        URL(string: "https://\(websiteDomain)")!
+    }
+
+    /// URL to the Terms and Conditions page.
+    static var termsAndConditionsURL: URL {
+        websiteBaseURL.appendingPathComponent("legal/terms-and-conditions")
+    }
+
+    /// URL to the Privacy Policy page.
+    static var privacyPolicyURL: URL {
+        websiteBaseURL.appendingPathComponent("legal/privacy-policy")
+    }
 }

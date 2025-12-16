@@ -86,7 +86,7 @@ struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
         guard let token = discovery.shareToken else { return nil }
         var components = URLComponents()
         components.scheme = "https"
-        components.host = "whats-that.app"
+        components.host = AppConfiguration.websiteDomain
         components.path = "/share/\(token.uuidString.lowercased())"
         return components.url
     }

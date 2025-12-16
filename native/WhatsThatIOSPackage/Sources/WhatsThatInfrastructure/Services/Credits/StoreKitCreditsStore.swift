@@ -7,7 +7,6 @@ import WhatsThatShared
 
 enum CreditsStoreError: LocalizedError {
     case userNotAuthenticated
-    case receiptUnavailable
     case validationFailed(String?)
     case unverifiedTransaction
     case unsupportedResponse
@@ -16,8 +15,6 @@ enum CreditsStoreError: LocalizedError {
         switch self {
         case .userNotAuthenticated:
             return "You need to sign in before purchasing credits."
-        case .receiptUnavailable:
-            return "We couldn’t access the App Store receipt. Please try again in a moment."
         case let .validationFailed(message):
             if let message, !message.isEmpty {
                 return message
@@ -84,40 +81,17 @@ public actor StoreKitCreditsStore: CreditsStore {
 
     public func purchase(productId: String) async throws -> CreditPurchaseResult {
         let product = try await loadProductIfNeeded(for: productId)
-
-        // Preflight: if the app has no local receipt, refresh it now so any
-        // Apple ID prompt (sandbox) happens before the purchase sheet.
-        if !hasCurrentReceipt() {
-            try? await AppStore.sync()
-        }
-
         let purchaseResult = try await product.purchase()
+        
         switch purchaseResult {
         case let .success(verification):
+            // Extract JWS from VerificationResult before unwrapping
+            let jwsString = verification.jwsRepresentation
             let transaction = try verify(verification)
-            do {
-                try await validateTransaction(transaction, for: product, refreshReceipt: false)
-            } catch let error as CreditsStoreError {
-                // If receipt is still missing or the server couldn't find the
-                // just-purchased transaction in the receipt, refresh once and
-                // retry validation. In sandbox, this may prompt for Apple ID.
-                let shouldRetry: Bool
-                switch error {
-                case .receiptUnavailable:
-                    shouldRetry = true
-                case .validationFailed(let message):
-                    let lower = message?.lowercased() ?? ""
-                    shouldRetry = lower.contains("transaction not found") || lower.contains("not found")
-                default:
-                    shouldRetry = false
-                }
-                if shouldRetry {
-                    try? await AppStore.sync()
-                    try await validateTransaction(transaction, for: product, refreshReceipt: false)
-                } else {
-                    throw error
-                }
-            }
+            
+            // Validate with server using StoreKit 2's signed JWS
+            try await validateTransaction(transaction, jwsString: jwsString, for: product)
+            
             await transaction.finish()
             return CreditPurchaseResult(status: .success)
         case .pending:
@@ -159,16 +133,13 @@ private extension StoreKitCreditsStore {
 
     func validateTransaction(
         _ transaction: Transaction,
-        for product: Product,
-        refreshReceipt: Bool = true
+        jwsString: String,
+        for product: Product
     ) async throws {
         guard let accessToken = client.auth.currentSession?.accessToken else {
             throw CreditsStoreError.userNotAuthenticated
         }
 
-        // Use existing receipt when available; only refresh on-demand during
-        // an explicit purchase flow to avoid unexpected sign-in prompts.
-        let receiptData = try await fetchReceiptData(refreshIfMissing: refreshReceipt)
         guard let url = try makeFunctionsURL(for: "validate-receipt") else {
             throw CreditsStoreError.unsupportedResponse
         }
@@ -180,12 +151,9 @@ private extension StoreKitCreditsStore {
 
         let payload: [String: Any] = [
             "platform": "ios",
-            "receiptData": receiptData.base64EncodedString(),
+            "signedTransaction": jwsString,
             "productId": product.id,
-            // Send both the StoreKit transaction id and the original id as strings
-            // to match common server expectations for Apple receipt fields.
-            "storeTransactionId": String(transaction.id),
-            "originalTransactionId": String(transaction.originalID)
+            "storeTransactionId": String(transaction.originalID)
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -209,37 +177,6 @@ private extension StoreKitCreditsStore {
         }
     }
 
-    func fetchReceiptData(refreshIfMissing: Bool) async throws -> Data {
-        if let data = currentReceiptData(), !data.isEmpty {
-            return data
-        }
-
-        if refreshIfMissing {
-            try await AppStore.sync()
-            if let data = currentReceiptData(), !data.isEmpty {
-                return data
-            }
-        }
-
-        throw CreditsStoreError.receiptUnavailable
-    }
-
-    func currentReceiptData() -> Data? {
-        guard
-            let url = Bundle.main.appStoreReceiptURL,
-            let data = try? Data(contentsOf: url),
-            !data.isEmpty
-        else {
-            return nil
-        }
-        return data
-    }
-
-    func hasCurrentReceipt() -> Bool {
-        if let data = currentReceiptData(), !data.isEmpty { return true }
-        return false
-    }
-
     func makeFunctionsURL(for pathComponent: String) throws -> URL? {
         guard let supabaseURL = configuration.supabaseURL else {
             throw CreditsStoreError.unsupportedResponse
@@ -261,6 +198,7 @@ private struct ValidateReceiptResponse: Decodable {
     let success: Bool
     let message: String?
 }
+
 #if os(iOS)
 public extension StoreKitCreditsStore {
     /// Clears local StoreKit cache and optionally deletes the on-disk App Store receipt.
@@ -283,16 +221,10 @@ public extension StoreKitCreditsStore {
         Task {
             for await update in Transaction.updates {
                 do {
+                    let jwsString = update.jwsRepresentation
                     let transaction: Transaction = try self.verify(update)
                     let product = try await self.loadProductIfNeeded(for: transaction.productID)
-                    do {
-                        try await self.validateTransaction(transaction, for: product, refreshReceipt: false)
-                    } catch {
-                        // Do not call AppStore.sync() here to avoid prompting
-                        // for Apple ID at app launch. The user can trigger a
-                        // receipt sync from the Credits screen as needed.
-                        throw error
-                    }
+                    try await self.validateTransaction(transaction, jwsString: jwsString, for: product)
                     await transaction.finish()
                     if let balanceStore {
                         _ = try? await balanceStore.refresh(force: true)

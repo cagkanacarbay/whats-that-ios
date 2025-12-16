@@ -172,9 +172,10 @@ serve(async (req) => {
     handlerLogger.info('User authenticated', { userIdMasked: maskId(user.id) })
 
     const { data: rateLimitAllowed, error: rateLimitError } = await supabaseUser.rpc(
-      'enforce_nearby_places_rate_limit',
+      'enforce_edge_function_rate_limit',
       {
         p_user_id: user.id,
+        p_function_name: 'nearby-places',
         p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
         p_max_requests: RATE_LIMIT_MAX_REQUESTS,
       }

@@ -273,3 +273,9 @@ enabled = true
 verify_jwt = false
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/shared-discovery/index.ts"
+
+[functions.generate-voiceover]
+enabled = true
+verify_jwt = true
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/generate-voiceover/index.ts"

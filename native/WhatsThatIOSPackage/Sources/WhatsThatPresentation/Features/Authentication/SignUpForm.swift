@@ -89,15 +89,12 @@ struct SignUpForm: View {
                     if newValue == true { onFieldFocusChanged(.confirm) }
                 }
                 Toggle(isOn: $agreedToTerms) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("I agree to the Terms and Conditions and Privacy Policy")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(bodyColor)
-                            .underline(shouldShowTermsError, color: Color.red.opacity(0.85))
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .animation(nil, value: shouldShowTermsError)
-                    }
+                    Text(termsAgreementAttributedString)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(bodyColor)
+                        .tint(primaryColor)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .toggleStyle(SwitchToggleStyle(tint: primaryColor))
                 if shouldShowTermsError {
@@ -122,9 +119,10 @@ struct SignUpForm: View {
                 DividerWithLabel(label: "or")
 
                 VStack(spacing: BrandSpacing.small) {
-                    Text("By continuing with Google or Apple, you agree to our Terms and Privacy Policy.")
+                    Text(socialAuthAgreementAttributedString)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(bodyColor.opacity(0.8))
+                        .tint(primaryColor)
                         .multilineTextAlignment(.center)
                     BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
                         handleSocialAuth(using: onGoogle)
@@ -231,6 +229,46 @@ struct SignUpForm: View {
         // Avoid heavy validation while typing; only require fields to be non‑empty
         // and terms toggled for enabling the button. Full checks happen on submit.
         !email.isEmpty && !password.isEmpty && !confirmPassword.isEmpty && agreedToTerms
+    }
+
+    // MARK: - Legal Agreement Attributed Strings
+
+    private var termsAgreementAttributedString: AttributedString {
+        var result = AttributedString("I agree to the ")
+        
+        var terms = AttributedString("Terms and Conditions")
+        terms.link = AppConfiguration.termsAndConditionsURL
+        terms.underlineStyle = .single
+        result.append(terms)
+        
+        result.append(AttributedString(" and "))
+        
+        var privacy = AttributedString("Privacy Policy")
+        privacy.link = AppConfiguration.privacyPolicyURL
+        privacy.underlineStyle = .single
+        result.append(privacy)
+        
+        return result
+    }
+
+    private var socialAuthAgreementAttributedString: AttributedString {
+        var result = AttributedString("By continuing with Google or Apple, you agree to our ")
+        
+        var terms = AttributedString("Terms")
+        terms.link = AppConfiguration.termsAndConditionsURL
+        terms.underlineStyle = .single
+        result.append(terms)
+        
+        result.append(AttributedString(" and "))
+        
+        var privacy = AttributedString("Privacy Policy")
+        privacy.link = AppConfiguration.privacyPolicyURL
+        privacy.underlineStyle = .single
+        result.append(privacy)
+        
+        result.append(AttributedString("."))
+        
+        return result
     }
 }
 

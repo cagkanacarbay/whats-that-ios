@@ -15,6 +15,10 @@ const PROCESSING_STALE_MS = 60_000;
 const EDGE_BUDGET_MS = 145_000;
 const BACKOFF_STEPS_MS = [0, 1000, 2000, 4000, 8000];
 
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
 type VoiceoverStatus = 'processing' | 'ready' | 'failed';
 
 interface VoiceoverRow {
@@ -92,6 +96,31 @@ serve(async req => {
 
     const userId = userData.user.id;
     logger.info('Request received', { userId: maskId(userId) });
+
+    // Rate limit check - before processing request
+    const { data: rateLimitAllowed, error: rateLimitError } = await supabaseAdmin.rpc(
+      'enforce_edge_function_rate_limit',
+      {
+        p_user_id: userId,
+        p_function_name: 'generate-voiceover',
+        p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
+        p_max_requests: RATE_LIMIT_MAX_REQUESTS,
+      }
+    );
+
+    if (rateLimitError) {
+      logger.error('Rate limit check failed', { errorMessage: rateLimitError.message });
+      return jsonResponse(baseHeaders, { error: 'rate_limit_error', message: 'Unable to check rate limit.' }, 500);
+    }
+
+    if (!rateLimitAllowed) {
+      logger.warn('Rate limit exceeded', { userId: maskId(userId) });
+      return jsonResponse(
+        baseHeaders,
+        { error: 'rate_limited', message: `Too many requests. Please wait a moment and try again.` },
+        429
+      );
+    }
 
     let payload: any;
     try {

@@ -26,6 +26,10 @@ const OPENAI_MODEL = "gpt-5-mini";
 const CLAUDE_MODEL = "claude-3-5-sonnet-20241022";
 const STREAM_RETRY_LIMIT = 3;
 
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_MAX_REQUESTS = 10;
+
 // Utility: mask an identifier by showing beginning and end
 function maskId(value: string): string {
   if (!value) return value;
@@ -357,6 +361,30 @@ serve(async (req: Request) => {
       }
       userId = user.id;
       handlerLogger.info('User authenticated', { userIdMasked: maskId(user.id) });
+
+      // Rate limit check - before consuming credits
+      sendEvent('status', { stage: 'rate_limit', message: 'Checking rate limit…' });
+      const { data: rateLimitAllowed, error: rateLimitError } = await supabaseAdmin.rpc(
+        'enforce_edge_function_rate_limit',
+        {
+          p_user_id: userId,
+          p_function_name: 'ask-ai-v7',
+          p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
+          p_max_requests: RATE_LIMIT_MAX_REQUESTS,
+        }
+      );
+
+      if (rateLimitError) {
+        handlerLogger.error('Rate limit check failed', { errorMessage: rateLimitError.message });
+        throw new Error('Rate limit check failed');
+      }
+
+      if (!rateLimitAllowed) {
+        handlerLogger.warn('Rate limit exceeded', { userIdMasked: maskId(user.id) });
+        const err = new Error(`Too many requests. Please wait a moment and try again.`);
+        (err as any).status = 429;
+        throw err;
+      }
 
       sendEvent('status', { stage: 'credits', message: 'Consuming credits…' });
 

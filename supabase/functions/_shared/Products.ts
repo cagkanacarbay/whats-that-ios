@@ -1,11 +1,11 @@
 // import { Platform } from 'react-native';
 
-// TODO: Replace with actual Product IDs from App Store Connect
+// Product IDs configured in App Store Connect
 export const ProductIDs = {
-  // iOS Product IDs
+  // iOS Product IDs (format: amount.credits)
   ios: {
-    CREDITS_PACK_100: '100credits',
-    CREDITS_PACK_1000: '1000credits',
+    CREDITS_PACK_100: '100.credits',
+    CREDITS_PACK_1000: '1000.credits',
   },
   // Android Product IDs
   // android: {
@@ -23,14 +23,14 @@ export const getPlatformProductIds = (): string[] => {
 
 // Helper function to map platform product ID to credit amount (adjust as needed)
 export const getCreditsForProductId = (productId: string): number => {
-    switch (productId) {
-        case ProductIDs.ios.CREDITS_PACK_100:
-            return 100;
-        case ProductIDs.ios.CREDITS_PACK_1000:
-            // Assuming the 1000 pack ID maps to 1000 credits
-            return 1000;
-        default:
-            console.warn(`Unknown product ID: ${productId}`);
-            return 0;
-    }
+  switch (productId) {
+    case ProductIDs.ios.CREDITS_PACK_100:
+      return 100;
+    case ProductIDs.ios.CREDITS_PACK_1000:
+      // Assuming the 1000 pack ID maps to 1000 credits
+      return 1000;
+    default:
+      console.warn(`Unknown product ID: ${productId}`);
+      return 0;
+  }
 } 

@@ -83,9 +83,11 @@ struct SettingsView: View {
                 ipopSection
                 audioGuidesSection
                 accountSection
+                #if DEBUG
                 onboardingSection
                 devSection
                 cacheDebugSection
+                #endif
             }
             .task {
                 await viewModel.refreshCreditBalance()
@@ -379,6 +381,7 @@ struct SettingsView: View {
         }
     }
 
+    #if DEBUG
     private var onboardingSection: some View {
         Section(header: Text("Cache & Onboarding")) {
             Button {
@@ -420,7 +423,9 @@ struct SettingsView: View {
                 .padding(.vertical, 4)
         }
     }
+    #endif
 
+    #if DEBUG
     private var devSection: some View {
         Section(header: Text("Development")) {
             Button {
@@ -443,11 +448,15 @@ struct SettingsView: View {
             }
         }
     }
+    #endif
     
+    #if DEBUG
     @Environment(\.audioServices) private var audioServices
     @State private var cacheAlertMessage: String?
     @State private var showCacheAlert = false
+    #endif
     
+    #if DEBUG
     private var cacheDebugSection: some View {
         Section(header: Text("Cache Management (Dev)")) {
             // Audio Files Cache
@@ -518,7 +527,8 @@ struct SettingsView: View {
             Text(cacheAlertMessage ?? "Cache cleared successfully")
         }
     }
-    
+    #endif
+    #if DEBUG
     private func cacheButtonLabel(icon: String, title: String, subtitle: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
@@ -560,6 +570,7 @@ struct SettingsView: View {
         defaults.removeObject(forKey: "voiceover_last_played")
         defaults.synchronize()
     }
+    #endif
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: storedAppearance) ?? .system

@@ -46,7 +46,6 @@ We do not use your personal information for third‑party advertising. We do not
 - We send user images and context (including location or nearby places where provided) to AI provider(s) solely to generate outputs. Examples include Anthropic Claude and Google Gemini for image analysis, and text‑to‑speech providers for Audio Guides. We may add or change providers.
 - For Audio Guides, we send your discovery's text description to a text‑to‑speech provider to generate audio narrations. The provider processes this text solely to produce the audio file, which is then stored in our systems and cached on your device for playback.
 - We configure and contract with providers so that your content is processed only to provide the Service and is not used to train foundation models, unless you explicitly opt in. Providers may retain limited data transiently for abuse prevention and troubleshooting per their policies.
-- See our current list of providers and roles at project-documentation/legal/sub-processors.md.
 
 6) Sharing and recipients
 We share data with service providers who act on our behalf to provide the Service:

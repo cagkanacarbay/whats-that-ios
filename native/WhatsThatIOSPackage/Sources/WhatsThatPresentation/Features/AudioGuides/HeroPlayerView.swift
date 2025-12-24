@@ -7,6 +7,9 @@ struct HeroPlayerView: View {
     @Environment(\.audioServices) private var services
     @Environment(\.colorScheme) var colorScheme
     
+    /// Whether to use compact sizing (for small screens like iPad compatibility mode)
+    var isCompact: Bool = false
+    
     /// Callback when user taps "Text" to open discovery detail
     var onTextSelected: (DiscoverySummary?) -> Void = { _ in }
     
@@ -17,6 +20,7 @@ struct HeroPlayerView: View {
                 queueStore: services.queueStore,
                 audioServices: services,
                 colorScheme: colorScheme,
+                isCompact: isCompact,
                 onTextSelected: onTextSelected
             )
         }
@@ -29,9 +33,15 @@ private struct HeroPlayerContentView: View {
     @ObservedObject var queueStore: AudioGuidesQueueStore
     let audioServices: AudioServicesContainer
     let colorScheme: ColorScheme
+    let isCompact: Bool
     var onTextSelected: (DiscoverySummary?) -> Void
     
     @State private var selectedMode = "Audio"
+    
+    // Responsive sizing for compact screens
+    private var ringSize: CGFloat { isCompact ? 200 : 300 }
+    private var artworkSize: CGFloat { isCompact ? 176 : 264 }
+    private var timeLabelsWidth: CGFloat { isCompact ? 160 : 240 }
     
     // Accelerated seek state
     @State private var seekTimer: Timer?
@@ -88,22 +98,23 @@ private struct HeroPlayerContentView: View {
     // MARK: - Body
     
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: isCompact ? 12 : 24) {
             // Space reserved for pill (positioned by parent as fixed overlay)
-            Spacer().frame(height: 36)
+            Spacer().frame(height: isCompact ? 24 : 36)
             
             // Main Circular Player
             circularPlayer
             
             // Meta Info (Title)
-            VStack(spacing: 8) {
+            VStack(spacing: isCompact ? 4 : 8) {
                 Text(discovery?.title ?? "Select a guide")
-                    .font(.title2)
+                    .font(isCompact ? .headline : .title2)
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                    .lineLimit(isCompact ? 1 : 2)
                     .padding(.horizontal)
-                    .padding(.top, 5)
+                    .padding(.top, isCompact ? 2 : 5)
             }
             
             // Controls
@@ -163,33 +174,35 @@ private struct HeroPlayerContentView: View {
     // MARK: - Circular Player
     
     private var circularPlayer: some View {
-        ZStack {
+        let strokeWidth: CGFloat = isCompact ? 10 : 14
+        
+        return ZStack {
             // Background Circle
             Circle()
                 .trim(from: 0.0, to: 0.8)
-                .stroke(BrandColors.Light.secondaryAction.opacity(0.3), style: StrokeStyle(lineWidth: 14, lineCap: .round))
+                .stroke(BrandColors.Light.secondaryAction.opacity(0.3), style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round))
                 .rotationEffect(.degrees(126))
-                .frame(width: 300, height: 300)
+                .frame(width: ringSize, height: ringSize)
             
             // Progress Ring
             Circle()
                 .trim(from: 0.0, to: progress * 0.8)
                 .stroke(
                     BrandColors.logo,
-                    style: StrokeStyle(lineWidth: 14, lineCap: .round)
+                    style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(126))
-                .frame(width: 300, height: 300)
+                .frame(width: ringSize, height: ringSize)
             
             // Artwork
             artworkView
         }
-        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.1), radius: isCompact ? 6 : 10, x: 0, y: isCompact ? 2 : 4)
         .overlay(alignment: .bottom) {
             // Time labels
             HStack {
                 Text(currentTimeString)
-                    .font(.caption)
+                    .font(isCompact ? .caption2 : .caption)
                     .fontWeight(.medium)
                     .monospacedDigit()
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
@@ -197,13 +210,13 @@ private struct HeroPlayerContentView: View {
                 Spacer()
                 
                 Text(durationString)
-                    .font(.caption)
+                    .font(isCompact ? .caption2 : .caption)
                     .fontWeight(.medium)
                     .monospacedDigit()
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
-            .frame(width: 240)
-            .offset(y: 5)
+            .frame(width: timeLabelsWidth)
+            .offset(y: isCompact ? 2 : 5)
         }
     }
     
@@ -221,7 +234,7 @@ private struct HeroPlayerContentView: View {
                     Image(uiImage: platformImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 264, height: 264)
+                        .frame(width: artworkSize, height: artworkSize)
                         .clipShape(Circle())
                 case .loading, .empty, .failure:
                     placeholderArtwork
@@ -237,17 +250,17 @@ private struct HeroPlayerContentView: View {
     private var placeholderArtwork: some View {
         Circle()
             .fill(Color.gray.opacity(0.3))
-            .frame(width: 264, height: 264)
+            .frame(width: artworkSize, height: artworkSize)
     }
     
     // MARK: - Playback Controls
     
     private var playbackControls: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: isCompact ? 16 : 24) {
             // Prev
             Button(action: playPrevious) {
                 Image(systemName: "backward.end.fill")
-                    .font(.system(size: 24))
+                    .font(.system(size: isCompact ? 20 : 24))
                     .foregroundColor(canPlayPrevious
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
@@ -260,9 +273,9 @@ private struct HeroPlayerContentView: View {
             // Play/Pause
             Button(action: togglePlayPause) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
+                    .font(.system(size: isCompact ? 48 : 64))
                     .foregroundColor(BrandColors.logo)
-                    .shadow(color: BrandColors.logo.opacity(0.3), radius: 10, x: 0, y: 4)
+                    .shadow(color: BrandColors.logo.opacity(0.3), radius: isCompact ? 6 : 10, x: 0, y: isCompact ? 2 : 4)
             }
             
             // +5s with accelerated seek
@@ -271,14 +284,14 @@ private struct HeroPlayerContentView: View {
             // Next
             Button(action: playNext) {
                 Image(systemName: "forward.end.fill")
-                    .font(.system(size: 24))
+                    .font(.system(size: isCompact ? 20 : 24))
                     .foregroundColor(canPlayNext
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
             }
             .disabled(!canPlayNext)
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, isCompact ? 4 : 10)
     }
     
     @ViewBuilder
@@ -288,7 +301,7 @@ private struct HeroPlayerContentView: View {
         
         Button(action: { controller.seek(by: seconds) }) {
             Image(systemName: imageName)
-                .font(.system(size: 24))
+                .font(.system(size: isCompact ? 20 : 24))
                 .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
         }
         .simultaneousGesture(

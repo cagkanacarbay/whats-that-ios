@@ -48,9 +48,6 @@ struct AudioGuidesPageView: View {
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            BrandTheme.palette(for: colorScheme).background
-                .ignoresSafeArea()
-            
             heroView
                 .allowsHitTesting(mode == .hero)
             
@@ -60,6 +57,7 @@ struct AudioGuidesPageView: View {
                     .zIndex(1)
             }
         }
+        .background(BrandTheme.palette(for: colorScheme).background.ignoresSafeArea())
         .animation(.easeInOut(duration: transitionDuration), value: mode)
         .sheet(isPresented: $viewModel.showHistory) {
             HistorySheetView(
@@ -105,31 +103,34 @@ private extension AudioGuidesPageView {
     
     var heroView: some View {
         GeometryReader { proxy in
-            let bottomInset = proxy.safeAreaInsets.bottom
             let safeTop = proxy.safeAreaInsets.top
-            let reservedBottom: CGFloat = 52 + bottomInset
+            let screenHeight = proxy.size.height
             
-            ZStack(alignment: .bottom) {
-                // Main content (flex layout)
-                VStack(spacing: 20) {
-                    Spacer(minLength: 12)
-                    HeroPlayerView(onTextSelected: onTextSelected)
+            // Detect compact screens (iPad compatibility mode simulates ~568pt 4" iPhone)
+            let isCompactScreen = screenHeight < 600
+            
+            // Layout using VStack to naturally respect safe areas and push toggle bar to bottom
+            VStack(spacing: 0) {
+                // Main content area (flex)
+                VStack(spacing: isCompactScreen ? 12 : 20) {
+                    Spacer(minLength: isCompactScreen ? 8 : 12)
+                    HeroPlayerView(isCompact: isCompactScreen, onTextSelected: onTextSelected)
                         .padding(.horizontal, 16)
-                    Spacer(minLength: 12)
+                    Spacer(minLength: isCompactScreen ? 8 : 12)
                 }
+                .frame(maxHeight: .infinity)
                 .padding(.horizontal, 8)
-                .padding(.bottom, reservedBottom)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 
-                // Toggle bar (fixed at bottom)
+                // Toggle bar (pushed to bottom of safe area)
                 toggleBar(enterListOnTap: true, showSelection: false)
                     .matchedGeometryEffect(id: "toggleBar", in: toggleNamespace, isSource: mode == .hero)
                     .padding(.horizontal, 8)
-                    .padding(.bottom, bottomInset)
+                    .padding(.bottom, 6) // Small consistent gap above tab bar
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .top) // Let player content bleed into status bar area
             .overlay(alignment: .top) {
                 // Pill (fixed position - matches Discovery Detail logic)
-                // Discovery Detail uses resolvedTopPadding (safeTop - 4) + 10
                 HStack {
                     Spacer()
                     heroPill
@@ -137,11 +138,6 @@ private extension AudioGuidesPageView {
                 }
                 .padding(.top, safeTop + Self.pillTopOffset)
                 .ignoresSafeArea()
-                .onAppear {
-                    print("🔍 AudioGuides: safeTop = \(safeTop)")
-                    print("🔍 AudioGuides: pillTopOffset = \(Self.pillTopOffset)")
-                    print("🔍 AudioGuides: calculated = \(safeTop + Self.pillTopOffset)")
-                }
             }
         }
     }

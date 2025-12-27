@@ -87,7 +87,8 @@ public final class AudioServicesContainer: ObservableObject {
         playbackController.configure(
             queueStore: queueStore,
             speedStore: speedStore,
-            progressStore: progressStore
+            progressStore: progressStore,
+            discoveryStore: discoveryStore
         )
         
         // Wire up generation complete callback to show toast
@@ -130,6 +131,24 @@ public final class AudioServicesContainer: ObservableObject {
         guard let toast = pendingGenerationToast else { return }
         queueStore.addToEnd(toast.discovery.id)
         dismissGenerationToast()
+    }
+    
+    // MARK: - User Data Clearing
+    
+    /// Clears all user-specific audio/playback data. Called during sign-out.
+    public func clearAllUserData() async {
+        // Stop any active playback first
+        playbackController.stop()
+        
+        // Clear all queue and progress state
+        queueStore.clearAll()
+        progressStore.clearAll()
+        
+        // Clear pending toasts
+        pendingGenerationToasts.removeAll()
+        
+        // Clear cached audio files
+        await fileCache.clearAll()
     }
 }
 

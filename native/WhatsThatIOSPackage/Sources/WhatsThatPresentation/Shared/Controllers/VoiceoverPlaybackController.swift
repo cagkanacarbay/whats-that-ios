@@ -83,6 +83,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var queueStore: AudioGuidesQueueStore?
     private var speedStore: VoiceoverPlaybackSpeedStore?
     private var progressStore: VoiceoverProgressStore?
+    private var discoveryStore: DiscoveryStore?
     
     /// Called when voiceover generation completes successfully (for toast notification)
     public var onGenerationComplete: ((DiscoverySummary) -> Void)?
@@ -269,6 +270,24 @@ public extension VoiceoverPlaybackController {
 
     @discardableResult
     func skipToNextDiscovery() -> DiscoverySummary? {
+        // Use queueStore if available for consistent navigation
+        if let queueStore = queueStore, let nextId = queueStore.next() {
+            if let discovery = getDiscovery(id: nextId) {
+                togglePlayback(for: discovery)
+                return discovery
+            } else {
+                // Fallback to async fetch via discoveryStore
+                Task {
+                    if let discovery = await discoveryStore?.get(id: nextId) {
+                        await MainActor.run {
+                            self.togglePlayback(for: discovery)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback to old queue logic if queueStore is missing (e.g. unit tests or isolation)
         guard let discovery = nextDiscoveryInQueue() else { return nil }
         togglePlayback(for: discovery)
         return discovery
@@ -276,6 +295,21 @@ public extension VoiceoverPlaybackController {
 
     @discardableResult
     func skipToPreviousDiscovery() -> DiscoverySummary? {
+        // Use queueStore if available
+        if let queueStore = queueStore {
+            let currentPos = position
+            if let prevId = queueStore.previous(currentPosition: currentPos) {
+                 if prevId == queueStore.current {
+                     // Restart
+                     seek(to: 0) {}
+                     return currentDiscovery
+                 } else if let discovery = getDiscovery(id: prevId) {
+                     togglePlayback(for: discovery)
+                     return discovery
+                 }
+            }
+        }
+
         guard let discovery = previousDiscoveryInQueue() else { return nil }
         togglePlayback(for: discovery)
         return discovery
@@ -462,11 +496,13 @@ public extension VoiceoverPlaybackController {
     func configure(
         queueStore: AudioGuidesQueueStore,
         speedStore: VoiceoverPlaybackSpeedStore,
-        progressStore: VoiceoverProgressStore
+        progressStore: VoiceoverProgressStore,
+        discoveryStore: DiscoveryStore
     ) {
         self.queueStore = queueStore
         self.speedStore = speedStore
         self.progressStore = progressStore
+        self.discoveryStore = discoveryStore
         
         // Initialize rate from persisted value
         self.currentRate = speedStore.speed
@@ -756,6 +792,16 @@ extension VoiceoverPlaybackController {
     }
 
     func handlePlaybackEnded() {
+        if let queueStore = queueStore, queueStore.autoplayEnabled {
+            log.debug("[handlePlaybackEnded] Autoplay enabled, attempting to play next")
+            if attemptAutoplayNext() {
+                return
+            }
+            log.debug("[handlePlaybackEnded] Autoplay failed (no next item), stopping")
+        } else {
+            log.debug("[handlePlaybackEnded] Autoplay disabled, stopping")
+        }
+        
         if let discoveryId = currentDiscovery?.id {
             playbackState = .paused(discoveryId: discoveryId)
         } else {
@@ -765,6 +811,32 @@ extension VoiceoverPlaybackController {
         position = 0
         updateNowPlayingPlaybackState()
         refreshNowPlayingInfo()
+    }
+    
+    private func attemptAutoplayNext() -> Bool {
+        guard let queueStore = queueStore else { return false }
+        
+        if let nextId = queueStore.next() {
+            if let discovery = getDiscovery(id: nextId) {
+                log.debug("[attemptAutoplayNext] Found next discovery in provider: \(discovery.title)")
+                togglePlayback(for: discovery)
+                return true
+            } else {
+                // Fetch from discoveryStore
+                log.debug("[attemptAutoplayNext] Discovery not in provider, fetching from store: \(nextId)")
+                Task {
+                    if let discovery = await discoveryStore?.get(id: nextId) {
+                         await MainActor.run {
+                             self.togglePlayback(for: discovery)
+                         }
+                    } else {
+                        log.error("[attemptAutoplayNext] Failed to find discovery \(nextId) in store")
+                    }
+                }
+                return true
+            }
+        }
+        return false
     }
 
     func addTimeObserver() {

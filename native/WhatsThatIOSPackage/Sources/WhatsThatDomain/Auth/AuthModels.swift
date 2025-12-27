@@ -91,6 +91,7 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
     case passwordUpdateFailed
     case passwordSame
     case cancelled
+    case accountDeletionFailed
     case unknown
 
     public var errorDescription: String? {
@@ -115,6 +116,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "Your new password matches the current one. Please choose a different password."
         case .cancelled:
             return "The sign-in flow was cancelled."
+        case .accountDeletionFailed:
+            return "We couldn't delete your account. Please try again or contact support."
         case .unknown:
             return "Something went wrong. Please try again."
         }
@@ -132,4 +135,5 @@ public protocol AuthService: Sendable {
     func sendPasswordReset(email: String) async throws
     func bootstrapPasswordResetSession(from url: URL) async throws -> AuthenticatedUser
     func updatePassword(to newPassword: String) async throws
+    func deleteAccount() async throws
 }

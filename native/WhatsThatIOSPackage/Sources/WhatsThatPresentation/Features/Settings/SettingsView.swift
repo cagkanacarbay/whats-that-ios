@@ -32,6 +32,7 @@ struct SettingsView: View {
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
+        onDeleteAccount: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void,
         loadVoiceoverPreferences: @escaping () async -> VoiceoverPreferences,
         saveVoiceoverPreferences: @escaping (VoiceoverPreferences) async -> Void,
@@ -56,6 +57,7 @@ struct SettingsView: View {
                 onSendPasswordReset: onSendPasswordReset,
                 onSignOut: onSignOut,
                 onClearAppStoreAccount: onClearAppStoreAccount,
+                onDeleteAccount: onDeleteAccount,
                 onClose: onClose
             )
         )

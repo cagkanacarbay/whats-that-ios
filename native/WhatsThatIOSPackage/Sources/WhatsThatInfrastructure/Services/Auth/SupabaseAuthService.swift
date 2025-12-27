@@ -294,6 +294,53 @@ public final actor SupabaseAuthService: AuthService {
         }
     }
 
+    public func deleteAccount() async throws {
+        guard let supabaseURL = configuration.supabaseURL else {
+            supabaseAuthLogger.error("Account deletion failed: missing Supabase URL")
+            throw DomainAuthError.accountDeletionFailed
+        }
+
+        guard let accessToken = client.auth.currentSession?.accessToken else {
+            supabaseAuthLogger.error("Account deletion failed: no active session")
+            throw DomainAuthError.accountDeletionFailed
+        }
+
+        let functionsURL = SupabaseDiscoveryAnalysisClient
+            .functionsBaseURL(from: supabaseURL)
+            .appendingPathComponent("delete-account")
+
+        var request = URLRequest(url: functionsURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "{}".data(using: .utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                supabaseAuthLogger.error("Account deletion failed: invalid response type")
+                throw DomainAuthError.accountDeletionFailed
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? "<no body>"
+                supabaseAuthLogger.error("Account deletion failed: status=\(httpResponse.statusCode) body=\(body, privacy: .public)")
+                throw DomainAuthError.accountDeletionFailed
+            }
+
+            supabaseAuthLogger.info("Account deletion completed successfully")
+
+            // Sign out locally after the account has been deleted on the server
+            try? await signOut()
+        } catch let error as DomainAuthError {
+            throw error
+        } catch {
+            supabaseAuthLogger.error("Account deletion failed: \(error.localizedDescription, privacy: .public)")
+            throw DomainAuthError.accountDeletionFailed
+        }
+    }
+
     private func mapSignInError(_ error: Error) -> DomainAuthError {
         if let authError = error as? Supabase.AuthError,
            case let .api(_, errorCode, _, _) = authError {

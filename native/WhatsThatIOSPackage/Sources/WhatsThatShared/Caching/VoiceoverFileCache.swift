@@ -272,3 +272,11 @@ private extension VoiceoverFileCache {
         }
     }
 }
+
+// MARK: - UserDataClearable
+
+extension VoiceoverFileCache: UserDataClearable {
+    public func clearUserData() async {
+        clearAll()
+    }
+}

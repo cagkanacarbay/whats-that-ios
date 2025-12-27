@@ -325,3 +325,11 @@ private extension DiscoveryAssetCache {
         try? fileManager.removeItem(at: fileURL)
     }
 }
+
+// MARK: - UserDataClearable
+
+extension DiscoveryAssetCache: UserDataClearable {
+    public func clearUserData() async {
+        clearAll()
+    }
+}

@@ -118,6 +118,19 @@ public final class DiscoveryStoreObserver: ObservableObject {
         await remove(id: summary.id)
     }
     
+    /// Resets all observer state. Called during sign-out to prevent stale data.
+    public func reset() {
+        discoveries = []
+        hasMore = true
+        loadState = .idle
+        isRefreshing = false
+        isPaginating = false
+        errorMessage = nil
+        didAttemptInitialLoad = false
+        isFetchingPage = false
+        logger.info("Observer reset - all state cleared")
+    }
+    
     // MARK: - Internal
     
     private enum FetchMode {
@@ -167,30 +180,31 @@ public final class DiscoveryStoreObserver: ObservableObject {
             isFetchingPage = false
         }
         
-        let cursor: Int64?
-        switch mode {
-        case .loadMore:
-            cursor = discoveries.last?.id
-        case .initial, .refresh:
-            cursor = nil
-        }
-        
         do {
             errorMessage = nil
             
-            // Use the store's loadMore which handles caching internally
-            let page = try await store.loadMore(limit: pageSize, before: cursor)
-            
             switch mode {
-            case .initial, .refresh:
-                // For initial/refresh, sync full cache (store replaces on nil cursor)
+            case .initial:
+                // Initial load: fetch first page
+                let page = try await store.loadMore(limit: pageSize, before: nil)
                 await syncFromStore()
+                hasMore = page.count == pageSize
+                
+            case .refresh:
+                // Refresh: use refreshAndMerge to properly detect and add missing items
+                let newItems = try await store.refreshAndMerge(limit: pageSize)
+                await syncFromStore()
+                logger.info("refresh completed: \(newItems.count) new items merged")
+                // Don't update hasMore on refresh - pagination state should remain
+                
             case .loadMore:
-                // For pagination, sync to include the new items
+                // Pagination: fetch next page using cursor
+                let cursor = discoveries.last?.id
+                let page = try await store.loadMore(limit: pageSize, before: cursor)
                 await syncFromStore()
+                hasMore = page.count == pageSize
             }
             
-            hasMore = page.count == pageSize
             loadState = discoveries.isEmpty ? .idle : .loaded
             
         } catch {

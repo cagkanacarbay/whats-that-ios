@@ -11,6 +11,7 @@ public final class AppRootViewModel: ObservableObject {
     private let authUseCase: AuthUseCase
     private let onboardingUseCase: OnboardingUseCase
     private let flowResolver: AppFlowResolver
+    private let clearAllUserData: () async -> Void
 
     private var currentFlags = OnboardingFlags()
     private var latestSession: AuthSession = .signedOut
@@ -19,11 +20,13 @@ public final class AppRootViewModel: ObservableObject {
     public init(
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
-        flowResolver: AppFlowResolver
+        flowResolver: AppFlowResolver,
+        clearAllUserData: @escaping () async -> Void
     ) {
         self.authUseCase = authUseCase
         self.onboardingUseCase = onboardingUseCase
         self.flowResolver = flowResolver
+        self.clearAllUserData = clearAllUserData
 
         Task(priority: .utility) {
             await DiscoveryAssetCache.shared.purgeExpiredEntries()
@@ -120,7 +123,7 @@ public final class AppRootViewModel: ObservableObject {
 
     public func signOut() async throws {
         try await authUseCase.signOut()
-        await DiscoveryAssetCache.shared.clearAll()
+        await clearAllUserData()
         passwordResetUser = nil
         updateFlow(session: .signedOut)
     }
@@ -129,6 +132,19 @@ public final class AppRootViewModel: ObservableObject {
         await onboardingUseCase.reset()
         currentFlags = OnboardingFlags()
         updateFlow(session: latestSession)
+    }
+
+    public func deleteAccount() async throws {
+        do {
+            try await authUseCase.deleteAccount()
+            await clearAllUserData()
+            passwordResetUser = nil
+            updateFlow(session: .signedOut)
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            throw AuthError.accountDeletionFailed
+        }
     }
 
     public func requestPasswordReset(email: String) async throws {

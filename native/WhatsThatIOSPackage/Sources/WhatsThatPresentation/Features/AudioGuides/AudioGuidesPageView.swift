@@ -22,6 +22,7 @@ struct AudioGuidesPageView: View {
     @StateObject private var viewModel: AudioGuidesViewModel
     @Namespace private var toggleNamespace
     @State private var overlayDragOffset: CGFloat = 0
+    @State private var heroDragOffset: CGFloat = 0
     @State private var creditBalance: Int?
     
     private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "AudioGuidesPageView")
@@ -106,8 +107,20 @@ private extension AudioGuidesPageView {
             let safeTop = proxy.safeAreaInsets.top
             let screenHeight = proxy.size.height
             
-            // Detect compact screens (iPad compatibility mode simulates ~568pt 4" iPhone)
+            // Detect compact screens (iPad compatibility mode simulates ~568pt 4\" iPhone)
             let isCompactScreen = screenHeight < 600
+            
+            // Drag gesture to detect scroll-down intent (swipe up to reveal Up Next)
+            let heroSwipeGesture = DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    // Only track upward drags (negative y = swiping up)
+                    if value.translation.height < 0 {
+                        heroDragOffset = value.translation.height
+                    }
+                }
+                .onEnded { value in
+                    handleHeroSwipeEnd(translation: value.translation)
+                }
             
             // Layout using VStack to naturally respect safe areas and push toggle bar to bottom
             VStack(spacing: 0) {
@@ -128,6 +141,8 @@ private extension AudioGuidesPageView {
                     .padding(.bottom, 6) // Small consistent gap above tab bar
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle()) // Ensure entire area is tappable for gesture
+            .gesture(heroSwipeGesture)
             .ignoresSafeArea(edges: .top) // Let player content bleed into status bar area
             .overlay(alignment: .top) {
                 // Pill (fixed position - matches Discovery Detail logic)
@@ -231,13 +246,15 @@ private extension AudioGuidesPageView {
                         UpNextListView(
                             viewModel: viewModel,
                             audioServices: audioServices,
-                            bottomPadding: 60  // Extra space for View History button above mini player
+                            bottomPadding: 60,  // Extra space for View History button above mini player
+                            onDismiss: { exitListMode(reason: "pull down from list") }
                         )
                     } else {
                         DiscoverListView(
                             viewModel: viewModel,
                             audioServices: audioServices,
-                            bottomPadding: 60  // Extra space for content above mini player
+                            bottomPadding: 60,  // Extra space for content above mini player
+                            onDismiss: { exitListMode(reason: "pull down from list") }
                         )
                     }
                 }
@@ -332,6 +349,17 @@ private extension AudioGuidesPageView {
         }
     }
     
+    func handleHeroSwipeEnd(translation: CGSize) {
+        // Detect upward swipe (negative height = swiping up, which means user wants to "scroll down" to see content below)
+        let isUpward = translation.height < -50 && abs(translation.height) > abs(translation.width) * 1.2
+        if isUpward {
+            log.debug("Detected swipe-up gesture in hero mode, opening Up Next list")
+            enterListMode(selecting: .upNext)
+        }
+        // Reset drag offset
+        heroDragOffset = 0
+    }
+    
     func handleOpenPlayer(for discovery: DiscoverySummary) {
         viewModel.play(discovery: discovery)
         exitListMode(reason: "play from list")
@@ -396,11 +424,19 @@ struct UpNextListView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
     let audioServices: AudioServicesContainer?
     var bottomPadding: CGFloat = 0
+    var onDismiss: (() -> Void)? = nil
     @Environment(\.colorScheme) var colorScheme
     @State private var showClearQueueConfirmation = false
     
+    // Scroll offset tracking for pull-down-to-dismiss
+    @State private var baselineY: CGFloat? = nil
+    @State private var hasDismissed = false
+    private let dismissThreshold: CGFloat = 80
+    
     var body: some View {
         List {
+
+            
             // 1. Now Playing Section
             if let nowPlaying = viewModel.nowPlayingDiscovery {
                 Section(header: Text("Now Playing").font(.caption).fontWeight(.bold)) {
@@ -434,6 +470,37 @@ struct UpNextListView: View {
         .scrollContentBackground(.hidden)
         .background(Color.clear)
         .miniPlayerScrollInset()
+        .coordinateSpace(name: "upNextScrollContainer")
+        .onPreferenceChange(AudioGuidesScrollOffsetPreferenceKey.self) { currentY in
+            handleScrollChange(currentY: currentY)
+        }
+    }
+    
+    private func handleScrollChange(currentY: CGFloat) {
+        // Set baseline on first reading (when list is at rest)
+        if baselineY == nil {
+            baselineY = currentY
+            return
+        }
+        
+        guard let baseline = baselineY else { return }
+        
+        // Calculate overscroll: positive means user is pulling down past the top
+        let overscroll = currentY - baseline
+        
+        // Trigger dismiss when pulled down beyond threshold
+        if overscroll > dismissThreshold && !hasDismissed {
+            hasDismissed = true
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            onDismiss?()
+        }
+        
+        // Reset dismiss flag when scroll returns to near baseline
+        if overscroll <= 10 {
+            hasDismissed = false
+        }
     }
     
     @ViewBuilder
@@ -655,6 +722,7 @@ struct DiscoverListView: View {
     @ObservedObject var viewModel: AudioGuidesViewModel
     let audioServices: AudioServicesContainer?
     var bottomPadding: CGFloat = 0
+    var onDismiss: (() -> Void)? = nil
     
     var body: some View {
         List {
@@ -688,6 +756,9 @@ struct DiscoverListView: View {
         .scrollContentBackground(.hidden)
         .background(Color.clear)
         .miniPlayerScrollInset()
+        .onOverscrollDismiss {
+            onDismiss?()
+        }
     }
     
     private var groupedDiscoveries: [(String, [DiscoverySummary])] {
@@ -865,5 +936,69 @@ struct HistorySheetView: View {
             }
         }
         historyDiscoveries = loaded
+    }
+}
+
+// MARK: - Scroll Offset Tracking
+
+/// PreferenceKey to track scroll offset from the top of a list (local to Audio Guides)
+private struct AudioGuidesScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// A view modifier that adds a scroll offset tracker to a list
+/// When the user overscrolls at the top (pulls down while at top), it calls the onOverscroll callback
+struct OverscrollDismissModifier: ViewModifier {
+    let onDismiss: () -> Void
+    let threshold: CGFloat
+    
+    @State private var isOverscrolling = false
+    @State private var scrollOffset: CGFloat = 0
+    
+    init(threshold: CGFloat = 60, onDismiss: @escaping () -> Void) {
+        self.threshold = threshold
+        self.onDismiss = onDismiss
+    }
+    
+    func body(content: Content) -> some View {
+        content
+            .onPreferenceChange(AudioGuidesScrollOffsetPreferenceKey.self) { topY in
+                // When the top of the list content is below its normal position (positive offset),
+                // it means the user is pulling down at the top
+                // We need to track the initial position and detect when it moves beyond threshold
+                handleScrollOffsetChange(topY: topY)
+            }
+    }
+    
+    private func handleScrollOffsetChange(topY: CGFloat) {
+        // Store the first value as the baseline
+        if scrollOffset == 0 && topY > 0 {
+            scrollOffset = topY
+        }
+        
+        // Calculate how far below the baseline we are (overscroll amount)
+        let overscrollAmount = topY - scrollOffset
+        
+        // If we've pulled down beyond the threshold and haven't triggered yet
+        if overscrollAmount > threshold && !isOverscrolling {
+            isOverscrolling = true
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            onDismiss()
+        } else if overscrollAmount <= 0 {
+            // Reset when scroll returns to normal
+            isOverscrolling = false
+        }
+    }
+}
+
+extension View {
+    /// Adds pull-down-to-dismiss behavior when the list is at the top
+    func onOverscrollDismiss(threshold: CGFloat = 60, perform action: @escaping () -> Void) -> some View {
+        modifier(OverscrollDismissModifier(threshold: threshold, onDismiss: action))
     }
 }

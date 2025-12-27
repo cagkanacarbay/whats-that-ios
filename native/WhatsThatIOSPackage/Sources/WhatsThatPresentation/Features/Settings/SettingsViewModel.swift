@@ -51,6 +51,7 @@ final class SettingsViewModel: ObservableObject {
     private let onSendPasswordReset: (String) async -> Result<Void, AuthError>
     private let onSignOut: () async -> Result<Void, Error>
     private let onClearAppStoreAccount: () async -> Result<Void, Error>
+    private let onDeleteAccount: () async -> Result<Void, Error>
     private let onClose: () -> Void
 
     init(
@@ -61,6 +62,7 @@ final class SettingsViewModel: ObservableObject {
         onSendPasswordReset: @escaping (String) async -> Result<Void, AuthError>,
         onSignOut: @escaping () async -> Result<Void, Error>,
         onClearAppStoreAccount: @escaping () async -> Result<Void, Error>,
+        onDeleteAccount: @escaping () async -> Result<Void, Error>,
         onClose: @escaping () -> Void
     ) {
         self.userEmail = userEmail
@@ -70,6 +72,7 @@ final class SettingsViewModel: ObservableObject {
         self.onSendPasswordReset = onSendPasswordReset
         self.onSignOut = onSignOut
         self.onClearAppStoreAccount = onClearAppStoreAccount
+        self.onDeleteAccount = onDeleteAccount
         self.onClose = onClose
     }
 
@@ -100,20 +103,20 @@ final class SettingsViewModel: ObservableObject {
         isShowingDeletionConfirmation = false
         isDeletingAccount = true
 
-        // Simulated deletion delay to show the overlay
-        try? await Task.sleep(for: .seconds(3))
+        let result = await onDeleteAccount()
 
-        // Dismiss the sheet first to avoid sticking during the flow transition
-        onClose()
-
-        // Wait a tiny bit for the dismissal to start/complete before signing out
-        try? await Task.sleep(for: .milliseconds(300))
-
-        // Finally, sign the user out
-        _ = await onSignOut()
-        
-        // Reset state (though the view model may be destroyed)
-        isDeletingAccount = false
+        switch result {
+        case .success:
+            // Dismiss the sheet first to avoid sticking during the flow transition
+            onClose()
+            // Wait a tiny bit for the dismissal to start/complete
+            try? await Task.sleep(for: .milliseconds(300))
+            // Sign out is handled by the edge function, but we call it anyway to ensure local state is cleared
+            _ = await onSignOut()
+        case .failure(let error):
+            isDeletingAccount = false
+            alertState = .error(error.localizedDescription)
+        }
     }
 
     func dismissAlert() {

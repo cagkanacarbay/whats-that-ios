@@ -359,5 +359,33 @@ public extension AppDependencyContainer {
         _ = await creditBalanceStore.set(nil)
         return .success(())
     }
+    
+    // MARK: - User Data Clearing
+    
+    /// Clears all user-specific data from all caches and stores.
+    /// Should be called during sign-out and account deletion to prevent data leakage between accounts.
+    func clearAllUserData() async {
+        // Clear discovery cache
+        await discoveryStore.clearUserData()
+        
+        // Clear image cache
+        await DiscoveryAssetCache.shared.clearUserData()
+        
+        // Clear voiceover file cache
+        await VoiceoverFileCache.shared.clearUserData()
+        
+        // Clear credit balance
+        await creditBalanceStore.clearUserData()
+        
+        // Clear location cache
+        await locationService.clearNearbyCache()
+        
+        // Clear audio-related UserDefaults (these stores are created per-session in AudioServicesContainer)
+        // so we need to clear their persisted data directly
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "audio_guides_queue_store")
+        defaults.removeObject(forKey: "voiceover_positions")
+        defaults.removeObject(forKey: "voiceover_last_played")
+    }
 }
 #endif

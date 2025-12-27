@@ -1,5 +1,6 @@
 import Foundation
 import WhatsThatDomain
+import WhatsThatShared
 
 public actor NearbyPlacesCacheStore {
     private var snapshots: [NearbyPlacesSnapshot]
@@ -101,5 +102,13 @@ public actor NearbyPlacesCacheStore {
         } catch {
             // Swallow persistence errors; cache misses are acceptable.
         }
+    }
+}
+
+// MARK: - UserDataClearable
+
+extension NearbyPlacesCacheStore: UserDataClearable {
+    public func clearUserData() async {
+        await clearAll()
     }
 }

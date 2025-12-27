@@ -33,6 +33,7 @@ public struct RootContentView: View {
     private let loadIPoPPreferences: () async -> IPoPPreferences?
     private let saveIPoPPreferences: (IPoPPreferences) async -> Void
     private let resetIPoPPreferences: () async -> Void
+    private let clearAllUserData: () async -> Void
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -56,7 +57,8 @@ public struct RootContentView: View {
         fetchVoiceSampleURL: @escaping (String) async -> URL?,
         loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
         saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void,
-        resetIPoPPreferences: @escaping () async -> Void = {}
+        resetIPoPPreferences: @escaping () async -> Void = {},
+        clearAllUserData: @escaping () async -> Void
     ) {
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
@@ -75,11 +77,23 @@ public struct RootContentView: View {
         self.loadIPoPPreferences = loadIPoPPreferences
         self.saveIPoPPreferences = saveIPoPPreferences
         self.resetIPoPPreferences = resetIPoPPreferences
+        self.clearAllUserData = clearAllUserData
+        
+        // Compose clearAllUserData with observer reset to clear all UI state on sign-out
+        let observerToReset = storeObserver
+        let composedClearAll: () async -> Void = {
+            await clearAllUserData()
+            await MainActor.run {
+                observerToReset.reset()
+            }
+        }
+        
         _viewModel = StateObject<AppRootViewModel>(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
                 onboardingUseCase: onboardingUseCase,
-                flowResolver: flowResolver
+                flowResolver: flowResolver,
+                clearAllUserData: composedClearAll
             )
         )
     }
@@ -144,6 +158,14 @@ public struct RootContentView: View {
                 },
                 onClearAppStoreAccount: {
                     await clearAppStoreLocal()
+                },
+                onDeleteAccount: {
+                    do {
+                        try await viewModel.deleteAccount()
+                        return .success(())
+                    } catch {
+                        return .failure(error)
+                    }
                 },
                 onClose: {
                     isSettingsPresented = false
@@ -257,6 +279,8 @@ public struct RootContentView: View {
             return "Use a different password"
         case .cancelled:
             return "Sign in cancelled"
+        case .accountDeletionFailed:
+            return "Couldn't delete account"
         case .unknown:
             return "Something went wrong"
         }
@@ -285,6 +309,8 @@ public struct RootContentView: View {
             return "Your new password is the same as your current password. Please choose a different one."
         case .cancelled:
             return "This sign in was cancelled."
+        case .accountDeletionFailed:
+            return "We couldn't delete your account. Please try again or contact support."
         case .unknown:
             return "Please try again."
         }

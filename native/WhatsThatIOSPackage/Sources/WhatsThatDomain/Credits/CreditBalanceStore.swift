@@ -1,4 +1,5 @@
 import Foundation
+import WhatsThatShared
 
 public actor CreditBalanceStore: Sendable {
     private enum Keys {
@@ -112,5 +113,13 @@ public actor CreditBalanceStore: Sendable {
         } else {
             defaults.removeObject(forKey: Keys.lastFetchedAt)
         }
+    }
+}
+
+// MARK: - UserDataClearable
+
+extension CreditBalanceStore: UserDataClearable {
+    public func clearUserData() async {
+        _ = set(nil)
     }
 }

@@ -154,15 +154,12 @@ serve(async req => {
       );
     }
 
-    const discoveryText = await fetchDiscoveryText(supabaseAdmin, discoveryId, userId, logger);
-    if (!discoveryText) {
+    const { title, description } = await fetchDiscoveryData(supabaseAdmin, discoveryId, userId, logger);
+    if (!description) {
       return jsonResponse(baseHeaders, { error: 'not_found', message: 'Discovery not found.' }, 404);
     }
 
-    const sanitizedText = stripEmojis(applyHeaderBreaks(discoveryText))
-      .replace(/[\r\n]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const sanitizedText = cleanVoiceoverText(title, description, logger);
     logger.debug('Normalized discovery text', {
       normalizedText: sanitizedText,
       length: sanitizedText.length,
@@ -445,26 +442,37 @@ const stripEmojis = (input: string): string => {
   return input.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
 };
 
-const applyHeaderBreaks = (input: string): string => {
-  let headerCount = 0;
-  return input
-    .split(/\r?\n/)
-    .map(line => {
-      const match = line.match(/^\s*##\s*(.*)$/);
-      if (!match) {
-        return line;
-      }
-      headerCount += 1;
-      const rawContent = match[1] ?? '';
-      const content = rawContent.trim() || rawContent;
-      if (!content.trim()) {
-        // Header marker with no visible text; leave it untouched to avoid losing content unexpectedly.
-        return line;
-      }
-      const prefix = headerCount === 1 ? '' : '(long-break) ';
-      return `${prefix}${content.trim()} (break)`;
-    })
-    .join('\n');
+const cleanVoiceoverText = (title: string, description: string, logger: Logger): string => {
+  // 1. Clean Title: strip emojis
+  const cleanedTitle = stripEmojis(title).trim();
+
+  // 2. Clean Description:
+  //    - Strip emojis
+  //    - Remove H2 headers (lines starting with ##) and replace with (long-break)
+  const descriptionNoEmojis = stripEmojis(description);
+  const descriptionLines = descriptionNoEmojis.split(/\r?\n/);
+
+  const cleanedDescriptionLines = descriptionLines.map(line => {
+    // Match line starting with ##
+    if (line.trim().startsWith('##')) {
+      return '(long-break)';
+    }
+    return line;
+  });
+
+  const cleanedDescription = cleanedDescriptionLines.join(' ');
+
+  // 3. Combine: Title + Description (Description starts with H2 -> long-break, so no extra break needed here)
+  const combinedText = `${cleanedTitle} ${cleanedDescription}`;
+
+  // 4. Normalize whitespace and breaks
+  return combinedText
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    // Normalize breaks - ensure we don't have multiple long-breaks in a row
+    // and that they have proper spacing
+    .replace(/\(long-break\)(\s*\(long-break\))+/g, '(long-break)')
+    .trim();
 };
 
 const jsonResponse = (headers: HeadersInit, body: Record<string, unknown>, status = 200) =>
@@ -482,24 +490,24 @@ async function fetchVoiceOptions(client: SupabaseClient, logger: Logger): Promis
   return (data as VoiceOption[]) ?? [];
 }
 
-async function fetchDiscoveryText(
+async function fetchDiscoveryData(
   client: SupabaseClient,
   discoveryId: number,
   userId: string,
   logger: Logger
-): Promise<string | null> {
+): Promise<{ title: string; description: string }> {
   const { data, error } = await client
     .from('discoveries')
-    .select('description')
+    .select('title, description')
     .eq('id', discoveryId)
     .eq('user_id', userId)
     .single();
 
   if (error || !data) {
     logger.warn('Discovery not found for user', { discoveryId, userId: maskId(userId), errorMessage: error?.message });
-    return null;
+    return { title: '', description: '' };
   }
-  return data.description as string;
+  return { title: data.title as string, description: data.description as string };
 }
 
 async function fetchCreditBalance(client: SupabaseClient, userId: string, logger: Logger): Promise<number | null> {

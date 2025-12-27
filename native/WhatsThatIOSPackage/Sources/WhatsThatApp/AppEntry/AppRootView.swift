@@ -128,7 +128,10 @@ public struct AppRootView: View {
             fetchVoiceSampleURL: fetchVoiceSampleURL,
             loadIPoPPreferences: loadIPoPPreferences,
             saveIPoPPreferences: saveIPoPPreferences,
-            resetIPoPPreferences: resetIPoPPreferences
+            resetIPoPPreferences: resetIPoPPreferences,
+            clearAllUserData: {
+                await container.clearAllUserData()
+            }
         )
         .task {
             // Listen for StoreKit transaction updates to avoid missing successful purchases.

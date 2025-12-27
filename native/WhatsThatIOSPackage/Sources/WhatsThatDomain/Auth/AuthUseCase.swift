@@ -51,4 +51,8 @@ public actor AuthUseCase: Sendable {
     public func updatePassword(to newPassword: String) async throws {
         try await service.updatePassword(to: newPassword)
     }
+
+    public func deleteAccount() async throws {
+        try await service.deleteAccount()
+    }
 }

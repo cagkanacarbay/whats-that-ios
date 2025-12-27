@@ -22,10 +22,8 @@ struct MainTabView: View {
     @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var audioServices: AudioServicesContainer
-    @State private var feedRefreshToken = UUID()
+    @ObservedObject private var storeObserver: DiscoveryStoreObserver
     @State private var pendingDiscoveryId: Int64?
-    @State private var pendingCreatedSummary: DiscoverySummary?
-    @State private var needsFeedRefresh = false
     @State private var awaitingSummaryId: Int64?
     @State private var summaryFallbackTask: Task<Void, Never>?
     @State private var activeOverlayTab: Tab?
@@ -33,15 +31,17 @@ struct MainTabView: View {
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
     @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
+    
+    // Background polling/UX state
+    @State private var showingProcessingAlert = false
 
-    private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     init(
-        feedUseCase: DiscoveryFeedUseCase,
+        storeObserver: DiscoveryStoreObserver,
         deletionUseCase: DiscoveryDeletionUseCase,
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
@@ -51,7 +51,7 @@ struct MainTabView: View {
         onSettings: (() -> Void)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
-        self.feedUseCase = feedUseCase
+        self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
         self.onSignOut = onSignOut
         self.onSettings = onSettings
@@ -83,11 +83,10 @@ struct MainTabView: View {
                 }
 
                 DiscoveriesHomeView(
-                    feedUseCase: feedUseCase,
+                    storeObserver: storeObserver,
                     deletionUseCase: deletionUseCase,
                     voiceoverController: voiceoverController,
                     pendingDiscoveryId: $pendingDiscoveryId,
-                    pendingCreatedSummary: $pendingCreatedSummary,
                     openFirstDetailFromAudioGuides: $openFirstDetailFromAudioGuides,
                     audioGuidesTargetDiscoveryId: $audioGuidesTargetDiscoveryId,
                     audioGuidesTargetDiscoverySummary: $audioGuidesTargetDiscoverySummary,
@@ -99,7 +98,6 @@ struct MainTabView: View {
                         handleDiscoveryAudioPillTapped(discovery)
                     }
                 )
-                .id(feedRefreshToken)
                 .tag(Tab.discoveries)
                 .tabItem {
                     Label("Discoveries", systemImage: "square.grid.2x2")
@@ -171,6 +169,11 @@ struct MainTabView: View {
             // Generation complete toast - positioned above mini player
             GenerationToastOverlay(audioServices: audioServices)
         }
+        .alert("Processing Discovery", isPresented: $showingProcessingAlert) {
+            Button("OK") { showingProcessingAlert = false }
+        } message: {
+            Text("Your discovery is being processed. We'll let you know when it's ready.")
+        }
         .audioServices(audioServices)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
@@ -179,6 +182,19 @@ struct MainTabView: View {
             uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
             cameraViewModel.onAnalysisBegan = handleAnalysisBegan
             uploadViewModel.onAnalysisBegan = handleAnalysisBegan
+            
+            cameraViewModel.onStreamInterrupted = handleStreamInterrupted
+            uploadViewModel.onStreamInterrupted = handleStreamInterrupted
+            cameraViewModel.onPollingDiscoveryReady = { discovery in
+                print("[DEBUG MainTabView] onPollingDiscoveryReady CALLBACK RECEIVED for discovery \(discovery.id)")
+                handlePollingDiscoveryReady(discovery)
+            }
+            uploadViewModel.onPollingDiscoveryReady = { discovery in
+                print("[DEBUG MainTabView] onPollingDiscoveryReady CALLBACK RECEIVED for discovery \(discovery.id)")
+                handlePollingDiscoveryReady(discovery)
+            }
+            print("[DEBUG MainTabView] onAppear: callbacks assigned")
+
             handleTabChange(to: selectedTab, isInitial: true)
         }
         .onDisappear {
@@ -196,6 +212,7 @@ struct MainTabView: View {
     }
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
+        print("[DEBUG MainTabView] handleTabChange: to \(tab), isInitial: \(isInitial), activeOverlayTab: \(String(describing: activeOverlayTab))")
         switch tab {
         case .camera:
             uploadViewModel.cancelFlow()
@@ -211,10 +228,6 @@ struct MainTabView: View {
             }
             if activeOverlayTab != .upload {
                 uploadViewModel.cancelFlow()
-            }
-            if needsFeedRefresh {
-                feedRefreshToken = UUID()
-                needsFeedRefresh = false
             }
             if isInitial {
                 cameraViewModel.cancelFlow()
@@ -252,7 +265,6 @@ struct MainTabView: View {
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {
         // Do not pre-select the discovery from the feed; keep the overlay active during creation.
-        // pendingDiscoveryId = discoveryId
         awaitingSummaryId = discoveryId
         summaryFallbackTask?.cancel()
         summaryFallbackTask = Task {
@@ -260,7 +272,8 @@ struct MainTabView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 if awaitingSummaryId == discoveryId {
-                    needsFeedRefresh = true
+                    // Trigger a reload since we didn't get the summary callback
+                    Task { await storeObserver.reload() }
                 }
             }
         }
@@ -269,17 +282,15 @@ struct MainTabView: View {
     private func handleDiscoverySummaryReady(_ summary: DiscoverySummary) {
         summaryFallbackTask?.cancel()
         awaitingSummaryId = nil
-        // Upsert the created summary into the feed so it's available behind the overlay.
-        pendingCreatedSummary = summary
-        // Do NOT trigger a hero open; we want to remain on the creation overlay.
-        // pendingDiscoveryId = summary.id
-        needsFeedRefresh = false
+        // Upsert the created summary into the store - this will automatically update the feed
+        Task {
+            await storeObserver.upsert(summary)
+            // Also update the audio services store for immediate Audio Guides access
+            await audioServices.discoveryStore.upsert(summary)
+        }
         // Ensure we're showing the Discoveries tab underneath the overlay.
         selectedTab = .discoveries
         // Keep the creation overlay visible; do not cancel the flow or clear the overlay.
-        // cameraViewModel.cancelFlow()
-        // uploadViewModel.cancelFlow()
-        // activeOverlayTab = nil
     }
 
     private func handleAnalysisBegan(_ type: DiscoveryCreationFlowType) {
@@ -290,6 +301,27 @@ struct MainTabView: View {
             activeOverlayTab = .upload
         }
         selectedTab = .discoveries
+    }
+
+    private func handleStreamInterrupted(_ media: DiscoveryCapturedMedia) {
+        print("[DEBUG MainTabView] handleStreamInterrupted called")
+        activeOverlayTab = nil
+        selectedTab = .discoveries
+        showingProcessingAlert = true
+        print("[DEBUG MainTabView] showingProcessingAlert set to true")
+    }
+
+    private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
+        print("[DEBUG MainTabView] handlePollingDiscoveryReady called for discovery \(discovery.id)")
+        
+        // Just upsert the discovery so it appears in the Discoveries tab
+        // The ViewModel handles populating the streaming view with discovery data
+        // User will dismiss the streaming view via normal flow (X button or swipe)
+        Task {
+            await storeObserver.upsert(discovery)
+            await audioServices.discoveryStore.upsert(discovery)
+            print("[DEBUG MainTabView] Discovery \(discovery.id) upserted to stores")
+        }
     }
 
     private func shouldShowOverlay(for state: DiscoveryCreationFlowState) -> Bool {
@@ -326,6 +358,7 @@ struct MainTabView: View {
     private func updateOverlayVisibility(for tab: Tab, state: DiscoveryCreationFlowState) {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: state) {
+            print("[DEBUG MainTabView] updateOverlayVisibility(state): clearing activeOverlayTab from \(tab) due to state \(state.phase)")
             activeOverlayTab = nil
         }
     }
@@ -333,6 +366,7 @@ struct MainTabView: View {
     private func updateOverlayVisibility(for tab: Tab, phase: DiscoveryCreationPhase) {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: phase) {
+            print("[DEBUG MainTabView] updateOverlayVisibility(phase): clearing activeOverlayTab from \(tab) due to phase \(phase)")
             activeOverlayTab = nil
         }
     }

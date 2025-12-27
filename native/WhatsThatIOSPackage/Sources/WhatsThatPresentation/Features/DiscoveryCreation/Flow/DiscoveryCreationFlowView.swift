@@ -8,6 +8,7 @@ struct DiscoveryCreationFlowView: View {
         case flowError(IdentifiedError)
         case locationPermissions
         case outOfCredits
+        case pollingFailed
 
         var id: String {
             switch self {
@@ -17,6 +18,8 @@ struct DiscoveryCreationFlowView: View {
                 return "locationPermissions"
             case .outOfCredits:
                 return "outOfCredits"
+            case .pollingFailed:
+                return "pollingFailed"
             }
         }
     }
@@ -91,6 +94,12 @@ struct DiscoveryCreationFlowView: View {
                     activeAlert = .flowError(IdentifiedError(error: error))
                 } else if case .flowError = activeAlert {
                     activeAlert = nil
+                }
+            }
+            .onChange(of: viewModel.showPollingFailedAlert) { _, showAlert in
+                if showAlert {
+                    activeAlert = .pollingFailed
+                    viewModel.showPollingFailedAlert = false
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in
@@ -248,6 +257,17 @@ struct DiscoveryCreationFlowView: View {
                 title: Text("Out of credits"),
                 message: Text("Each discovery costs 1 credit. Purchase more to continue."),
                 dismissButton: .default(Text("OK"))
+            )
+        case .pollingFailed:
+            return Alert(
+                title: Text("Discovery Failed"),
+                message: Text("There was an error generating your discovery. Please try again."),
+                primaryButton: .default(Text("Retry"), action: {
+                    viewModel.retryWithPendingMedia()
+                }),
+                secondaryButton: .cancel(Text("Cancel"), action: {
+                    viewModel.cancelFlow()
+                })
             )
         }
     }

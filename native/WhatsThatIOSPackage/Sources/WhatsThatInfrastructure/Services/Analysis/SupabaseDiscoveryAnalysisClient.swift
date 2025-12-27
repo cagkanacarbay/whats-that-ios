@@ -1,25 +1,9 @@
 #if USE_REMOTE_DEPS && canImport(Supabase)
 import Foundation
 import Supabase
+import UIKit
 import WhatsThatDomain
 import WhatsThatShared
-
-public enum DiscoveryAnalysisClientError: LocalizedError {
-    case unauthenticated
-    case invalidResponse
-    case unexpectedStatus(Int)
-
-    public var errorDescription: String? {
-        switch self {
-        case .unauthenticated:
-            return "You need to sign in before creating a discovery."
-        case .invalidResponse:
-            return "The analysis service returned an unexpected response."
-        case let .unexpectedStatus(code):
-            return "The analysis service returned status code \(code)."
-        }
-    }
-}
 
 public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
     private let client: SupabaseClient
@@ -32,6 +16,15 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
     private let jsonEncoder: JSONEncoder
     #if DEBUG
     private let isDebugLoggingEnabled = true
+    
+    // MARK: - Debug Flags (set these to test error scenarios)
+    
+    /// Set to a number > 0 to simulate streamInterrupted after N seconds of streaming
+    /// CHANGE THIS TO 0 WHEN DONE TESTING
+    static var debugSimulateStreamInterruptedAfterSeconds: TimeInterval = 0
+    
+    /// Set to true to make polling never find a discovery (tests timeout flow)
+    static var debugPollingAlwaysFails: Bool = false
     #else
     private let isDebugLoggingEnabled = false
     #endif
@@ -55,23 +48,59 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         cancellationHandler: @escaping @Sendable () async -> Void
     ) -> AsyncThrowingStream<DiscoveryAnalysisEvent, Error> {
         AsyncThrowingStream { continuation in
+            // Request background execution time to continue streaming when app is backgrounded
+            var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+            Task { @MainActor in
+                backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "DiscoveryAnalysis") {
+                    // Called when background time is about to expire
+                    if backgroundTaskId != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                        backgroundTaskId = .invalid
+                    }
+                }
+            }
+
             let task = Task {
+                defer {
+                    Task { @MainActor in
+                        if backgroundTaskId != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                        }
+                    }
+                }
+
                 do {
                     let request = try await makeRequest(with: payload, sessionId: sessionId)
                     let (bytes, response) = try await urlSession.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
-                        throw DiscoveryAnalysisClientError.invalidResponse
+                        throw DiscoveryAnalysisError.invalidResponse
                     }
 
                     guard (200..<300).contains(httpResponse.statusCode) else {
-                        throw DiscoveryAnalysisClientError.unexpectedStatus(httpResponse.statusCode)
+                        throw DiscoveryAnalysisError.unexpectedStatus(httpResponse.statusCode)
                     }
 
                     var buffer = Data()
                     var streamedText = ""
                     var didEmitMetadata = false
+                    
+                    #if DEBUG
+                    let streamStartTime = Date()
+                    let simulateInterruptAfter = Self.debugSimulateStreamInterruptedAfterSeconds
+                    #endif
 
                     for try await chunk in bytes {
+                        #if DEBUG
+                        // Check if we should simulate stream interruption
+                        if simulateInterruptAfter > 0 {
+                            let elapsed = Date().timeIntervalSince(streamStartTime)
+                            if elapsed >= simulateInterruptAfter {
+                                print("[DEBUG] Simulating stream interruption after \(elapsed)s")
+                                throw DiscoveryAnalysisError.streamInterrupted
+                            }
+                        }
+                        #endif
+                        
                         buffer.append(chunk)
                         try await parseAvailableEvents(
                             from: &buffer,
@@ -92,7 +121,12 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
 
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: error)
+                    // Check if this is a stream interruption (e.g., backgrounding)
+                    if Self.isStreamInterruption(error) {
+                        continuation.finish(throwing: DiscoveryAnalysisError.streamInterrupted)
+                    } else {
+                        continuation.finish(throwing: error)
+                    }
                 }
             }
 
@@ -111,11 +145,11 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         guard
             let configurationURL = configuration.supabaseURL
         else {
-            throw DiscoveryAnalysisClientError.invalidResponse
+            throw DiscoveryAnalysisError.invalidResponse
         }
 
         guard let accessToken = client.auth.currentSession?.accessToken else {
-            throw DiscoveryAnalysisClientError.unauthenticated
+            throw DiscoveryAnalysisError.unauthenticated
         }
 
         let functionsURL = Self.functionsBaseURL(from: configurationURL).appendingPathComponent("ask-ai-v7")
@@ -438,6 +472,15 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
         }
 
         return nil
+    }
+
+    /// Checks if an error indicates a stream interruption (e.g., app backgrounded).
+    private static func isStreamInterruption(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+        return nsError.code == NSURLErrorNetworkConnectionLost ||
+               nsError.code == NSURLErrorTimedOut ||
+               nsError.code == NSURLErrorNotConnectedToInternet
     }
 }
 #endif

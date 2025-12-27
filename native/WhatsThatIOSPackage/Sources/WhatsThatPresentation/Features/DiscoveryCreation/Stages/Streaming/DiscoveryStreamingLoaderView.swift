@@ -18,13 +18,29 @@ struct DiscoveryStreamingLoaderView: View {
 
     var body: some View {
         VStack(spacing: BrandSpacing.medium) {
-            if shouldShowLoader {
+            if state.isPolling {
+                pollingMessage
+            } else if shouldShowLoader {
                 loaderMessages
             } else {
                 metadataView
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var pollingMessage: some View {
+        VStack(spacing: BrandSpacing.medium) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: palette.textPrimary))
+                .scaleEffect(1.2)
+            
+            Text(state.statusMessage ?? "Checking for your discovery...")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(palette.textPrimary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, BrandSpacing.large)
     }
 
     private var loaderMessages: some View {

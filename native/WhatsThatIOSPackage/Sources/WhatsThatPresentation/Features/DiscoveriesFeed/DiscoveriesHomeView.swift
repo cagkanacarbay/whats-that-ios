@@ -13,11 +13,10 @@ private let discoveriesHomeLogger = Logger(
 )
 
 struct DiscoveriesHomeView: View {
-    private let feedUseCase: DiscoveryFeedUseCase
+    @ObservedObject private var storeObserver: DiscoveryStoreObserver
     private let deletionUseCase: DiscoveryDeletionUseCase
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var pendingDiscoveryId: Int64?
-    @Binding private var pendingCreatedSummary: DiscoverySummary?
     @Binding private var openFirstDetailFromAudioGuides: Bool
     @Binding private var audioGuidesTargetDiscoveryId: Int64?
     @Binding private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
@@ -27,7 +26,6 @@ struct DiscoveriesHomeView: View {
     private let onQuickUpload: (() -> Void)?
     private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
 
-    @StateObject private var viewModel: DiscoveryFeedViewModel
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @State private var scrollOffset: CGFloat = 0
@@ -54,11 +52,10 @@ struct DiscoveriesHomeView: View {
     private let refreshIndicatorRevealThreshold: CGFloat = 12
 
     init(
-        feedUseCase: DiscoveryFeedUseCase,
+        storeObserver: DiscoveryStoreObserver,
         deletionUseCase: DiscoveryDeletionUseCase,
         voiceoverController: VoiceoverPlaybackController,
         pendingDiscoveryId: Binding<Int64?>,
-        pendingCreatedSummary: Binding<DiscoverySummary?>,
         openFirstDetailFromAudioGuides: Binding<Bool>,
         audioGuidesTargetDiscoveryId: Binding<Int64?>,
         audioGuidesTargetDiscoverySummary: Binding<DiscoverySummary?>,
@@ -68,11 +65,10 @@ struct DiscoveriesHomeView: View {
         onQuickUpload: (() -> Void)? = nil,
         onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil
     ) {
-        self.feedUseCase = feedUseCase
+        self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
         self._voiceoverController = ObservedObject(initialValue: voiceoverController)
         self._pendingDiscoveryId = pendingDiscoveryId
-        self._pendingCreatedSummary = pendingCreatedSummary
         self._openFirstDetailFromAudioGuides = openFirstDetailFromAudioGuides
         self._audioGuidesTargetDiscoveryId = audioGuidesTargetDiscoveryId
         self._audioGuidesTargetDiscoverySummary = audioGuidesTargetDiscoverySummary
@@ -81,7 +77,6 @@ struct DiscoveriesHomeView: View {
         self.onQuickCamera = onQuickCamera
         self.onQuickUpload = onQuickUpload
         self.onOpenAudioGuide = onOpenAudioGuide
-        _viewModel = StateObject(wrappedValue: DiscoveryFeedViewModel(feedUseCase: feedUseCase))
         _detailCoordinator = StateObject(
             wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
         )
@@ -111,14 +106,14 @@ struct DiscoveriesHomeView: View {
                         refreshHeaderView(metrics: metrics)
 
                         DiscoveriesGridView(
-                            viewModel: viewModel,
+                            storeObserver: storeObserver,
                             availableWidth: contentWidth,
                             availableHeight: contentHeight,
                             cardSpacing: gridSpacing,
                             cardFrames: $cardFrames,
                             activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
                             onLoadMore: { discovery in
-                                await viewModel.loadMoreIfNeeded(currentItem: discovery)
+                                await storeObserver.loadMoreIfNeeded(currentItem: discovery)
                             },
                             onSelect: { discovery, imageURL, frame in
                                 handleDiscoverySelection(
@@ -137,10 +132,10 @@ struct DiscoveriesHomeView: View {
                 .coordinateSpace(name: "discoveriesScroll")
                 .miniPlayerScrollInset()
                 .refreshable {
-                    await viewModel.refresh()
+                    await storeObserver.refresh()
                 }
                 .task {
-                    await viewModel.loadInitialIfNeeded()
+                    await storeObserver.loadInitialIfNeeded()
                     presentPendingDiscoveryIfNeeded()
                     resolveOpenFromAudioGuidesIfNeeded()
                 }
@@ -149,7 +144,7 @@ struct DiscoveriesHomeView: View {
                     let adjusted = rawValue - metrics.headerSpacerHeight
                     scrollOffset = adjusted
                 }
-                .onChange(of: viewModel.discoveries) {
+                .onChange(of: storeObserver.discoveries) {
                     presentPendingDiscoveryIfNeeded()
                     resolveOpenFromAudioGuidesIfNeeded()
                 }
@@ -157,17 +152,13 @@ struct DiscoveriesHomeView: View {
                     presentPendingDiscoveryIfNeeded()
                 }
                 .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
+                    print("[DEBUG DiscoveriesHomeView] >>> onChange openFirstDetailFromAudioGuides fired: newValue=\(newValue)")
                     if newValue {
                         discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
                         resolveOpenFromAudioGuidesIfNeeded()
                     }
                 }
-                .onChange(of: pendingCreatedSummary) { oldValue, newValue in
-                    guard let summary = newValue else { return }
-                    viewModel.upsert(summary)
-                    pendingCreatedSummary = nil
-                }
-                .onChange(of: viewModel.isRefreshing) { _, newValue in
+                .onChange(of: storeObserver.isRefreshing) { _, newValue in
                     discoveriesHomeLogger.info("isRefreshing changed: \(newValue, privacy: .public)")
                 }
                 .onChange(of: cardFrames) {
@@ -186,8 +177,8 @@ struct DiscoveriesHomeView: View {
                         }
                     }
                 }
-                .onChange(of: viewModel.errorMessage) { _, newValue in
-                    if let message = newValue?.nonEmptyOrNil, !viewModel.discoveries.isEmpty {
+                .onChange(of: storeObserver.errorMessage) { _, newValue in
+                    if let message = newValue?.nonEmptyOrNil, !storeObserver.discoveries.isEmpty {
                         refreshErrorMessage = message
                     } else if newValue == nil {
                         refreshErrorMessage = nil
@@ -237,7 +228,7 @@ struct DiscoveriesHomeView: View {
             .onAppear {
                 updateSafeAreaBottomInsetIfNeeded(safeBottom)
                 updateSafeAreaTopInsetIfNeeded(safeTop)
-                voiceoverController.setDiscoveryQueueProvider { viewModel.discoveries }
+                voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
             }
             .onChange(of: safeBottom) { _, newValue in
                 updateSafeAreaBottomInsetIfNeeded(newValue)
@@ -245,13 +236,13 @@ struct DiscoveriesHomeView: View {
             .onChange(of: safeTop) { _, newValue in
                 updateSafeAreaTopInsetIfNeeded(newValue)
             }
-            .onChange(of: viewModel.discoveries) { _, _ in
-                voiceoverController.setDiscoveryQueueProvider { viewModel.discoveries }
+            .onChange(of: storeObserver.discoveries) { _, _ in
+                voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
             }
         }
         .overlay(alignment: .bottom) {
             Group {
-                if viewModel.isPaginating {
+                if storeObserver.isPaginating {
                     HStack(spacing: BrandSpacing.small) {
                         ProgressView()
                             .progressViewStyle(.circular)
@@ -270,7 +261,7 @@ struct DiscoveriesHomeView: View {
                 }
             }
         }
-        .animation(.easeInOut, value: viewModel.loadState)
+        .animation(.easeInOut, value: storeObserver.loadState)
         .alert(
             "An error occurred",
             isPresented: Binding(
@@ -278,14 +269,14 @@ struct DiscoveriesHomeView: View {
                 set: { isPresented in
                     if !isPresented {
                         refreshErrorMessage = nil
-                        viewModel.clearError()
+                        storeObserver.clearError()
                     }
                 }
             ),
             actions: {
                 Button("OK", role: .cancel) {
                     refreshErrorMessage = nil
-                    viewModel.clearError()
+                    storeObserver.clearError()
                 }
             },
             message: {
@@ -335,13 +326,17 @@ struct DiscoveriesHomeView: View {
     }
 
     private func presentPendingDiscoveryIfNeeded() {
+        print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded called, pendingDiscoveryId=\(String(describing: pendingDiscoveryId))")
         guard let pendingId = pendingDiscoveryId,
               !detailCoordinator.snapshot.phase.isActive
         else {
+            print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded: early exit (no pending or overlay active)")
             return
         }
 
-        guard let discovery = viewModel.discoveries.first(where: { $0.id == pendingId }) else {
+        print("[DEBUG DiscoveriesHomeView] Looking for discovery \(pendingId) in \(storeObserver.discoveries.count) discoveries")
+        guard let discovery = storeObserver.discoveries.first(where: { $0.id == pendingId }) else {
+            print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded: discovery \(pendingId) NOT FOUND in feed")
             return
         }
 
@@ -349,6 +344,7 @@ struct DiscoveriesHomeView: View {
 
         pendingDiscoveryId = nil
         let animated = true
+        print("[DEBUG DiscoveriesHomeView] Presenting discovery \(discovery.id)")
         discoveriesHomeLogger.info("Pending discovery resolved id=\(discovery.id, privacy: .public) animated=\(animated, privacy: .public)")
         handleDiscoverySelection(
             discovery: discovery,
@@ -364,7 +360,7 @@ struct DiscoveriesHomeView: View {
             return frame
         }
 
-        guard let firstId = viewModel.discoveries.first?.id,
+        guard let firstId = storeObserver.discoveries.first?.id,
               let frame = cardFrames[firstId],
               frame.width > 0,
               frame.height > 0
@@ -404,11 +400,11 @@ struct DiscoveriesHomeView: View {
         }
         
         // Find the discovery's position in the list
-        let discoveryIndex = viewModel.discoveries.firstIndex { $0.id == discoveryId }
+        let discoveryIndex = storeObserver.discoveries.firstIndex { $0.id == discoveryId }
         
         // Find visible card indices
         let visibleIds = Set(cardFrames.keys)
-        let visibleIndices = viewModel.discoveries.enumerated()
+        let visibleIndices = storeObserver.discoveries.enumerated()
             .filter { visibleIds.contains($0.element.id) }
             .map { $0.offset }
         
@@ -436,17 +432,23 @@ struct DiscoveriesHomeView: View {
     }
 
     private func resolveOpenFromAudioGuidesIfNeeded() {
-        guard openFirstDetailFromAudioGuides else { return }
+        print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded called, openFirstDetailFromAudioGuides=\(openFirstDetailFromAudioGuides)")
+        guard openFirstDetailFromAudioGuides else {
+            print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: early exit (flag is false)")
+            return
+        }
 
         // Require an explicit target from Audio Guides; do not fall back to first.
         let targetId = audioGuidesTargetDiscoveryId ?? audioGuidesTargetDiscoverySummary?.id
+        print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: targetId=\(String(describing: targetId)), hasSummary=\(audioGuidesTargetDiscoverySummary != nil)")
         guard let discoveryId = targetId else {
+            print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: no discovery attached")
             discoveriesHomeLogger.info("AudioGuides Text tap: no discovery attached to guide")
             return
         }
 
         // Try to find in current feed; otherwise use the passed summary (may be from a different page).
-        let feedTarget = viewModel.discoveries.first(where: { $0.id == discoveryId })
+        let feedTarget = storeObserver.discoveries.first(where: { $0.id == discoveryId })
         let resolvedTarget = feedTarget ?? audioGuidesTargetDiscoverySummary
 
         guard let target = resolvedTarget else {
@@ -506,8 +508,8 @@ struct DiscoveriesHomeView: View {
         Task {
             do {
                 try await deletionUseCase.delete(discovery)
+                await storeObserver.remove(discovery)
                 await MainActor.run {
-                    viewModel.remove(discovery)
                     detailCoordinator.dismiss(reason: .backButton)
                     deletingDiscoveryId = nil
                     isDeletionInProgress = false
@@ -551,9 +553,9 @@ struct DiscoveriesHomeView: View {
     @ViewBuilder
     private func refreshHeaderView(metrics: DiscoveriesHeaderMetrics) -> some View {
         let pullDistance = max(scrollOffset - metrics.gridTopPadding, 0)
-        let shouldShowIndicator = viewModel.isRefreshing || pullDistance > refreshIndicatorRevealThreshold
+        let shouldShowIndicator = storeObserver.isRefreshing || pullDistance > refreshIndicatorRevealThreshold
         let indicatorOpacity: Double = {
-            if viewModel.isRefreshing {
+            if storeObserver.isRefreshing {
                 return 1
             } else if shouldShowIndicator {
                 let pullBeyondThreshold = max(Double(pullDistance - refreshIndicatorRevealThreshold), 0)

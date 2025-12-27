@@ -67,3 +67,4 @@ native/Config/Environments/*.xcconfig
 !native/Config/Environments/Example.xcconfig
 
 .env.mcp
+mcp_config.json

@@ -36,6 +36,9 @@ public struct AppRootView: View {
         let audioServicesFactory: (() -> AudioServicesContainer)? = {
             container.makeAudioServicesContainer()
         }
+        let storeObserverFactory: (() -> DiscoveryStoreObserver)? = {
+            container.makeDiscoveryStoreObserver()
+        }
         let creditsFactory: (() -> CreditsViewModel)? = {
             container.makeCreditsViewModel()
         }
@@ -68,6 +71,7 @@ public struct AppRootView: View {
         }
         #else
         let audioServicesFactory: (() -> AudioServicesContainer)? = nil
+        let storeObserverFactory: (() -> DiscoveryStoreObserver)? = nil
         let creditsFactory: (() -> CreditsViewModel)? = nil
         let balanceFetcher: () async -> Result<Int, Error> = {
             .failure(AuthError.unknown)
@@ -101,13 +105,13 @@ public struct AppRootView: View {
         }
 
         return RootContentView(
-            feedUseCase: container.discoveryFeedUseCase,
             deletionUseCase: container.discoveryDeletionUseCase,
             authUseCase: container.authUseCase,
             onboardingUseCase: container.onboardingUseCase,
             flowResolver: container.flowResolver,
             makeCreationViewModel: makeViewModel,
             makeAudioServicesContainer: audioServicesFactory,
+            storeObserver: storeObserverFactory!(),
             makeCreditsViewModel: creditsFactory,
             fetchCreditBalance: balanceFetcher,
             clearAppStoreLocal: clearAppStoreLocal,

@@ -58,10 +58,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     @Published private(set) var creditBalance: Int?
     @Published private(set) var error: FlowError?
     @Published private(set) var pushToken: String?
+    @Published var showPollingFailedAlert: Bool = false
 
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
     var onAnalysisBegan: ((DiscoveryCreationFlowType) -> Void)?
+
+    /// Called when stream is interrupted (e.g., backgrounding). Parent should navigate to discoveries tab.
+    var onStreamInterrupted: ((DiscoveryCapturedMedia) -> Void)?
+    /// Called when polling finds the completed discovery. Parent should upsert discovery to store.
+    var onPollingDiscoveryReady: ((DiscoverySummary) -> Void)?
 
     private let configuration: Configuration
     private let captureService: DiscoveryCaptureService
@@ -79,6 +85,17 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private let analysisParser = DiscoveryAnalysisParser()
     #if DEBUG
     private let debugLoggingEnabled = true
+    
+    // MARK: - Debug Flags for Testing Polling
+    
+    /// Set to true to simulate polling always failing (never finds discovery)
+    /// This tests the polling timeout error flow
+    /// CHANGE TO false WHEN DONE TESTING
+    static var debugPollingAlwaysFails: Bool = false
+    
+    /// Set to true to use short polling intervals (5s total instead of ~79s)
+    /// CHANGE TO false WHEN DONE TESTING
+    static var debugUseShortPollingIntervals: Bool = false
     #else
     private let debugLoggingEnabled = false
     #endif
@@ -88,6 +105,21 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var freshLocationForAnalysis: DiscoveryLocation?
     private var ephemeralFreshTask: Task<Void, Never>?
     private var ephemeralFreshInFlight = false
+
+    // Background polling support
+    private var pendingMedia: DiscoveryCapturedMedia?
+    private var analysisStartTime: Date?
+    private var pollingTask: Task<Void, Never>?
+    
+    /// Returns polling intervals - short for debugging, normal for production
+    private var pollingIntervals: [TimeInterval] {
+        #if DEBUG
+        if Self.debugUseShortPollingIntervals {
+            return [1, 1, 1, 1, 1]  // 5s total for quick testing
+        }
+        #endif
+        return [1, 2, 4, 8, 16, 16, 16, 16]  // ~79s total
+    }
 
     var flowType: DiscoveryCreationFlowType {
         configuration.type
@@ -145,6 +177,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         analysisState = nil
         currentMedia = nil
         freshLocationForAnalysis = nil
+        pollingTask?.cancel()
+        pollingTask = nil
+        pendingMedia = nil
+        analysisStartTime = nil
         flowState = .cancelled
         error = nil
         flowState = .idle
@@ -603,6 +639,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         )
         analysisState = initialState
         flowState = .analyzing(initialState)
+        analysisStartTime = Date()
+        pendingMedia = media
+        pollingTask?.cancel()
+        pollingTask = nil
 
         do {
             // Deterministic confirm-stage path: if coordinates exist and nearby are missing,
@@ -660,8 +700,24 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 handle(event: event)
             }
         } catch is CancellationError {
+            print("[DEBUG] Caught CancellationError")
             await handleAnalysisCancellation()
+        } catch let error as DiscoveryAnalysisError where error == .streamInterrupted {
+            print("[DEBUG] Caught DiscoveryAnalysisError.streamInterrupted - starting polling")
+            debugLog("Analysis stream interrupted. Starting polling fallback.")
+            // Keep the streaming UI visible but update status to show we're polling
+            analysisState = analysisStateUpdated { state in
+                state.isStreaming = false
+                state.isPolling = true
+                state.statusMessage = "Connection interrupted. Checking for your discovery..."
+            }
+            // Republish flowState to update UI
+            if let analysisState {
+                flowState = .analyzing(analysisState)
+            }
+            startPollingForCompletion()
         } catch {
+            print("[DEBUG] Caught generic error: \(type(of: error)) - \(error.localizedDescription)")
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
             if Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to friendly no-credits error and sync local cache.
@@ -718,27 +774,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             // Do not republish flowState here; wait for the final end signal.
             onDiscoveryCreated?(discoveryId)
             hydrateDiscoverySummaryIfNeeded(for: discoveryId)
-            // Optimistically decrement credits on success.
-            Task { [weak self] in
-                guard let self else { return }
-                let updated = await self.creditBalanceStore.adjust(by: -1)
-                await MainActor.run {
-                    self.creditBalance = updated
-                }
-            }
-            Task { [weak self] in
-                guard let self,
-                      let voiceoverRepository,
-                      let preferencesStore = voiceoverPreferencesStore else { return }
-                let preferences = await preferencesStore.load()
-                guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
-                print("[DiscoveryCreationFlowViewModel] autoTTS=enabled voiceModelId=\(preferences.voiceModelId) discoveryId=\(discoveryId)")
-                _ = await voiceoverRepository.requestVoiceover(
-                    for: discoveryId,
-                    voiceModelId: preferences.voiceModelId,
-                    ttsModel: preferences.ttsModel
-                )
-            }
+            handleSuccessfulCreation(discoveryId: discoveryId)
         case let .error(message, status):
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to a friendly no-credits error and sync local cache.
@@ -760,6 +796,165 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             if let analysisState {
                 flowState = .analyzing(analysisState)
             }
+        }
+    }
+
+    // MARK: - Background Polling
+
+    private func startPollingForCompletion() {
+        print("[DEBUG] startPollingForCompletion called")
+        pollingTask?.cancel()
+        let intervals = pollingIntervals
+        pollingTask = Task { [weak self] in
+            // Request background execution time to continue polling when app is backgrounded
+            var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+            backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "DiscoveryPolling") {
+                print("[DEBUG] Polling background task expired")
+                if backgroundTaskId != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                    backgroundTaskId = .invalid
+                }
+            }
+            defer {
+                print("[DEBUG] Polling task defer block executing")
+                if backgroundTaskId != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                }
+            }
+
+            print("[DEBUG] Polling task started, intervals: \(intervals)")
+            for (index, interval) in intervals.enumerated() {
+                // Wait for specified interval
+                print("[DEBUG] Poll #\(index + 1): sleeping for \(interval)s")
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard !Task.isCancelled else {
+                    print("[DEBUG] Poll #\(index + 1): task was cancelled")
+                    return
+                }
+
+                print("[DEBUG] Poll #\(index + 1): checking for completed discovery")
+                if let discovery = await self?.checkForCompletedDiscovery() {
+                    print("[DEBUG] Poll #\(index + 1): Found discovery \(discovery.id)")
+                    await MainActor.run { self?.handlePollingDiscoveryReady(discovery) }
+                    return
+                } else {
+                    
+                    print("[DEBUG] Poll #\(index + 1): No discovery found")
+                }
+            }
+
+            print("[DEBUG] All polls exhausted. Calling handlePollingTimeout")
+            await MainActor.run { self?.handlePollingTimeout() }
+        }
+    }
+
+    private func checkForCompletedDiscovery() async -> DiscoverySummary? {
+        #if DEBUG
+        // Simulate polling failure for testing timeout flow
+        if Self.debugPollingAlwaysFails {
+            print("[DEBUG] debugPollingAlwaysFails=true, returning nil")
+            return nil
+        }
+        #endif
+        
+        guard let startTime = analysisStartTime else { return nil }
+        
+        do {
+            // Buffer the start time slightly to account for clock drift/processing delay
+            let searchStartTime = startTime.addingTimeInterval(-30)
+            let recents = try await historyRepository.fetchRecentDiscoveries(limit: 5)
+            
+            // Find a discovery that was captured after our analysis started
+            // Note: DB typically stores created_at but capturedAt in Summary maps to that.
+            return recents.first { $0.capturedAt >= searchStartTime }
+        } catch {
+            debugLog("Failed to fetch recent discoveries during polling: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    @MainActor
+    private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
+        print("[DEBUG VM] handlePollingDiscoveryReady: discovery \(discovery.id)")
+        
+        // Populate the analysis state with discovery data
+        // This mimics what would have happened if the stream completed normally
+        analysisState = DiscoveryAnalysisState(
+            statusMessage: "Discovery complete!",
+            streamedText: discovery.detailDescription ?? "",
+            isStreaming: false,
+            isPolling: false,
+            discoveryIdentifier: discovery.id,
+            metadataTitle: discovery.title,
+            metadataShortDescription: discovery.shortDescription,
+            displayMarkdown: discovery.detailDescription ?? "",
+            discoverySummary: discovery
+        )
+        
+        // Update flowState to trigger UI refresh with the populated data
+        flowState = .analyzing(analysisState!)
+        print("[DEBUG VM] Updated analysisState with discovery data, title=\(discovery.title)")
+        
+        // Notify MainTabView to upsert the discovery (so it appears in Discoveries tab)
+        // But DON'T navigate - let user dismiss the streaming view normally
+        onPollingDiscoveryReady?(discovery)
+        
+        // Ensure credits and TTS are handled for polling success path
+        handleSuccessfulCreation(discoveryId: discovery.id)
+    }
+
+    @MainActor
+    private func handlePollingTimeout() {
+        print("[DEBUG] handlePollingTimeout: showing polling failure alert")
+        
+        // Update analysis state to show we've stopped polling
+        analysisState = analysisStateUpdated { state in
+            state.isPolling = false
+            state.isStreaming = false
+            state.statusMessage = "Connection lost"
+        }
+        
+        // Re-publish analysisState to update UI (keeps streaming view visible with the image)
+        if let analysisState {
+            flowState = .analyzing(analysisState)
+        }
+        
+        // Trigger the polling failed alert in DiscoveryCreationFlowView
+        // The alert has Cancel (dismiss) and Retry (go back to confirm) options
+        showPollingFailedAlert = true
+    }
+
+    /// Unified success handler for credits and TTS. Called from both real-time streaming and polling recovery.
+    private func handleSuccessfulCreation(discoveryId: Int64) {
+        // Optimistically decrement credits on success.
+        Task { [weak self] in
+            guard let self else { return }
+            let updated = await self.creditBalanceStore.adjust(by: -1)
+            await MainActor.run {
+                self.creditBalance = updated
+            }
+        }
+        // Trigger auto TTS if enabled.
+        Task { [weak self] in
+            guard let self,
+                  let voiceoverRepository,
+                  let preferencesStore = voiceoverPreferencesStore else { return }
+            let preferences = await preferencesStore.load()
+            guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
+            print("[DiscoveryCreationFlowViewModel] autoTTS=enabled voiceModelId=\(preferences.voiceModelId) discoveryId=\(discoveryId)")
+            _ = await voiceoverRepository.requestVoiceover(
+                for: discoveryId,
+                voiceModelId: preferences.voiceModelId,
+                ttsModel: preferences.ttsModel
+            )
+        }
+    }
+
+    func retryWithPendingMedia() {
+        guard let media = pendingMedia else { return }
+        debugLog("Retrying with pending media")
+        Task {
+            await prepareConfirmation(with: media)
         }
     }
 

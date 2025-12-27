@@ -13,7 +13,6 @@ import UIKit
 
 public struct AppDependencyContainer: Sendable {
     public let configuration: AppConfiguration
-    public let discoveryFeedUseCase: DiscoveryFeedUseCase
     public let discoveryDeletionUseCase: DiscoveryDeletionUseCase
     public let authUseCase: AuthUseCase
     public let onboardingUseCase: OnboardingUseCase
@@ -21,6 +20,7 @@ public struct AppDependencyContainer: Sendable {
 #if os(iOS)
     private let discoveryCreationProvider: DiscoveryCreationDependencyProvider
     private let discoveryRepository: DiscoveryRepository
+    public let discoveryStore: DiscoveryStore
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
     private let voiceInventoryRepository: VoiceInventoryRepository
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
@@ -48,13 +48,13 @@ public struct AppDependencyContainer: Sendable {
         locationService: DiscoveryLocationService
     ) {
         self.configuration = configuration
-        self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
         self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
         self.authUseCase = AuthUseCase(service: authService)
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
         self.flowResolver = AppFlowResolver()
         self.discoveryCreationProvider = discoveryCreationProvider
         self.discoveryRepository = discoveryRepository
+        self.discoveryStore = DiscoveryStore(repository: discoveryRepository)
         self.voiceoverRepository = voiceoverRepository
         self.voiceInventoryRepository = voiceInventoryRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
@@ -72,7 +72,6 @@ public struct AppDependencyContainer: Sendable {
         onboardingRepository: OnboardingRepository
     ) {
         self.configuration = configuration
-        self.discoveryFeedUseCase = DiscoveryFeedUseCase(repository: discoveryRepository)
         self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
         self.authUseCase = AuthUseCase(service: authService)
         self.onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
@@ -266,10 +265,15 @@ public extension AppDependencyContainer {
     @MainActor
     func makeAudioServicesContainer() -> AudioServicesContainer {
         AudioServicesContainer(
-            repository: discoveryRepository,
+            discoveryStore: discoveryStore,
             voiceoverRepository: voiceoverRepository,
             creditBalanceStore: creditBalanceStore
         )
+    }
+
+    @MainActor
+    func makeDiscoveryStoreObserver() -> DiscoveryStoreObserver {
+        DiscoveryStoreObserver(store: discoveryStore)
     }
 
     func loadVoiceoverPreferences() async -> VoiceoverPreferences {

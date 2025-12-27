@@ -7,6 +7,7 @@ final class SettingsViewModel: ObservableObject {
     enum AlertState: Equatable, Identifiable {
         case confirmReset
         case confirmSignOut
+        case confirmDeleteAccount
         case finished
         case appStoreCleared
         case error(String)
@@ -18,6 +19,8 @@ final class SettingsViewModel: ObservableObject {
                 return "confirm-reset"
             case .confirmSignOut:
                 return "confirm-sign-out"
+            case .confirmDeleteAccount:
+                return "confirm-delete-account"
             case .finished:
                 return "finished"
             case .appStoreCleared:
@@ -37,6 +40,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var isRequestingPasswordReset = false
     @Published var creditBalance: Int?
     @Published var alertState: AlertState?
+    @Published var isDeletingAccount = false
+    @Published var isShowingDeletionConfirmation = false
+    @Published var deletionConfirmationText = ""
     let canRequestPasswordReset: Bool
     let userEmail: String?
 
@@ -73,6 +79,41 @@ final class SettingsViewModel: ObservableObject {
 
     func presentSignOutConfirmation() {
         alertState = .confirmSignOut
+    }
+
+    func presentDeleteAccountConfirmation() {
+        deletionConfirmationText = ""
+        isShowingDeletionConfirmation = true
+    }
+
+    func cancelDeleteAccountConfirmation() {
+        isShowingDeletionConfirmation = false
+        deletionConfirmationText = ""
+    }
+
+    var canConfirmDeletion: Bool {
+        deletionConfirmationText.lowercased() == "delete my account"
+    }
+
+    func performAccountDeletion() async {
+        guard canConfirmDeletion else { return }
+        isShowingDeletionConfirmation = false
+        isDeletingAccount = true
+
+        // Simulated deletion delay to show the overlay
+        try? await Task.sleep(for: .seconds(3))
+
+        // Dismiss the sheet first to avoid sticking during the flow transition
+        onClose()
+
+        // Wait a tiny bit for the dismissal to start/complete before signing out
+        try? await Task.sleep(for: .milliseconds(300))
+
+        // Finally, sign the user out
+        _ = await onSignOut()
+        
+        // Reset state (though the view model may be destroyed)
+        isDeletingAccount = false
     }
 
     func dismissAlert() {

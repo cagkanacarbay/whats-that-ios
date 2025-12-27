@@ -5,6 +5,26 @@ public enum DiscoveryCreationFlowType: String, Equatable, Sendable {
     case upload
 }
 
+public enum DiscoveryAnalysisError: LocalizedError, Equatable, Sendable {
+    case unauthenticated
+    case invalidResponse
+    case unexpectedStatus(Int)
+    case streamInterrupted
+
+    public var errorDescription: String? {
+        switch self {
+        case .unauthenticated:
+            return "You need to sign in before creating a discovery."
+        case .invalidResponse:
+            return "The analysis service returned an unexpected response."
+        case let .unexpectedStatus(code):
+            return "The analysis service returned status code \(code)."
+        case .streamInterrupted:
+            return "The connection was interrupted. Your discovery may still be processing."
+        }
+    }
+}
+
 public enum DiscoveryFlowCancellationError: Error, Equatable, Sendable {
     case userCancelled
 
@@ -98,6 +118,7 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
     public var statusMessage: String?
     public var streamedText: String
     public var isStreaming: Bool
+    public var isPolling: Bool
     public var discoveryIdentifier: Int64?
     public var systemPromptVersion: String?
     public var userPromptVersion: String?
@@ -110,6 +131,7 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         statusMessage: String? = nil,
         streamedText: String = "",
         isStreaming: Bool = true,
+        isPolling: Bool = false,
         discoveryIdentifier: Int64? = nil,
         systemPromptVersion: String? = nil,
         userPromptVersion: String? = nil,
@@ -121,6 +143,7 @@ public struct DiscoveryAnalysisState: Equatable, Sendable {
         self.statusMessage = statusMessage
         self.streamedText = streamedText
         self.isStreaming = isStreaming
+        self.isPolling = isPolling
         self.discoveryIdentifier = discoveryIdentifier
         self.systemPromptVersion = systemPromptVersion
         self.userPromptVersion = userPromptVersion

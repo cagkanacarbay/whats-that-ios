@@ -3,7 +3,7 @@ import WhatsThatDomain
 import WhatsThatShared
 
 struct DiscoveriesGridView: View {
-    @ObservedObject var viewModel: DiscoveryFeedViewModel
+    @ObservedObject var storeObserver: DiscoveryStoreObserver
     let availableWidth: CGFloat
     // Used to center empty state vertically
     var availableHeight: CGFloat? = nil
@@ -33,9 +33,9 @@ struct DiscoveriesGridView: View {
     }
 
     var body: some View {
-        switch viewModel.loadState {
-        case .idle where viewModel.discoveries.isEmpty:
-            if viewModel.isRefreshing {
+        switch storeObserver.loadState {
+        case .idle where storeObserver.discoveries.isEmpty:
+            if storeObserver.isRefreshing {
                 skeletonGrid
             } else {
                 EmptyDiscoveriesView(onCamera: onTapCamera, onUpload: onTapUpload, minHeight: availableHeight)
@@ -46,11 +46,11 @@ struct DiscoveriesGridView: View {
             DiscoveriesErrorView(
                 message: message,
                 action: {
-                    Task { await viewModel.reload() }
+                    Task { await storeObserver.reload() }
                 }
             )
         case .loaded, .idle:
-            if viewModel.discoveries.isEmpty {
+            if storeObserver.discoveries.isEmpty {
                 EmptyDiscoveriesView(onCamera: onTapCamera, onUpload: onTapUpload, minHeight: availableHeight)
             } else {
                 gridContent
@@ -70,7 +70,7 @@ struct DiscoveriesGridView: View {
 
     private var gridContent: some View {
         LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardSpacing) {
-            ForEach(viewModel.discoveries) { discovery in
+            ForEach(storeObserver.discoveries) { discovery in
                 DiscoveryCardView(
                     discovery: discovery,
                     width: cardWidth,
@@ -83,7 +83,7 @@ struct DiscoveriesGridView: View {
                 )
                 .background(
                     GeometryReader { proxy in
-                        let isFirstDiscovery = discovery.id == viewModel.discoveries.first?.id
+                        let isFirstDiscovery = discovery.id == storeObserver.discoveries.first?.id
                         let globalFrame = proxy.frame(in: .global)
                         let localFrame = proxy.frame(in: .named("discoveriesScroll"))
                         Color.clear

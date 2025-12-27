@@ -82,14 +82,4 @@ public enum DiscoveryFeedError: LocalizedError, Equatable {
     }
 }
 
-public actor DiscoveryFeedUseCase: Sendable {
-    private let repository: DiscoveryRepository
 
-    public init(repository: DiscoveryRepository) {
-        self.repository = repository
-    }
-
-    public func loadPage(limit: Int = 10, before discoveryId: Int64? = nil) async throws -> [DiscoverySummary] {
-        try await repository.fetchDiscoveries(limit: limit, before: discoveryId)
-    }
-}

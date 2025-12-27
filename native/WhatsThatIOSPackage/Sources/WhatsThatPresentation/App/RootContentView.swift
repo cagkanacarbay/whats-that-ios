@@ -16,10 +16,10 @@ public struct RootContentView: View {
     @State private var settingsSheetDetent: PresentationDetent = .fraction(0.8)
     @State private var mainTabDestination: MainTabDestination = .discoveries
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
-    private let feedUseCase: DiscoveryFeedUseCase
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     private let makeAudioServicesContainer: (() -> AudioServicesContainer)?
+    @StateObject private var storeObserver: DiscoveryStoreObserver
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
     private let clearAppStoreLocal: () async -> Result<Void, Error>
@@ -37,13 +37,13 @@ public struct RootContentView: View {
     @State private var processingPasswordResetToken: String?
 
     public init(
-        feedUseCase: DiscoveryFeedUseCase,
         deletionUseCase: DiscoveryDeletionUseCase,
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver = AppFlowResolver(),
         makeCreationViewModel: @escaping (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel,
         makeAudioServicesContainer: (() -> AudioServicesContainer)? = nil,
+        storeObserver: DiscoveryStoreObserver,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
         fetchCreditBalance: @escaping () async -> Result<Int, Error> = { .failure(AuthError.unknown) },
         clearAppStoreLocal: @escaping () async -> Result<Void, Error> = { .failure(AuthError.unknown) },
@@ -58,10 +58,10 @@ public struct RootContentView: View {
         saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void,
         resetIPoPPreferences: @escaping () async -> Void = {}
     ) {
-        self.feedUseCase = feedUseCase
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
         self.makeAudioServicesContainer = makeAudioServicesContainer
+        _storeObserver = StateObject(wrappedValue: storeObserver)
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
         self.clearAppStoreLocal = clearAppStoreLocal
@@ -393,7 +393,7 @@ public struct RootContentView: View {
         case .main:
             if let makeAudioServicesContainer {
                 MainTabView(
-                    feedUseCase: feedUseCase,
+                    storeObserver: storeObserver,
                     deletionUseCase: deletionUseCase,
                     cameraViewModel: makeCreationViewModel(.camera),
                     uploadViewModel: makeCreationViewModel(.upload),

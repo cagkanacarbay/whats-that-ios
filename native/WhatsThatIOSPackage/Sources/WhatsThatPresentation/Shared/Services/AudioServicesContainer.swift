@@ -60,7 +60,7 @@ public final class AudioServicesContainer: ObservableObject {
     // MARK: - Init
     
     public init(
-        repository: DiscoveryRepository,
+        discoveryStore: DiscoveryStore,
         voiceoverRepository: DiscoveryVoiceoverRepository,
         creditBalanceStore: CreditBalanceStore? = nil,
         defaults: UserDefaults = .standard
@@ -70,7 +70,7 @@ public final class AudioServicesContainer: ObservableObject {
         self.speedStore = VoiceoverPlaybackSpeedStore(defaults: defaults)
         self.progressStore = VoiceoverProgressStore(defaults: defaults)
         self.miniPlayerPresence = MiniPlayerPresenceStore()
-        self.discoveryStore = DiscoveryStore(repository: repository)
+        self.discoveryStore = discoveryStore
         self.fileCache = VoiceoverFileCache.shared
         self.networkMonitor = NetworkMonitor()
         self.preferencesStore = VoiceoverPreferencesStore()

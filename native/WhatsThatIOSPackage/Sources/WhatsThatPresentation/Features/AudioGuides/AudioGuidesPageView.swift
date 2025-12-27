@@ -656,8 +656,6 @@ struct DiscoverListView: View {
     let audioServices: AudioServicesContainer?
     var bottomPadding: CGFloat = 0
     
-    @State private var discoveries: [DiscoverySummary] = []
-    
     var body: some View {
         List {
             ForEach(groupedDiscoveries, id: \.0) { sectionTitle, sectionDiscoveries in
@@ -672,6 +670,11 @@ struct DiscoverListView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                        .onAppear {
+                            Task {
+                                await viewModel.loadMoreIfNeeded(currentId: discovery.id)
+                            }
+                        }
                     }
                 }
             }
@@ -685,31 +688,13 @@ struct DiscoverListView: View {
         .scrollContentBackground(.hidden)
         .background(Color.clear)
         .miniPlayerScrollInset()
-        .task {
-            await loadDiscoveries()
-        }
     }
     
     private var groupedDiscoveries: [(String, [DiscoverySummary])] {
-        viewModel.groupedDiscoveries(filteredDiscoveries)
-    }
-    
-    private var filteredDiscoveries: [DiscoverySummary] {
-        if viewModel.showWithoutAudioGuide {
-            return discoveries
-        } else {
-            return discoveries.filter { discovery in
-                let state = viewModel.rowState(for: discovery.id)
-                return state.voiceoverStatus.isPlayable
-            }
-        }
-    }
-    
-    private func loadDiscoveries() async {
-        guard let services = audioServices else { return }
-        discoveries = await services.discoveryStore.allCached()
+        viewModel.groupedDiscoveries(viewModel.filteredDiscoveries)
     }
 }
+
 
 // MARK: - Discover Row Container
 

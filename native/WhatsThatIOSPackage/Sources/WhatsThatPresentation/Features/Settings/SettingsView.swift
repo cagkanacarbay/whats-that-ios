@@ -147,6 +147,15 @@ struct SettingsView: View {
                             viewModel.dismissAlert()
                         }
                     )
+                case .confirmDeleteAccount:
+                    // This case is handled by the sheet, so just dismiss if it somehow appears
+                    return Alert(
+                        title: Text("Delete account"),
+                        message: Text("Please use the confirmation sheet."),
+                        dismissButton: .default(Text("OK")) {
+                            viewModel.dismissAlert()
+                        }
+                    )
                 case .finished:
                     return Alert(
                         title: Text("Done"),
@@ -178,6 +187,24 @@ struct SettingsView: View {
                         }
                     )
                 }
+            }
+        }
+        .sheet(isPresented: $viewModel.isShowingDeletionConfirmation) {
+            DeleteAccountConfirmationSheet(
+                confirmationText: $viewModel.deletionConfirmationText,
+                canConfirm: viewModel.canConfirmDeletion,
+                onConfirm: {
+                    Task { await viewModel.performAccountDeletion() }
+                },
+                onCancel: {
+                    viewModel.cancelDeleteAccountConfirmation()
+                }
+            )
+            .presentationDetents([.medium])
+        }
+        .overlay {
+            if viewModel.isDeletingAccount {
+                DeletingAccountOverlay()
             }
         }
     }
@@ -318,6 +345,13 @@ struct SettingsView: View {
             }
             .disabled(viewModel.isSigningOut)
             .accessibilityIdentifier("settings.signOut")
+
+            Button(role: .destructive) {
+                viewModel.presentDeleteAccountConfirmation()
+            } label: {
+                Text("Delete account")
+            }
+            .accessibilityIdentifier("settings.deleteAccount")
         }
     }
 
@@ -704,6 +738,108 @@ private struct AudioGuidePickerSheet: View {
             if !hasConfirmed {
                 onCancel()
             }
+        }
+    }
+}
+
+// MARK: - Delete Account Confirmation Sheet
+
+private struct DeleteAccountConfirmationSheet: View {
+    @Binding var confirmationText: String
+    let canConfirm: Bool
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BrandSpacing.medium) {
+            HStack {
+                Button {
+                    onCancel()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Cancel")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.top, BrandSpacing.large)
+
+            Text("Delete your account?")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, BrandSpacing.large)
+
+            Text("This action is permanent. All your discoveries, credits, and data will be deleted and cannot be recovered.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, BrandSpacing.large)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Type **delete my account** to confirm:")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                TextField("delete my account", text: $confirmationText)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .accessibilityIdentifier("settings.deleteAccountConfirmationField")
+            }
+            .padding(.horizontal, BrandSpacing.large)
+
+            Spacer()
+
+            Button(role: .destructive) {
+                onConfirm()
+            } label: {
+                Text("Delete my account")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(canConfirm ? Color.red : Color.gray.opacity(0.3))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(!canConfirm)
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.large)
+            .accessibilityIdentifier("settings.deleteAccountConfirmButton")
+        }
+    }
+}
+
+// MARK: - Deleting Account Overlay
+
+private struct DeletingAccountOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+
+            VStack(spacing: BrandSpacing.large) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(1.5)
+                    .tint(.white)
+
+                Text("We're sad to see you go...")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+
+                Text("Deleting your account and data")
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .padding()
         }
     }
 }

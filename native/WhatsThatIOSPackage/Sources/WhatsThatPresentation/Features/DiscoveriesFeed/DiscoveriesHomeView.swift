@@ -145,17 +145,26 @@ struct DiscoveriesHomeView: View {
                     scrollOffset = adjusted
                 }
                 .onChange(of: storeObserver.discoveries) {
-                    presentPendingDiscoveryIfNeeded()
-                    resolveOpenFromAudioGuidesIfNeeded()
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        presentPendingDiscoveryIfNeeded()
+                        resolveOpenFromAudioGuidesIfNeeded()
+                    }
                 }
                 .onChange(of: pendingDiscoveryId) {
-                    presentPendingDiscoveryIfNeeded()
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        presentPendingDiscoveryIfNeeded()
+                    }
                 }
                 .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
                     print("[DEBUG DiscoveriesHomeView] >>> onChange openFirstDetailFromAudioGuides fired: newValue=\(newValue)")
-                    if newValue {
-                        discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
-                        resolveOpenFromAudioGuidesIfNeeded()
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        if newValue {
+                            discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
+                            resolveOpenFromAudioGuidesIfNeeded()
+                        }
                     }
                 }
                 .onChange(of: storeObserver.isRefreshing) { _, newValue in

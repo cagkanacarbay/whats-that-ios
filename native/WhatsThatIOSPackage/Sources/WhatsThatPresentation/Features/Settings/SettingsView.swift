@@ -10,6 +10,9 @@ struct SettingsView: View {
     private let saveVoiceoverPreferences: (VoiceoverPreferences) async -> Void
     private let fetchVoiceOptions: () async -> [VoiceModelOption]
     private let fetchVoiceSampleURL: (String) async -> URL?
+    #if DEBUG
+    private let onSetCreditBalance: (Int) async -> Void
+    #endif
 
     @StateObject private var viewModel: SettingsViewModel
     @StateObject private var voicePickerViewModel: VoicePickerViewModel
@@ -21,6 +24,9 @@ struct SettingsView: View {
     @State private var isIPoPSheetPresented = false
     @State private var initialVoiceModelId: String?
     @State private var committedVoiceModelId: String?
+    #if DEBUG
+    @State private var debugCreditInput: String = ""
+    #endif
 
     init(
         userEmail: String?,
@@ -39,8 +45,12 @@ struct SettingsView: View {
         fetchVoiceOptions: @escaping () async -> [VoiceModelOption],
         fetchVoiceSampleURL: @escaping (String) async -> URL?,
         loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
-        saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void
+        saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void,
+        onSetCreditBalance: @escaping (Int) async -> Void = { _ in }
     ) {
+        #if DEBUG
+        self.onSetCreditBalance = onSetCreditBalance
+        #endif
         self.makeCreditsView = makeCreditsView
         self.makeNearbyCacheInspector = makeNearbyCacheInspector
         self.onClose = onClose
@@ -214,6 +224,13 @@ struct SettingsView: View {
     private var audioGuidesSection: some View {
         Section(header: Text("Audio guides")) {
             Toggle("Auto-generate audio guides after analysis (1 credit)", isOn: autoGenerateAudioGuideBinding)
+                .disabled(voicePickerViewModel.isAutoToggleLocked)
+            
+            if voicePickerViewModel.isAutoToggleLocked {
+                Text("Enabled for your free intro voiceovers. You can disable this after your introduction credits are exhausted.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             Button {
                 initialVoiceModelId = committedVoiceModelId ?? voicePickerViewModel.selectedVoiceId
@@ -464,6 +481,73 @@ struct SettingsView: View {
     #if DEBUG
     private var devSection: some View {
         Section(header: Text("Development")) {
+            // Debug Credit Override
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Image(systemName: "creditcard")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.orange)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Override Local Credits")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                        Text("Sets cached balance (does not sync to server)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                HStack {
+                    TextField("Credit amount", text: $debugCreditInput)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 120)
+                    
+                    Button("Set") {
+                        if let credits = Int(debugCreditInput) {
+                            Task {
+                                await onSetCreditBalance(credits)
+                                viewModel.updateCreditBalance(credits)
+                                debugCreditInput = ""
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(Int(debugCreditInput) == nil)
+                    
+                    Spacer()
+                }
+            }
+            .padding(.vertical, 4)
+            
+            // Free Credits Alert Reset Toggle
+            Button {
+                Task {
+                    await FreeCreditsAlertTracker.shared.resetForTesting()
+                    cacheAlertMessage = "Free credits alert reset - will show again on next zero balance"
+                    showCacheAlert = true
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reset Free Credits Alert")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                        Text("Re-show 'credits exhausted' alert next time balance hits 0")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+            
             Button {
                 isNearbyInspectorPresented = true
             } label: {

@@ -281,7 +281,8 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
                         updatedAt: response.updatedAt,
                         errorReason: response.errorReason,
                         wasExisting: response.wasExisting ?? false,
-                        wasRefunded: response.wasRefunded ?? false
+                        wasRefunded: response.wasRefunded ?? false,
+                        creditBalance: response.creditBalance
                     )
                     cache[asset.discoveryId] = CacheEntry(
                         asset: asset,
@@ -345,6 +346,21 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             )
         }
     }
+    
+    public func countUserVoiceovers() async -> Int {
+        do {
+            // Query discovery_voiceovers for count of user's voiceovers
+            // RLS will filter to only the current user's voiceovers
+            let response: PostgrestResponse<[VoiceoverCountRow]> = try await client
+                .from("discovery_voiceovers")
+                .select("id")
+                .execute()
+            return response.value.count
+        } catch {
+            supabaseVoiceoverLogger.error("Failed to count voiceovers: \(error.localizedDescription, privacy: .public)")
+            return 0
+        }
+    }
 }
 
 private func date(from string: String?) -> Date? {
@@ -391,7 +407,8 @@ private extension SupabaseVoiceoverRepository {
         updatedAt: Date?,
         errorReason: String?,
         wasExisting: Bool,
-        wasRefunded: Bool
+        wasRefunded: Bool,
+        creditBalance: Int? = nil
     ) -> DiscoveryVoiceoverAsset {
         let resolvedStatus = Self.status(from: status)
         let resolvedURL = audioURLString.flatMap { URL(string: $0) }
@@ -409,7 +426,8 @@ private extension SupabaseVoiceoverRepository {
             updatedAt: updatedAt,
             errorReason: errorReason,
             wasExistingResponse: wasExisting,
-            wasRefunded: wasRefunded
+            wasRefunded: wasRefunded,
+            creditBalance: creditBalance
         )
     }
 
@@ -455,6 +473,10 @@ private struct VoiceoverTableRow: Decodable {
     let updated_at: String?
 }
 
+private struct VoiceoverCountRow: Decodable {
+    let id: Int64
+}
+
 private struct VoiceoverRequestBody: Encodable {
     let discovery_id: Int64
     let voice_model_id: String
@@ -477,6 +499,7 @@ private struct VoiceoverEdgeResponse: Decodable {
     let audioURLExpiresAt: Date?
     let wasRefunded: Bool?
     let wasExisting: Bool?
+    let creditBalance: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -494,6 +517,7 @@ private struct VoiceoverEdgeResponse: Decodable {
         case audioURLExpiresAt = "audio_url_expires_at"
         case wasRefunded = "was_refunded"
         case wasExisting = "was_existing"
+        case creditBalance = "credit_balance"
     }
 }
 
@@ -541,6 +565,10 @@ public struct SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             wasExistingResponse: false,
             wasRefunded: false
         )
+    }
+    
+    public func countUserVoiceovers() async -> Int {
+        0
     }
 }
 #endif

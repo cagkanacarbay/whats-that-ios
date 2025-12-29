@@ -3,8 +3,8 @@ import WhatsThatDomain
 
 public actor UserDefaultsOnboardingRepository: OnboardingRepository {
     private let userDefaults: UserDefaults
-    private let preKey: String
-    private let postKey: String
+    private let keyPrefix: String
+    private var currentUserId: String?
 
     public init(
         suiteName: String? = nil,
@@ -15,9 +15,33 @@ public actor UserDefaultsOnboardingRepository: OnboardingRepository {
         } else {
             self.userDefaults = .standard
         }
-
-        self.preKey = "\(keyPrefix).preCompleted"
-        self.postKey = "\(keyPrefix).postCompleted"
+        self.keyPrefix = keyPrefix
+    }
+    
+    // MARK: - User Binding
+    
+    /// Binds the repository to a specific user. Keys become prefixed with userId.
+    public func bind(to userId: String) {
+        self.currentUserId = userId
+    }
+    
+    /// Unbinds from the current user. Does NOT delete existing data.
+    public func unbind() {
+        self.currentUserId = nil
+    }
+    
+    // MARK: - User-Keyed Storage Keys
+    
+    private var preKey: String {
+        // Pre-onboarding is ALWAYS device-level (once per app install, regardless of user)
+        return "\(keyPrefix).preCompleted"
+    }
+    
+    private var postKey: String {
+        guard let userId = currentUserId else {
+            return "\(keyPrefix).postCompleted"  // Fallback for pre-auth (not user-specific)
+        }
+        return "\(keyPrefix).\(userId).postCompleted"
     }
 
     public func loadFlags() async -> OnboardingFlags {

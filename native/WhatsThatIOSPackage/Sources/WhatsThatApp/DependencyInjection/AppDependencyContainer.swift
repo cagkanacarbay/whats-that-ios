@@ -23,7 +23,7 @@ public struct AppDependencyContainer: Sendable {
     public let discoveryStore: DiscoveryStore
     private let voiceoverRepository: any DiscoveryVoiceoverRepository
     private let voiceInventoryRepository: VoiceInventoryRepository
-    private let voiceoverPreferencesStore: VoiceoverPreferencesStore
+    public let voiceoverPreferencesStore: VoiceoverPreferencesStore
     private let ipopPreferencesStore: IPoPPreferencesStore
     private let creditsRepository: DiscoveryCreditsRepository
     private let creditsStore: any CreditsStore
@@ -322,6 +322,13 @@ public extension AppDependencyContainer {
         }
     }
 
+    #if DEBUG
+    /// Debug-only: Override the local credit cache (does not sync to server).
+    func setCreditBalance(_ credits: Int) async {
+        _ = await creditBalanceStore.set(credits)
+    }
+    #endif
+
     // MARK: - App-wide Location Lifecycle
     @MainActor
     func startAppLocationTracking() async {
@@ -386,6 +393,12 @@ public extension AppDependencyContainer {
         defaults.removeObject(forKey: "audio_guides_queue_store")
         defaults.removeObject(forKey: "voiceover_positions")
         defaults.removeObject(forKey: "voiceover_last_played")
+        
+        // Unbind voiceover preferences store (data is keyed by userId, so no need to delete)
+        await voiceoverPreferencesStore.unbind()
+        
+        // Unbind free credits alert tracker (does NOT delete per-user data)
+        await FreeCreditsAlertTracker.shared.unbind()
     }
 }
 #endif

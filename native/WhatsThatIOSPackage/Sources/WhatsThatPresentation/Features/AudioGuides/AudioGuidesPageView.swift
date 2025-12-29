@@ -25,6 +25,13 @@ struct AudioGuidesPageView: View {
     @State private var heroDragOffset: CGFloat = 0
     @State private var creditBalance: Int?
     
+    // MARK: - Insufficient Credits State
+    @State private var showInsufficientCreditsAlert: Bool = false
+    @State private var presentedCreditsViewModel: CreditsViewModel?
+    @State private var showCreditsSheet: Bool = false
+    @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
+    
     private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "AudioGuidesPageView")
     private let transitionDuration: Double = 0.3
     private let miniPlayerHeight: CGFloat = 76
@@ -32,10 +39,12 @@ struct AudioGuidesPageView: View {
     init(
         mode: Binding<AudioGuidesDisplayMode>,
         audioServices: AudioServicesContainer,
-        onTextSelected: @escaping (DiscoverySummary?) -> Void = { _ in }
+        onTextSelected: @escaping (DiscoverySummary?) -> Void = { _ in },
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self._mode = mode
         self.onTextSelected = onTextSelected
+        self.makeCreditsViewModel = makeCreditsViewModel
         
         // Create ViewModel using passed audio services
         _viewModel = StateObject(wrappedValue: AudioGuidesViewModel(
@@ -67,22 +76,37 @@ struct AudioGuidesPageView: View {
             )
         }
         .alert(
-            "Generate an audio guide?",
+            (creditBalance ?? 1) > 0 ? "Generate an audio guide?" : "You need credits to generate audio guides",
             isPresented: $viewModel.showCreateAlert,
             actions: {
-                Button("Cancel", role: .cancel) {
-                    viewModel.discoveryForAlert = nil
+                if (creditBalance ?? 1) > 0 {
+                    Button("Cancel", role: .cancel) {
+                        viewModel.discoveryForAlert = nil
+                    }
+                    Button("Generate") {
+                        viewModel.confirmCreation()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Not Now", role: .cancel) {
+                        viewModel.discoveryForAlert = nil
+                    }
+                    Button("Get Credits") {
+                        viewModel.discoveryForAlert = nil
+                        presentCreditsSheet()
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                Button("Generate") {
-                    viewModel.confirmCreation()
-                }
-                .keyboardShortcut(.defaultAction)
             },
             message: {
-                if let balance = creditBalance {
-                    Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                if (creditBalance ?? 1) > 0 {
+                    if let balance = creditBalance {
+                        Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                    } else {
+                        Text("This will use 1 credit.")
+                    }
                 } else {
-                    Text("This will use 1 credit.")
+                    Text("Each audio guide costs 1 credit. Purchase more to continue.")
                 }
             }
         )
@@ -93,6 +117,72 @@ struct AudioGuidesPageView: View {
                 creditBalance = await store.getCached()
             }
         }
+        // MARK: - Insufficient Credits Alert
+        .alert(
+            "Out of Credits",
+            isPresented: $showInsufficientCreditsAlert,
+            actions: {
+                Button("Not Now", role: .cancel) { }
+                Button("Get Credits") {
+                    presentCreditsSheet()
+                }
+                .keyboardShortcut(.defaultAction)
+            },
+            message: {
+                Text("Each audio guide costs 1 credit. Purchase more to continue.")
+            }
+        )
+        // MARK: - Credits Sheet
+        .sheet(isPresented: $showCreditsSheet, onDismiss: {
+            presentedCreditsViewModel = nil
+            creditsSheetDetent = .fraction(0.8)
+        }) {
+            NavigationStack {
+                if let creditsViewModel = presentedCreditsViewModel {
+                    CreditsView(viewModel: creditsViewModel)
+                } else {
+                    Text("Credits unavailable")
+                        .font(.headline)
+                        .padding()
+                }
+            }
+            .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
+            .presentationDragIndicator(.visible)
+        }
+        // MARK: - Observe assetStates for insufficient_credits errors
+        .onChange(of: audioServices?.playbackController.assetStates) { _, newStates in
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                guard let states = newStates else { return }
+                for (_, asset) in states {
+                    if asset.errorReason == "insufficient_credits" {
+                        // Update local credit balance to 0 since server says no credits
+                        creditBalance = 0
+                        // Also update the store's cache
+                        if let store = audioServices?.creditBalanceStore {
+                            Task {
+                                await store.set(0)
+                            }
+                        }
+                        showInsufficientCreditsAlert = true
+                        break
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Credits Sheet Helpers
+    
+    private func presentCreditsSheet() {
+        guard let factory = makeCreditsViewModel else {
+            log.warning("makeCreditsViewModel factory not available")
+            return
+        }
+        let creditsViewModel = factory()
+        presentedCreditsViewModel = creditsViewModel
+        creditsSheetDetent = .fraction(0.8)
+        showCreditsSheet = true
     }
 }
 
@@ -127,7 +217,7 @@ private extension AudioGuidesPageView {
                 // Main content area (flex)
                 VStack(spacing: isCompactScreen ? 12 : 20) {
                     Spacer(minLength: isCompactScreen ? 8 : 12)
-                    HeroPlayerView(isCompact: isCompactScreen, onTextSelected: onTextSelected)
+                    HeroPlayerView(isCompact: isCompactScreen, isCheckingVoiceoverStatus: viewModel.isLoadingVoiceoverStatus, hasAnyDiscoveries: !viewModel.localIds.isEmpty, onTextSelected: onTextSelected)
                         .padding(.horizontal, 16)
                     Spacer(minLength: isCompactScreen ? 8 : 12)
                 }
@@ -161,8 +251,16 @@ private extension AudioGuidesPageView {
     private var heroPill: some View {
         HStack(spacing: 0) {
             Button(action: {
-                if let services = audioServices,
-                   let currentId = services.queueStore.current {
+                guard let services = audioServices else { return }
+                
+                // First check if playback controller has a current discovery (most reliable)
+                if let discovery = services.playbackController.currentDiscovery {
+                    onTextSelected(discovery)
+                    return
+                }
+                
+                // Fallback: check queue store's current ID
+                if let currentId = services.queueStore.current {
                     Task {
                         if let discovery = await services.discoveryStore.get(id: currentId) {
                             onTextSelected(discovery)
@@ -472,7 +570,10 @@ struct UpNextListView: View {
         .miniPlayerScrollInset()
         .coordinateSpace(name: "upNextScrollContainer")
         .onPreferenceChange(AudioGuidesScrollOffsetPreferenceKey.self) { currentY in
-            handleScrollChange(currentY: currentY)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                handleScrollChange(currentY: currentY)
+            }
         }
     }
     
@@ -743,9 +844,22 @@ struct DiscoverListView: View {
                                 await viewModel.loadMoreIfNeeded(currentId: discovery.id)
                             }
                         }
-                    }
                 }
             }
+        }
+            
+            if viewModel.isLoadingMore {
+                 HStack(spacing: BrandSpacing.small) {
+                     ProgressView()
+                         .progressViewStyle(.circular)
+                     Text("Loading more")
+                         .font(.system(size: 14, weight: .semibold))
+                 }
+                 .frame(maxWidth: .infinity)
+                 .padding(.vertical, 12)
+                 .listRowSeparator(.hidden)
+                 .listRowBackground(Color.clear)
+             }
             
             Color.clear
                 .frame(height: bottomPadding)
@@ -966,10 +1080,13 @@ struct OverscrollDismissModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onPreferenceChange(AudioGuidesScrollOffsetPreferenceKey.self) { topY in
-                // When the top of the list content is below its normal position (positive offset),
-                // it means the user is pulling down at the top
-                // We need to track the initial position and detect when it moves beyond threshold
-                handleScrollOffsetChange(topY: topY)
+                // Defer to next runloop to prevent "update multiple times per frame" error
+                DispatchQueue.main.async {
+                    // When the top of the list content is below its normal position (positive offset),
+                    // it means the user is pulling down at the top
+                    // We need to track the initial position and detect when it moves beyond threshold
+                    handleScrollOffsetChange(topY: topY)
+                }
             }
     }
     

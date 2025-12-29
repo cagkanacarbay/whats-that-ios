@@ -66,8 +66,11 @@ struct VoiceoverDetailButton: View {
             }
         )
         .onChange(of: asset?.errorReason) { _, newValue in
-            if newValue == "insufficient_credits" {
-                showCreditsAlert = true
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                if newValue == "insufficient_credits" {
+                    showCreditsAlert = true
+                }
             }
         }
     }

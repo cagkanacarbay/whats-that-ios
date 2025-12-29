@@ -10,6 +10,12 @@ struct HeroPlayerView: View {
     /// Whether to use compact sizing (for small screens like iPad compatibility mode)
     var isCompact: Bool = false
     
+    /// Whether the voiceover status is currently being checked for all discoveries
+    var isCheckingVoiceoverStatus: Bool = false
+    
+    /// Whether the user has any discoveries at all
+    var hasAnyDiscoveries: Bool = false
+    
     /// Callback when user taps "Text" to open discovery detail
     var onTextSelected: (DiscoverySummary?) -> Void = { _ in }
     
@@ -21,6 +27,8 @@ struct HeroPlayerView: View {
                 audioServices: services,
                 colorScheme: colorScheme,
                 isCompact: isCompact,
+                hasAnyDiscoveries: hasAnyDiscoveries,
+                isCheckingVoiceoverStatus: isCheckingVoiceoverStatus,
                 onTextSelected: onTextSelected
             )
         }
@@ -34,9 +42,13 @@ private struct HeroPlayerContentView: View {
     let audioServices: AudioServicesContainer
     let colorScheme: ColorScheme
     let isCompact: Bool
+    let hasAnyDiscoveries: Bool
+    let isCheckingVoiceoverStatus: Bool
     var onTextSelected: (DiscoverySummary?) -> Void
     
     @State private var selectedMode = "Audio"
+    @State private var didAttemptAutoLoad = false
+    @State private var generatingDiscovery: DiscoverySummary? = nil
     
     // Responsive sizing for compact screens
     private var ringSize: CGFloat { isCompact ? 200 : 300 }
@@ -95,6 +107,52 @@ private struct HeroPlayerContentView: View {
         controller.position > 3.0 || queueStore.hasPrevious
     }
     
+    /// Returns the first audio-ready discovery ID from assetStates
+    /// Since baseList may be empty on first load, we check assetStates directly
+    private var firstAudioReadyId: Int64? {
+        let assetStates = controller.assetStates
+        
+        log.debug("[firstAudioReadyId] Checking assetStates.count=\(assetStates.count)")
+        
+        // Find all ready discovery IDs
+        let readyIds = assetStates.compactMap { id, asset -> Int64? in
+            if asset.status == .ready {
+                log.debug("[firstAudioReadyId] id=\(id) is READY")
+                return id
+            } else {
+                log.debug("[firstAudioReadyId] id=\(id) status=\(String(describing: asset.status))")
+                return nil
+            }
+        }
+        
+        if let firstId = readyIds.first {
+            log.debug("[firstAudioReadyId] FOUND ready audio guide: id=\(firstId)")
+            return firstId
+        }
+        
+        log.debug("[firstAudioReadyId] No audio-ready discovery found")
+        return nil
+    }
+    
+    /// Whether any audio guides are available
+    private var hasAnyAudioGuides: Bool {
+        firstAudioReadyId != nil
+    }
+    
+    /// Returns the first generating discovery ID (only when no ready audio guides exist)
+    private var firstGeneratingId: Int64? {
+        // Only show generating state when no audio is ready yet
+        guard firstAudioReadyId == nil else { return nil }
+        
+        let assetStates = controller.assetStates
+        return assetStates.compactMap { id, asset -> Int64? in
+            if asset.status == .processing {
+                return id
+            }
+            return nil
+        }.first
+    }
+    
     // MARK: - Body
     
     var body: some View {
@@ -105,16 +163,63 @@ private struct HeroPlayerContentView: View {
             // Main Circular Player
             circularPlayer
             
-            // Meta Info (Title)
+            // Meta Info (Title or Empty State)
             VStack(spacing: isCompact ? 4 : 8) {
-                Text(discovery?.title ?? "Select a guide")
-                    .font(isCompact ? .headline : .title2)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
-                    .lineLimit(isCompact ? 1 : 2)
+                if discovery != nil {
+                    // Show discovery title when loaded
+                    Text(discovery!.title)
+                        .font(isCompact ? .headline : .title2)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                        .lineLimit(isCompact ? 1 : 2)
+                        .padding(.horizontal)
+                        .padding(.top, isCompact ? 2 : 5)
+                } else if isCheckingVoiceoverStatus {
+                    // Still checking for audio guides - show loading message
+                    Text("Loading your audio guides")
+                        .font(isCompact ? .subheadline : .body)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                        .padding(.horizontal)
+                        .padding(.top, isCompact ? 2 : 5)
+                } else if generatingDiscovery != nil {
+                    // Audio guide is being generated
+                    VStack(spacing: 4) {
+                        Text("Generating audio guide...")
+                            .font(isCompact ? .subheadline : .body)
+                            .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                        if let generating = generatingDiscovery {
+                            Text(generating.title)
+                                .font(isCompact ? .caption : .subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
+                                .lineLimit(1)
+                        }
+                    }
                     .padding(.horizontal)
                     .padding(.top, isCompact ? 2 : 5)
+                } else if hasAnyDiscoveries {
+                    // Has discoveries but no audio guides yet
+                    (Text("Create an audio guide from ") + 
+                     Text("My Discoveries").fontWeight(.bold) + 
+                     Text(" to start"))
+                        .font(isCompact ? .subheadline : .body)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                        .padding(.horizontal)
+                        .padding(.top, isCompact ? 2 : 5)
+                } else {
+                    // No discoveries at all - guide user to create their first one
+                    (Text("To listen to audio guides first create a discovery using ") + 
+                     Text("Camera").fontWeight(.bold) + 
+                     Text(" or ") +
+                     Text("Gallery").fontWeight(.bold))
+                        .font(isCompact ? .subheadline : .body)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
+                        .padding(.horizontal)
+                        .padding(.top, isCompact ? 2 : 5)
+                }
             }
             
             // Controls
@@ -122,6 +227,28 @@ private struct HeroPlayerContentView: View {
             
             // Autoplay and Speed Control Row
             bottomControlsRow
+        }
+        .onAppear {
+            attemptAutoLoadFirstGuide()
+            fetchGeneratingDiscoveryIfNeeded()
+        }
+        .onChange(of: controller.assetStates) { _, _ in
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                // When asset states change, check if we can auto-load
+                attemptAutoLoadFirstGuide()
+                fetchGeneratingDiscoveryIfNeeded()
+            }
+        }
+        .onChange(of: isCheckingVoiceoverStatus) { _, isChecking in
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                // When checking completes, try to auto-load
+                if !isChecking {
+                    attemptAutoLoadFirstGuide()
+                    fetchGeneratingDiscoveryIfNeeded()
+                }
+            }
         }
     }
     
@@ -237,20 +364,63 @@ private struct HeroPlayerContentView: View {
                         .frame(width: artworkSize, height: artworkSize)
                         .clipShape(Circle())
                 case .loading, .empty, .failure:
-                    placeholderArtwork
+                    placeholderArtworkContent
                 }
             }
             // Force view recreation when discovery changes to reload image
             .id("hero-artwork-\(discovery.id)-\(imagePath)")
+        } else if let generating = generatingDiscovery,
+                  let imagePath = generating.imagePath,
+                  let imageURL = URL(string: imagePath) {
+            // Audio guide is generating - show faded image with spinner
+            ZStack {
+                DiscoveryCachedImage(
+                    discoveryId: generating.id,
+                    remoteURL: imageURL
+                ) { phase in
+                    switch phase {
+                    case .success(let platformImage):
+                        Image(uiImage: platformImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: artworkSize, height: artworkSize)
+                            .clipShape(Circle())
+                            .opacity(0.4)  // Faded appearance
+                    case .loading, .empty, .failure:
+                        placeholderArtworkContent
+                            .opacity(0.4)
+                    }
+                }
+                .id("hero-generating-\(generating.id)-\(imagePath)")
+                
+                // Spinner overlay for generating state
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.logo))
+                    .scaleEffect(isCompact ? 1.5 : 2.0)
+            }
         } else {
-            placeholderArtwork
+            // No discovery loaded - show placeholder with optional spinner
+            ZStack {
+                placeholderArtworkContent
+                
+                // Show spinner while checking for audio guides
+                if isCheckingVoiceoverStatus {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.logo))
+                        .scaleEffect(isCompact ? 1.5 : 2.0)
+                }
+            }
         }
     }
     
-    private var placeholderArtwork: some View {
+    private var placeholderArtworkContent: some View {
         Circle()
             .fill(Color.gray.opacity(0.3))
             .frame(width: artworkSize, height: artworkSize)
+    }
+    
+    private var placeholderArtwork: some View {
+        placeholderArtworkContent
     }
     
     // MARK: - Playback Controls
@@ -406,6 +576,95 @@ private struct HeroPlayerContentView: View {
         
         // No audio-ready discovery found in baseList
         log.debug("[togglePlayPause] No audio-ready discovery found to play")
+    }
+    
+    /// Attempts to auto-load the first audio guide when the view appears
+    private func attemptAutoLoadFirstGuide() {
+        log.debug("[attemptAutoLoadFirstGuide] Called. discovery=\(discovery?.id ?? -1), didAttemptAutoLoad=\(didAttemptAutoLoad)")
+        log.debug("[attemptAutoLoadFirstGuide] isCheckingVoiceoverStatus=\(isCheckingVoiceoverStatus)")
+        
+        // Don't auto-load if we already have a discovery loaded
+        guard discovery == nil else {
+            log.debug("[attemptAutoLoadFirstGuide] SKIP: discovery already loaded")
+            return
+        }
+        
+        // Don't attempt more than once (after we've successfully loaded one)
+        guard !didAttemptAutoLoad else {
+            log.debug("[attemptAutoLoadFirstGuide] SKIP: already attempted")
+            return
+        }
+        
+        // Check if there's an audio-ready discovery
+        if let firstReadyId = firstAudioReadyId {
+            log.debug("[attemptAutoLoadFirstGuide] Found firstReadyId=\(firstReadyId), attempting to load")
+            // Auto-load the first available audio guide
+            if let discovery = controller.getDiscovery(id: firstReadyId) {
+                log.debug("[attemptAutoLoadFirstGuide] Got discovery from provider: '\(discovery.title)'")
+                didAttemptAutoLoad = true  // Only mark as attempted when we actually load
+                // Just set it as current without playing - user can press play
+                controller.setCurrentDiscovery(discovery)
+            } else {
+                log.debug("[attemptAutoLoadFirstGuide] Discovery not in provider, fetching from store...")
+                Task {
+                    if let discovery = await audioServices.discoveryStore.get(id: firstReadyId) {
+                        log.debug("[attemptAutoLoadFirstGuide] Got discovery from store: '\(discovery.title)'")
+                        await MainActor.run {
+                            didAttemptAutoLoad = true  // Only mark as attempted when we actually load
+                        }
+                        controller.setCurrentDiscovery(discovery)
+                    } else {
+                        log.debug("[attemptAutoLoadFirstGuide] FAILED: Could not find discovery in store")
+                    }
+                }
+            }
+        } else {
+            log.debug("[attemptAutoLoadFirstGuide] No firstReadyId found")
+        }
+    }
+    
+    /// Fetches the generating discovery info when we detect one is being created
+    private func fetchGeneratingDiscoveryIfNeeded() {
+        // Clear if we now have a ready audio guide (generating is complete)
+        if firstAudioReadyId != nil {
+            if generatingDiscovery != nil {
+                generatingDiscovery = nil
+                log.debug("[fetchGeneratingDiscovery] Cleared generating discovery - audio is now ready")
+            }
+            return
+        }
+        
+        // Check if there's a generating discovery
+        guard let generatingId = firstGeneratingId else {
+            if generatingDiscovery != nil {
+                generatingDiscovery = nil
+                log.debug("[fetchGeneratingDiscovery] Cleared generating discovery - no longer generating")
+            }
+            return
+        }
+        
+        // Don't re-fetch if already tracking this one
+        if generatingDiscovery?.id == generatingId {
+            return
+        }
+        
+        log.debug("[fetchGeneratingDiscovery] Found generating id=\(generatingId), fetching discovery info")
+        
+        // Try to get from controller's cache first
+        if let discovery = controller.getDiscovery(id: generatingId) {
+            generatingDiscovery = discovery
+            log.debug("[fetchGeneratingDiscovery] Got from controller: '\(discovery.title)'")
+        } else {
+            // Fetch from discovery store
+            Task {
+                if let discovery = await audioServices.discoveryStore.get(id: generatingId) {
+                    await MainActor.run {
+                        generatingDiscovery = discovery
+                    }
+                    log.debug("[fetchGeneratingDiscovery] Got from store: '\(discovery.title)'")
+                }
+            }
+        }
     }
     
     private func playNext() {

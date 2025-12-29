@@ -22,6 +22,7 @@ public struct DiscoveryVoiceoverAsset: Equatable, Sendable {
     public let errorReason: String?
     public let wasExistingResponse: Bool
     public let wasRefunded: Bool
+    public let creditBalance: Int?
     public var modelIdentifier: String? { voiceModelId }
 
     public init(
@@ -37,7 +38,8 @@ public struct DiscoveryVoiceoverAsset: Equatable, Sendable {
         updatedAt: Date?,
         errorReason: String?,
         wasExistingResponse: Bool,
-        wasRefunded: Bool
+        wasRefunded: Bool,
+        creditBalance: Int? = nil
     ) {
         self.discoveryId = discoveryId
         self.status = status
@@ -52,6 +54,7 @@ public struct DiscoveryVoiceoverAsset: Equatable, Sendable {
         self.errorReason = errorReason
         self.wasExistingResponse = wasExistingResponse
         self.wasRefunded = wasRefunded
+        self.creditBalance = creditBalance
     }
 }
 
@@ -60,6 +63,10 @@ public protocol DiscoveryVoiceoverRepository: Sendable {
     func requestVoiceover(for discoveryId: Int64,
                          voiceModelId: String,
                          ttsModel: String) async -> DiscoveryVoiceoverAsset
+    
+    /// Counts how many voiceovers the current user has (for intro tracker sync).
+    /// Returns 0 if count cannot be determined.
+    func countUserVoiceovers() async -> Int
 }
 
 public struct VoiceModelOption: Equatable, Sendable {

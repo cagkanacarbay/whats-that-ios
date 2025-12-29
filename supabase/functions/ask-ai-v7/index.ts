@@ -388,7 +388,7 @@ serve(async (req: Request) => {
 
       sendEvent('status', { stage: 'credits', message: 'Consuming credits…' });
 
-      const { error: consumeError } = await supabaseAdmin.rpc('consume_credit_for_discovery', {
+      const { data: consumeResult, error: consumeError } = await supabaseAdmin.rpc('consume_credit_for_discovery', {
         p_user_id: userId,
         p_credits_to_consume: CREDITS_PER_DISCOVERY,
       });
@@ -403,6 +403,9 @@ serve(async (req: Request) => {
       }
       creditsConsumed = true;
       handlerLogger.info('Credit consumed for discovery', { userIdMasked: maskId(user.id) });
+
+      // Use the balance returned directly from the RPC (no extra fetch needed)
+      const creditBalance: number | null = typeof consumeResult === 'number' ? consumeResult : null;
 
       sendEvent('status', { stage: 'preprocess', message: 'Preparing image…' });
       const uint8Array = new Uint8Array(atob(base64Image).split('').map((char) => char.charCodeAt(0)));
@@ -1267,11 +1270,13 @@ serve(async (req: Request) => {
         discoveryId,
         systemPromptVersion: systemPromptMetadata.version,
         userPromptVersion: userPromptMetadata.version,
+        creditBalance,
       });
       handlerLogger.info('Completion event sent', {
         discoveryId,
         systemPromptVersion: systemPromptMetadata.version,
         userPromptVersion: userPromptMetadata.version,
+        creditBalance,
       });
       close();
     } catch (error: any) {

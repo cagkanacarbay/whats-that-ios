@@ -348,7 +348,8 @@ public final class SupabaseDiscoveryAnalysisClient: DiscoveryAnalysisClient {
                let identifier = parseIdentifier(from: info["discoveryId"]) {
                 let systemVersion = info["systemPromptVersion"] as? String
                 let userVersion = info["userPromptVersion"] as? String
-                return .complete(discoveryId: identifier, systemPromptVersion: systemVersion, userPromptVersion: userVersion)
+                let creditBalance = parseIdentifier(from: info["creditBalance"]).map { Int($0) }
+                return .complete(discoveryId: identifier, systemPromptVersion: systemVersion, userPromptVersion: userVersion, creditBalance: creditBalance)
             }
         case "error":
             if let dict = parseDictionary(from: dataString) {

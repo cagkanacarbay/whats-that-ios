@@ -72,7 +72,10 @@ struct ShimmerTextView: View {
             triggerShimmerIfNeeded(for: text)
         }
         .onChange(of: text) { _, newValue in
-            triggerShimmerIfNeeded(for: newValue)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                triggerShimmerIfNeeded(for: newValue)
+            }
         }
         .onDisappear {
             stopShimmer()

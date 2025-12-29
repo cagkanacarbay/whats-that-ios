@@ -60,6 +60,7 @@ public final class AudioGuidesViewModel: ObservableObject {
     
     @Published public private(set) var isLoadingVoiceoverStatus: Bool = false
     @Published public private(set) var localIds: [Int64] = []
+    @Published public private(set) var isLoadingMore: Bool = false
     @Published public private(set) var localDiscoveryCache: [Int64: DiscoverySummary] = [:]
     
     // MARK: - Private State
@@ -199,19 +200,23 @@ public final class AudioGuidesViewModel: ObservableObject {
         if queued.isEmpty {
             return nextBaseItems
         }
-        return queued + nextBaseItems
+        // Deduplicate: exclude items from nextBaseItems that are already in queued
+        let queuedSet = Set(queued)
+        let filteredBaseItems = nextBaseItems.filter { !queuedSet.contains($0) }
+        return queued + filteredBaseItems
     }
     
+    // MARK: - History Items
+    
+    /// History items with current limit, filtered to only show items with audio guides
     /// History items with current limit, filtered to only show items with audio guides
     public var historyItems: [Int64] {
-        let assetStates = voiceoverController.assetStates
-        return queueStore.history
-            .filter { id in
-                guard let asset = assetStates[id] else { return false }
-                return asset.status == .ready
-            }
-            .prefix(historyLimit)
-            .map { $0 }
+        let history = queueStore.history
+        let candidates = Array(history.prefix(historyLimit))
+        
+        // Deduplicate while preserving order
+        var seen = Set<Int64>()
+        return candidates.filter { seen.insert($0).inserted }
     }
     
     /// Returns discovery IDs that have ready audio guides
@@ -242,6 +247,9 @@ public final class AudioGuidesViewModel: ObservableObject {
             } catch {
                 // Silent failure - will show empty state
             }
+        } else {
+            // Cache exists - set cursor to last item for proper pagination
+            cursor = cachedDiscoveries.last?.id
         }
         
         localIds = cachedDiscoveries.map(\.id)
@@ -267,12 +275,15 @@ public final class AudioGuidesViewModel: ObservableObject {
     
     /// Load more discoveries if needed (pagination)
     public func loadMoreIfNeeded(currentId: Int64?) async {
-        guard hasMore else { return }
+        guard hasMore, !isLoadingMore else { return }
         guard let currentId, let index = localIds.firstIndex(of: currentId) else { return }
         
         // Trigger load when near end (4 items from end)
         let threshold = max(0, localIds.count - 4)
         guard index >= threshold else { return }
+        
+        isLoadingMore = true
+        defer { isLoadingMore = false }
         
         do {
             let newItems = try await discoveryStore.loadMore(limit: 10, before: cursor)
@@ -576,6 +587,32 @@ public final class AudioGuidesViewModel: ObservableObject {
                 Task {
                     await self?.handleExpansionNeeded(direction)
                 }
+            }
+            .store(in: &cancellables)
+        
+        // MARK: - Discovery Store Updates
+        
+        // Subscribe to newly upserted discoveries (e.g., after creation)
+        // This ensures My Discoveries list updates when a new discovery is created
+        discoveryStore.discoveryUpserted
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] discovery in
+                guard let self else { return }
+                
+                // Add to local cache if not already present
+                if !self.localIds.contains(discovery.id) {
+                    self.localIds.insert(discovery.id, at: 0)
+                }
+                self.localDiscoveryCache[discovery.id] = discovery
+                
+                // Re-sort by capturedAt descending
+                self.localIds.sort { id1, id2 in
+                    let date1 = self.localDiscoveryCache[id1]?.capturedAt ?? .distantPast
+                    let date2 = self.localDiscoveryCache[id2]?.capturedAt ?? .distantPast
+                    return date1 > date2
+                }
+                
+                log.debug("[discoveryUpserted] Added discovery id=\(discovery.id) to local cache")
             }
             .store(in: &cancellables)
     }

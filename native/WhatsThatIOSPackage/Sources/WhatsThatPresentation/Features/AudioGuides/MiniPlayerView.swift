@@ -102,13 +102,19 @@ private struct MiniPlayerContentView: View {
             onHeightChange(height)
         }
         .onChange(of: controller.currentDiscovery?.id) { oldId, newId in
-            log.debug("[MiniPlayer] Discovery changed: \(oldId ?? -1) → \(newId ?? -1)")
-            if let discovery = discovery {
-                log.debug("[MiniPlayer] New discovery: '\(discovery.title)', imagePath: \(discovery.imagePath ?? "nil")")
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                log.debug("[MiniPlayer] Discovery changed: \(oldId ?? -1) → \(newId ?? -1)")
+                if let discovery = discovery {
+                    log.debug("[MiniPlayer] New discovery: '\(discovery.title)', imagePath: \(discovery.imagePath ?? "nil")")
+                }
             }
         }
         .onChange(of: controller.playbackState) { oldState, newState in
-            log.debug("[MiniPlayer] Playback state: \(String(describing: oldState)) → \(String(describing: newState))")
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                log.debug("[MiniPlayer] Playback state: \(String(describing: oldState)) → \(String(describing: newState))")
+            }
         }
         .onAppear {
             log.debug("[MiniPlayer] onAppear - discovery: \(discovery?.title ?? "nil"), state: \(String(describing: controller.playbackState))")

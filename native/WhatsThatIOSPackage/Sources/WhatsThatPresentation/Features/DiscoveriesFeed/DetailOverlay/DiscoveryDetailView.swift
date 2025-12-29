@@ -447,14 +447,17 @@ private struct DiscoveryDetailContentView: View {
         // Track scroll position via geometry to compute a stable
         // distance-from-top value for gesture gating.
         .onPreferenceChange(HeroScrollOffsetPreferenceKey.self) { value in
-            if baselineOffset == nil {
-                baselineOffset = value
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                if baselineOffset == nil {
+                    baselineOffset = value
+                }
+                let adjusted = value - (baselineOffset ?? 0)
+                scrollOffset = adjusted
+                // Positive distance from top (0 at top, grows as you scroll down)
+                let distanceFromTop = max(-adjusted, 0)
+                updateGatedDistanceFromTop(distance: distanceFromTop)
             }
-            let adjusted = value - (baselineOffset ?? 0)
-            scrollOffset = adjusted
-            // Positive distance from top (0 at top, grows as you scroll down)
-            let distanceFromTop = max(-adjusted, 0)
-            updateGatedDistanceFromTop(distance: distanceFromTop)
         }
         .onAppear {
             voiceoverController.prefetch(for: [discovery.id])

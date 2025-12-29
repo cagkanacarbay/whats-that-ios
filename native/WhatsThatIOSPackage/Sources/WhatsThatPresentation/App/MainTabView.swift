@@ -108,7 +108,8 @@ struct MainTabView: View {
                     audioServices: audioServices,
                     onTextSelected: { discovery in
                         handleAudioGuideTextSelected(discovery)
-                    }
+                    },
+                    makeCreditsViewModel: makeCreditsViewModel
                 )
                 .tag(Tab.audioGuides)
                 .tabItem {
@@ -201,13 +202,22 @@ struct MainTabView: View {
             summaryFallbackTask?.cancel()
         }
         .onChange(of: selectedTab) { _, newValue in
-            handleTabChange(to: newValue)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                handleTabChange(to: newValue)
+            }
         }
         .onChange(of: cameraViewModel.flowState.phase) { _, newPhase in
-            updateOverlayVisibility(for: .camera, phase: newPhase)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                updateOverlayVisibility(for: .camera, phase: newPhase)
+            }
         }
         .onChange(of: uploadViewModel.flowState.phase) { _, newPhase in
-            updateOverlayVisibility(for: .upload, phase: newPhase)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                updateOverlayVisibility(for: .upload, phase: newPhase)
+            }
         }
     }
 

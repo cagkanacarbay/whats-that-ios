@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import OSLog
 import WhatsThatShared
 
@@ -13,6 +14,18 @@ public actor DiscoveryStore {
     private var cache: [Int64: DiscoverySummary] = [:]
     private var orderedIds: [Int64] = []
     private let repository: DiscoveryRepository
+    
+    // MARK: - Combine Publishers
+    
+    /// Publisher for newly upserted discoveries (e.g., after creation).
+    /// Allows observers like AudioGuidesViewModel to react to new discoveries.
+    /// Marked nonisolated(unsafe) because PassthroughSubject is inherently thread-safe.
+    private nonisolated(unsafe) let _discoveryUpserted = PassthroughSubject<DiscoverySummary, Never>()
+    
+    /// Nonisolated accessor for subscribing to upsert events.
+    public nonisolated var discoveryUpserted: AnyPublisher<DiscoverySummary, Never> {
+        _discoveryUpserted.eraseToAnyPublisher()
+    }
     
     // MARK: - Debug Flags
     
@@ -138,6 +151,9 @@ public actor DiscoveryStore {
         orderedIds.sort {
             (cache[$0]?.capturedAt ?? .distantPast) > (cache[$1]?.capturedAt ?? .distantPast)
         }
+        
+        // Notify subscribers of the upsert (for AudioGuidesViewModel sync)
+        _discoveryUpserted.send(summary)
     }
     
     /// Removes a discovery from cache.

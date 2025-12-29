@@ -34,6 +34,10 @@ public struct RootContentView: View {
     private let saveIPoPPreferences: (IPoPPreferences) async -> Void
     private let resetIPoPPreferences: () async -> Void
     private let clearAllUserData: () async -> Void
+    private let voiceoverPreferencesStore: VoiceoverPreferencesStore
+    #if DEBUG
+    private let setCreditBalance: (Int) async -> Void
+    #endif
     @State private var processedPasswordResetTokens: Set<String> = []
     @State private var processingPasswordResetToken: String?
 
@@ -58,8 +62,13 @@ public struct RootContentView: View {
         loadIPoPPreferences: @escaping () async -> IPoPPreferences?,
         saveIPoPPreferences: @escaping (IPoPPreferences) async -> Void,
         resetIPoPPreferences: @escaping () async -> Void = {},
-        clearAllUserData: @escaping () async -> Void
+        clearAllUserData: @escaping () async -> Void,
+        voiceoverPreferencesStore: VoiceoverPreferencesStore,
+        setCreditBalance: @escaping (Int) async -> Void = { _ in }
     ) {
+        #if DEBUG
+        self.setCreditBalance = setCreditBalance
+        #endif
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
         self.makeAudioServicesContainer = makeAudioServicesContainer
@@ -78,6 +87,7 @@ public struct RootContentView: View {
         self.saveIPoPPreferences = saveIPoPPreferences
         self.resetIPoPPreferences = resetIPoPPreferences
         self.clearAllUserData = clearAllUserData
+        self.voiceoverPreferencesStore = voiceoverPreferencesStore
         
         // Compose clearAllUserData with observer reset to clear all UI state on sign-out
         let observerToReset = storeObserver
@@ -93,7 +103,8 @@ public struct RootContentView: View {
                 authUseCase: authUseCase,
                 onboardingUseCase: onboardingUseCase,
                 flowResolver: flowResolver,
-                clearAllUserData: composedClearAll
+                clearAllUserData: composedClearAll,
+                voiceoverPreferencesStore: voiceoverPreferencesStore
             )
         )
     }
@@ -175,7 +186,8 @@ public struct RootContentView: View {
                 fetchVoiceOptions: fetchVoiceOptions,
                 fetchVoiceSampleURL: fetchVoiceSampleURL,
                 loadIPoPPreferences: loadIPoPPreferences,
-                saveIPoPPreferences: saveIPoPPreferences
+                saveIPoPPreferences: saveIPoPPreferences,
+                onSetCreditBalance: setCreditBalance
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }

@@ -12,6 +12,7 @@ public final class AppRootViewModel: ObservableObject {
     private let onboardingUseCase: OnboardingUseCase
     private let flowResolver: AppFlowResolver
     private let clearAllUserData: () async -> Void
+    private let voiceoverPreferencesStore: VoiceoverPreferencesStore
 
     private var currentFlags = OnboardingFlags()
     private var latestSession: AuthSession = .signedOut
@@ -21,12 +22,14 @@ public final class AppRootViewModel: ObservableObject {
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver,
-        clearAllUserData: @escaping () async -> Void
+        clearAllUserData: @escaping () async -> Void,
+        voiceoverPreferencesStore: VoiceoverPreferencesStore
     ) {
         self.authUseCase = authUseCase
         self.onboardingUseCase = onboardingUseCase
         self.flowResolver = flowResolver
         self.clearAllUserData = clearAllUserData
+        self.voiceoverPreferencesStore = voiceoverPreferencesStore
 
         Task(priority: .utility) {
             await DiscoveryAssetCache.shared.purgeExpiredEntries()
@@ -218,6 +221,32 @@ public final class AppRootViewModel: ObservableObject {
 
     private func updateFlow(session: AuthSession) {
         latestSession = session
-        flowState = flowResolver.resolve(session: session, flags: currentFlags)
+        
+        // For signed-in users, we need to bind stores BEFORE resolving flow state
+        // because flow resolution depends on user-specific flags
+        if let user = session.user {
+            Task {
+                let userId = user.id.uuidString
+                
+                // 1. Bind all user-keyed stores first
+                await onboardingUseCase.bind(to: userId)
+                await voiceoverPreferencesStore.bind(to: userId)
+                
+                // 2. Bind the free credits alert tracker
+                await FreeCreditsAlertTracker.shared.bind(to: userId)
+                
+                // 3. Now load flags with correct user binding
+                let flags = await onboardingUseCase.flags()
+                
+                // 4. Resolve flow state with correct user flags
+                await MainActor.run {
+                    self.currentFlags = flags
+                    self.flowState = self.flowResolver.resolve(session: session, flags: flags)
+                }
+            }
+        } else {
+            // Not signed in - resolve immediately with current flags
+            flowState = flowResolver.resolve(session: session, flags: currentFlags)
+        }
     }
 }

@@ -59,12 +59,15 @@ struct DiscoveryDetailOverlayView: View {
             }
         }
         .onChange(of: scrollOffset) { _, newValue in
-            // Fallback propagation from the binding itself, in case the inner
-            // content's callback path does not fire. Convert the content's
-            // negative-downwards offset to positive distance-from-top.
-            let distanceFromTop = max(-newValue, 0)
-            // Safe to call synchronously; coordinator defers any published changes.
-            onScrollContentOffsetChanged(distanceFromTop)
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                // Fallback propagation from the binding itself, in case the inner
+                // content's callback path does not fire. Convert the content's
+                // negative-downwards offset to positive distance-from-top.
+                let distanceFromTop = max(-newValue, 0)
+                // Safe to call synchronously; coordinator defers any published changes.
+                onScrollContentOffsetChanged(distanceFromTop)
+            }
         }
     }
 
@@ -99,7 +102,7 @@ struct DiscoveryDetailOverlayView: View {
                     if snapshot.isClosing { return 0 }
                     return overlayOpacity(for: snapshot.progress)
                 }()
-                Color.black
+                backgroundColor
                     .opacity(backdropOpacity)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -293,16 +296,22 @@ struct DiscoveryDetailOverlayView: View {
         }
         // Global mini player remains visible in MainTabView - text will scroll behind it
         .onChange(of: snapshot.isClosing) { _, closing in
-            if closing {
-                dismissFullscreen()
-            }
-            guard closing, scrollOffset != 0 else { return }
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.2)) {
-                scrollOffset = 0
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                if closing {
+                    dismissFullscreen()
+                }
+                guard closing, scrollOffset != 0 else { return }
+                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.2)) {
+                    scrollOffset = 0
+                }
             }
         }
         .onChange(of: snapshot.context?.id) { _, _ in
-            dismissFullscreen()
+            // Defer to next runloop to prevent "update multiple times per frame" error
+            DispatchQueue.main.async {
+                dismissFullscreen()
+            }
         }
         .sheet(isPresented: $isImageSheetPresented, onDismiss: {
             fullscreenContext = nil

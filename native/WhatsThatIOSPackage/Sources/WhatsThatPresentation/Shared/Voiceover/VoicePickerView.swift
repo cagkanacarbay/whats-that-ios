@@ -65,8 +65,13 @@ public struct VoicePickerView: View {
                             .foregroundStyle(palette.textPrimary)
                     }
                     .toggleStyle(SwitchToggleStyle(tint: palette.primaryAction))
-
-                    if showCreditNote {
+                    .disabled(viewModel.isAutoToggleLocked)
+                    
+                    if viewModel.isAutoToggleLocked {
+                        Text("Enabled for your free intro voiceovers. You can disable this after your introduction credits are exhausted.")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(palette.textSecondary)
+                    } else if showCreditNote {
                         Text("Each audio guide uses one credit to generate. Oh, but it's so worth it.")
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(palette.textSecondary)

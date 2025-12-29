@@ -27,6 +27,7 @@ public class VoicePickerViewModel: ObservableObject {
     @Published public var selectedVoiceId: String?
     @Published public var isAutoEnabled: Bool = true
     @Published public var isPlaying: Bool = false
+    @Published public private(set) var isAutoToggleLocked: Bool = false
     @Published public private(set) var sampleStates: [String: VoiceSampleState] = [:]
     @Published public private(set) var playingVoiceId: String?
     
@@ -111,6 +112,10 @@ public class VoicePickerViewModel: ObservableObject {
     }
 
     public func setAutoEnabled(_ enabled: Bool) {
+        // Prevent disabling while intro voiceovers are still active
+        if !enabled && isAutoToggleLocked {
+            return
+        }
         guard enabled != isAutoEnabled else { return }
         isAutoEnabled = enabled
         Task {
@@ -158,6 +163,9 @@ public class VoicePickerViewModel: ObservableObject {
         
         let prefs = await loadVoiceoverPreferences()
         isAutoEnabled = prefs.autoEnabled
+        
+        // Check if toggle should be locked during intro period (until credits exhausted alert shown)
+        isAutoToggleLocked = await FreeCreditsAlertTracker.shared.isInIntroMode
         
         if !prefs.voiceModelId.isEmpty, voices.contains(where: { $0.voiceModelId == prefs.voiceModelId }) {
             selectedVoiceId = prefs.voiceModelId

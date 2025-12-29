@@ -10,7 +10,7 @@ struct DiscoveryAudioControls: View {
     
     @Environment(\.colorScheme) private var colorScheme
     
-    private let voiceoverController: VoiceoverPlaybackController
+    @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     private let queueStore: AudioGuidesQueueStore
     private let progressStore: VoiceoverProgressStore
     private let creditBalanceStore: CreditBalanceStore?
@@ -54,21 +54,30 @@ struct DiscoveryAudioControls: View {
     @State private var showGenerateConfirmation = false
     @State private var creditBalance: Int?
     
+    // MARK: - Credits Sheet State
+    @State private var showCreditsSheet: Bool = false
+    @State private var showInsufficientCreditsAlert: Bool = false
+    @State private var presentedCreditsViewModel: CreditsViewModel?
+    @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
+    
     init(
         discovery: DiscoverySummary,
         voiceoverStatus: AudioGuideRowStatus,
         isPlaying: Bool,
         audioServices: AudioServicesContainer,
-        scrollOffset: Binding<CGFloat>
+        scrollOffset: Binding<CGFloat>,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self.discovery = discovery
         self.voiceoverStatus = voiceoverStatus
         self.isPlaying = isPlaying
         self._scrollOffset = scrollOffset
-        self.voiceoverController = audioServices.playbackController
+        self._voiceoverController = ObservedObject(wrappedValue: audioServices.playbackController)
         self.queueStore = audioServices.queueStore
         self.progressStore = audioServices.progressStore
         self.creditBalanceStore = audioServices.creditBalanceStore
+        self.makeCreditsViewModel = makeCreditsViewModel
     }
     
     private var palette: BrandTheme.Palette {
@@ -137,20 +146,32 @@ struct DiscoveryAudioControls: View {
             Spacer()
         }
         .alert(
-            "Generate an audio guide?",
+            (creditBalance ?? 1) > 0 ? "Generate an audio guide?" : "You need credits to generate audio guides",
             isPresented: $showGenerateConfirmation,
             actions: {
-                Button("Cancel", role: .cancel) { }
-                Button("Generate") {
-                    voiceoverController.requestVoiceover(for: discovery)
+                if (creditBalance ?? 1) > 0 {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Generate") {
+                        voiceoverController.requestVoiceover(for: discovery)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Not Now", role: .cancel) { }
+                    Button("Get Credits") {
+                        presentCreditsSheet()
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                .keyboardShortcut(.defaultAction)
             },
             message: {
-                if let balance = creditBalance {
-                    Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                if (creditBalance ?? 1) > 0 {
+                    if let balance = creditBalance {
+                        Text("This will use 1 credit. You have \(String(balance)) credits remaining.")
+                    } else {
+                        Text("This will use 1 credit.")
+                    }
                 } else {
-                    Text("This will use 1 credit.")
+                    Text("Each audio guide costs 1 credit. Purchase more to continue.")
                 }
             }
         )
@@ -159,6 +180,64 @@ struct DiscoveryAudioControls: View {
                 creditBalance = await store.getCached()
             }
         }
+        // MARK: - Insufficient Credits Alert (shown when server returns insufficient_credits)
+        .alert(
+            "Out of Credits",
+            isPresented: $showInsufficientCreditsAlert,
+            actions: {
+                Button("Not Now", role: .cancel) { }
+                Button("Get Credits") {
+                    presentCreditsSheet()
+                }
+                .keyboardShortcut(.defaultAction)
+            },
+            message: {
+                Text("Each audio guide costs 1 credit. Purchase more to continue.")
+            }
+        )
+        // MARK: - Credits Sheet
+        .sheet(isPresented: $showCreditsSheet, onDismiss: {
+            presentedCreditsViewModel = nil
+            creditsSheetDetent = .fraction(0.8)
+        }) {
+            NavigationStack {
+                if let creditsViewModel = presentedCreditsViewModel {
+                    CreditsView(viewModel: creditsViewModel)
+                } else {
+                    Text("Credits unavailable")
+                        .font(.headline)
+                        .padding()
+                }
+            }
+            .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
+            .presentationDragIndicator(.visible)
+        }
+        // MARK: - Observe assetStates for insufficient_credits errors
+        .onChange(of: voiceoverController.assetStates) { _, newStates in
+            DispatchQueue.main.async {
+                guard let asset = newStates[discovery.id],
+                      asset.errorReason == "insufficient_credits" else { return }
+                // Update local credit balance to 0 since server says no credits
+                creditBalance = 0
+                // Also update the store's cache
+                if let store = creditBalanceStore {
+                    Task {
+                        await store.set(0)
+                    }
+                }
+                showInsufficientCreditsAlert = true
+            }
+        }
+    }
+    
+    // MARK: - Credits Sheet Helpers
+    
+    private func presentCreditsSheet() {
+        guard let factory = makeCreditsViewModel else { return }
+        let creditsViewModel = factory()
+        presentedCreditsViewModel = creditsViewModel
+        creditsSheetDetent = .fraction(0.8)
+        showCreditsSheet = true
     }
     
     // Inline queue action button for the unified bar

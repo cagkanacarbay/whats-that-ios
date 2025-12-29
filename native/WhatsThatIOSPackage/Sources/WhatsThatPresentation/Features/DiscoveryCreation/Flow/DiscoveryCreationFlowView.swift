@@ -9,6 +9,8 @@ struct DiscoveryCreationFlowView: View {
         case locationPermissions
         case outOfCredits
         case pollingFailed
+        case freeCreditsExhaustedAtAudioGeneration
+        case freeCreditsExhaustedAtConfirm
 
         var id: String {
             switch self {
@@ -20,6 +22,10 @@ struct DiscoveryCreationFlowView: View {
                 return "outOfCredits"
             case .pollingFailed:
                 return "pollingFailed"
+            case .freeCreditsExhaustedAtAudioGeneration:
+                return "freeCreditsExhaustedAtAudioGeneration"
+            case .freeCreditsExhaustedAtConfirm:
+                return "freeCreditsExhaustedAtConfirm"
             }
         }
     }
@@ -102,6 +108,18 @@ struct DiscoveryCreationFlowView: View {
                     viewModel.showPollingFailedAlert = false
                 }
             }
+            .onChange(of: viewModel.showFreeCreditsExhaustedAtAudioGeneration) { _, showAlert in
+                if showAlert {
+                    activeAlert = .freeCreditsExhaustedAtAudioGeneration
+                    viewModel.showFreeCreditsExhaustedAtAudioGeneration = false
+                }
+            }
+            .onChange(of: viewModel.showFreeCreditsExhaustedAtConfirm) { _, showAlert in
+                if showAlert {
+                    activeAlert = .freeCreditsExhaustedAtConfirm
+                    viewModel.showFreeCreditsExhaustedAtConfirm = false
+                }
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     viewModel.refreshLocationPermissionOnForeground()
@@ -116,7 +134,8 @@ struct DiscoveryCreationFlowView: View {
                 switch sheet {
                 case .credits:
                     NavigationStack {
-                        if let creditsViewModel = ensureCreditsViewModel() {
+                        // Use presentedCreditsViewModel directly - it's set before activeSheet
+                        if let creditsViewModel = presentedCreditsViewModel {
                             CreditsView(viewModel: creditsViewModel)
                         } else {
                             Text("Credits unavailable")
@@ -268,6 +287,24 @@ struct DiscoveryCreationFlowView: View {
                 secondaryButton: .cancel(Text("Cancel"), action: {
                     viewModel.cancelFlow()
                 })
+            )
+        case .freeCreditsExhaustedAtAudioGeneration:
+            return Alert(
+                title: Text("So Much More to Discover"),
+                message: Text("Your free credits are used up. To listen to this discovery as an audio guide and make new discoveries, add credits."),
+                primaryButton: .default(Text("Get Credits"), action: {
+                    presentCreditsSheet()
+                }),
+                secondaryButton: .cancel(Text("Not Now"))
+            )
+        case .freeCreditsExhaustedAtConfirm:
+            return Alert(
+                title: Text("So Much More to Discover"),
+                message: Text("Your free credits are used up. To generate new discoveries and audio guides, add credits."),
+                primaryButton: .default(Text("Get Credits"), action: {
+                    presentCreditsSheet()
+                }),
+                secondaryButton: .cancel(Text("Not Now"))
             )
         }
     }

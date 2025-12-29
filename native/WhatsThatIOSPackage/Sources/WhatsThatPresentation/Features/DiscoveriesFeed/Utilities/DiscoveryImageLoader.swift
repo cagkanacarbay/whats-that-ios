@@ -151,8 +151,11 @@ public struct DiscoveryCachedImage<Content: View>: View {
                 loader.loadIfNeeded()
             }
             .onChange(of: remoteURL) { _, newValue in
-                loader.updateRemoteURL(newValue)
-                loader.loadIfNeeded()
+                // Defer to next runloop to prevent "update multiple times per frame" error
+                DispatchQueue.main.async {
+                    loader.updateRemoteURL(newValue)
+                    loader.loadIfNeeded()
+                }
             }
     }
 

@@ -131,6 +131,12 @@ public struct AppRootView: View {
             resetIPoPPreferences: resetIPoPPreferences,
             clearAllUserData: {
                 await container.clearAllUserData()
+            },
+            voiceoverPreferencesStore: container.voiceoverPreferencesStore,
+            setCreditBalance: { credits in
+                #if DEBUG
+                await container.setCreditBalance(credits)
+                #endif
             }
         )
         .task {

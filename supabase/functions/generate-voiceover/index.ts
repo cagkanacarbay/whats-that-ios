@@ -183,6 +183,7 @@ serve(async req => {
     if (startResult.error) {
       const message = startResult.error?.message ?? 'start_voiceover_request failed';
       if (message.includes('insufficient_credits')) {
+        // For insufficient credits, we still need to fetch balance since the RPC threw an error
         const balance = await fetchCreditBalance(supabaseAdmin, userId, logger);
         return jsonResponse(
           baseHeaders,
@@ -197,18 +198,21 @@ serve(async req => {
       return jsonResponse(baseHeaders, { error: 'server_error', message: 'Unable to start voiceover.' }, 500);
     }
 
-    let row = (startResult.data as VoiceoverRow) ?? null;
-    if (!row) {
+    // Extract from composite type: { voiceover, credit_balance, was_existing }
+    const resultData = startResult.data as { voiceover: VoiceoverRow; credit_balance: number | null; was_existing: boolean } | null;
+    if (!resultData || !resultData.voiceover) {
       logger.error('start_voiceover_request returned no row');
       return jsonResponse(baseHeaders, { error: 'server_error', message: 'Unexpected response.' }, 500);
     }
 
+    let row = resultData.voiceover;
     const now = Date.now();
     const updatedAtMs = row.updated_at ? Date.parse(row.updated_at) : 0;
     const isFreshInsert = row.status === 'processing' &&
       Math.abs(now - (row.requested_at ? Date.parse(row.requested_at) : now)) < 5_000;
-    let wasExistingResponse = !isFreshInsert;
-    let creditBalance: number | null = null;
+    let wasExistingResponse = resultData.was_existing;
+    // Use credit_balance from RPC result (no extra fetch needed)
+    let creditBalance: number | null = resultData.credit_balance;
 
     logger.info('Voiceover row ready for processing', {
       discoveryId,
@@ -222,7 +226,7 @@ serve(async req => {
     if (row.status === 'ready') {
       const { audioUrl, expiresAt } = await signAudioUrl(supabaseAdmin, row, logger);
       logger.info('Returning existing ready voiceover', { discoveryId, voiceoverId: row.id, audioUrlPresent: Boolean(audioUrl) });
-      creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
+      // creditBalance already set from RPC result
       return jsonResponse(
         baseHeaders,
         {
@@ -243,7 +247,7 @@ serve(async req => {
       !isFreshInsert
     ) {
       logger.info('Processing already in-flight (<1m); returning as-is', { discoveryId, voiceoverId: row.id, updatedAt: row.updated_at });
-      creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
+      // creditBalance already set from RPC result
       return jsonResponse(
         baseHeaders,
         {
@@ -307,7 +311,7 @@ serve(async req => {
       logger.info('Credit charged for retry', { discoveryId, voiceoverId: row.id, creditBalance });
       wasExistingResponse = true;
     } else if (isFreshInsert) {
-      creditBalance = await fetchCreditBalance(supabaseAdmin, userId, logger);
+      // creditBalance already set from RPC result (no extra fetch needed)
     }
 
     const { audioBuffer, upstreamStatus, upstreamError } = await callFishAudio(

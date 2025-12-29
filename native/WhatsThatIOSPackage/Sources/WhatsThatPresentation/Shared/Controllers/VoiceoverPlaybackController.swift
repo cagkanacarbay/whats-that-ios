@@ -87,6 +87,9 @@ public final class VoiceoverPlaybackController: ObservableObject {
     
     /// Called when voiceover generation completes successfully (for toast notification)
     public var onGenerationComplete: ((DiscoverySummary) -> Void)?
+    
+    /// Called when server returns updated credit balance after voiceover request
+    public var onCreditBalanceUpdated: ((Int) -> Void)?
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -395,6 +398,12 @@ public extension VoiceoverPlaybackController {
 
             if normalized.status == .ready, let _ = normalized.audioURL {
                 clearPending(discovery.id)
+                // Sync credit balance if server provided updated value
+                if let serverBalance = normalized.creditBalance {
+                    await MainActor.run {
+                        self.onCreditBalanceUpdated?(serverBalance)
+                    }
+                }
                 // Notify that generation completed (for toast) - don't affect playback state
                 await MainActor.run {
                     self.onGenerationComplete?(discovery)

@@ -59,6 +59,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     @Published private(set) var error: FlowError?
     @Published private(set) var pushToken: String?
     @Published var showPollingFailedAlert: Bool = false
+    @Published var showFreeCreditsExhaustedAtAudioGeneration: Bool = false
+    @Published var showFreeCreditsExhaustedAtConfirm: Bool = false
 
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
@@ -585,6 +587,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         do {
             let balance = try await creditBalanceStore.refreshIfStale()
             creditBalance = balance
+            
+            // Check if we should show the "credits exhausted" alert at confirm stage
+            let tracker = FreeCreditsAlertTracker.shared
+            if await tracker.shouldShowCreditsExhaustedAlert(currentBalance: balance) {
+                await tracker.markCreditsExhaustedAlertShown()
+                await MainActor.run {
+                    self.showFreeCreditsExhaustedAtConfirm = true
+                }
+                print("[DiscoveryCreationFlowViewModel] Showing credits exhausted alert at confirm stage")
+            }
         } catch {
             // Keep existing cached value
         }
@@ -720,14 +732,22 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             print("[DEBUG] Caught generic error: \(type(of: error)) - \(error.localizedDescription)")
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
             if Self.messageIndicatesInsufficientCredits(message) {
-                // Normalize to friendly no-credits error and sync local cache.
-                self.error = .noCredits
-                self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
+                // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
                 Task { [weak self] in
                     guard let self else { return }
                     let updated = await self.creditBalanceStore.set(0)
                     await MainActor.run {
                         self.creditBalance = updated
+                        // Return to confirmation stage with the same image
+                        if let confirmState = self.confirmationState {
+                            self.flowState = .confirming(confirmState)
+                            // Show credits exhausted alert with "Get Credits" option
+                            self.showFreeCreditsExhaustedAtConfirm = true
+                        } else {
+                            // Fallback if confirmation state is unavailable
+                            self.error = .noCredits
+                            self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
+                        }
                     }
                 }
             } else {
@@ -763,7 +783,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 state.isStreaming = true
             }
             // Coarse phase: do not republish flowState for each token.
-        case let .complete(discoveryId, systemVersion, userVersion):
+        case let .complete(discoveryId, systemVersion, userVersion, serverCreditBalance):
             analysisState = analysisStateUpdated { state in
                 state.discoveryIdentifier = discoveryId
                 state.isStreaming = false
@@ -774,17 +794,25 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             // Do not republish flowState here; wait for the final end signal.
             onDiscoveryCreated?(discoveryId)
             hydrateDiscoverySummaryIfNeeded(for: discoveryId)
-            handleSuccessfulCreation(discoveryId: discoveryId)
+            handleSuccessfulCreation(discoveryId: discoveryId, serverCreditBalance: serverCreditBalance)
         case let .error(message, status):
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
-                // Normalize to a friendly no-credits error and sync local cache.
-                error = .noCredits
-                flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
+                // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
                 Task { [weak self] in
                     guard let self else { return }
                     let updated = await self.creditBalanceStore.set(0)
                     await MainActor.run {
                         self.creditBalance = updated
+                        // Return to confirmation stage with the same image
+                        if let confirmState = self.confirmationState {
+                            self.flowState = .confirming(confirmState)
+                            // Show credits exhausted alert with "Get Credits" option
+                            self.showFreeCreditsExhaustedAtConfirm = true
+                        } else {
+                            // Fallback if confirmation state is unavailable
+                            self.error = .noCredits
+                            self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
+                        }
                     }
                 }
             } else {
@@ -925,21 +953,46 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     }
 
     /// Unified success handler for credits and TTS. Called from both real-time streaming and polling recovery.
-    private func handleSuccessfulCreation(discoveryId: Int64) {
-        // Optimistically decrement credits on success.
+    private func handleSuccessfulCreation(discoveryId: Int64, serverCreditBalance: Int? = nil) {
+        // Sync credits: use server-provided balance if available, otherwise adjust optimistically.
         Task { [weak self] in
             guard let self else { return }
-            let updated = await self.creditBalanceStore.adjust(by: -1)
+            let updated: Int?
+            if let serverBalance = serverCreditBalance {
+                // Use the authoritative server balance
+                updated = await self.creditBalanceStore.set(serverBalance)
+            } else {
+                // Fallback for polling recovery: optimistically decrement
+                updated = await self.creditBalanceStore.adjust(by: -1)
+            }
             await MainActor.run {
                 self.creditBalance = updated
             }
+            
+            // Check if we should show the "credits exhausted" alert
+            // This triggers when credits reach 0 for the first time
+            let finalBalance = updated ?? serverCreditBalance ?? 0
+            let tracker = FreeCreditsAlertTracker.shared
+            let shouldShow = await tracker.shouldShowCreditsExhaustedAlert(currentBalance: finalBalance)
+            print("[DiscoveryCreationFlowViewModel] Credits check: balance=\(finalBalance), shouldShowExhausted=\(shouldShow)")
+            
+            if shouldShow {
+                await tracker.markCreditsExhaustedAlertShown()
+                await MainActor.run {
+                    self.showFreeCreditsExhaustedAtAudioGeneration = true
+                }
+                print("[DiscoveryCreationFlowViewModel] Showing credits exhausted alert")
+            }
         }
+        
         // Trigger auto TTS if enabled.
         Task { [weak self] in
             guard let self,
                   let voiceoverRepository,
                   let preferencesStore = voiceoverPreferencesStore else { return }
+            
             let preferences = await preferencesStore.load()
+            print("[DiscoveryCreationFlowViewModel] autoTTS check: autoEnabled=\(preferences.autoEnabled), voiceModelId='\(preferences.voiceModelId)'")
             guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
             print("[DiscoveryCreationFlowViewModel] autoTTS=enabled voiceModelId=\(preferences.voiceModelId) discoveryId=\(discoveryId)")
             _ = await voiceoverRepository.requestVoiceover(
@@ -1028,8 +1081,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         case let .token(token):
             let preview = String(token.replacingOccurrences(of: "\n", with: " ").prefix(60))
             return "token(len: \(token.count), preview: \(preview))"
-        case let .complete(id, system, user):
-            return "complete(id: \(id), system: \(system ?? "nil"), user: \(user ?? "nil"))"
+        case let .complete(id, system, user, credits):
+            return "complete(id: \(id), system: \(system ?? "nil"), user: \(user ?? "nil"), credits: \(credits.map { String($0) } ?? "nil"))"
         case let .error(message, status):
             if let status {
                 return "error(message: \(message), status: \(status))"

@@ -95,6 +95,14 @@ public final class AudioServicesContainer: ObservableObject {
         playbackController.onGenerationComplete = { [weak self] discovery in
             self?.showGenerationCompleteToast(for: discovery)
         }
+        
+        // Wire up credit balance sync callback
+        playbackController.onCreditBalanceUpdated = { [weak self] serverBalance in
+            guard let creditStore = self?.creditBalanceStore else { return }
+            Task {
+                _ = await creditStore.set(serverBalance)
+            }
+        }
     }
     
     // MARK: - Toast Actions

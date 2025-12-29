@@ -163,51 +163,69 @@ struct DiscoveryStreamingStageView: View {
                     .padding(.top, BrandSpacing.xLarge)
                 }
                 .onChange(of: state.displayMarkdown) {
-                    updateDisplayedMarkdown()
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        updateDisplayedMarkdown()
+                    }
                 }
                 .onAppear {
                     logStreamStarted()
                 }
                 .onChange(of: state.streamedText) {
-                    // Throttle noisy updates: only consider stream text for clearing
-                    // the loader if we still have no metadata and the loader is visible.
-                    guard !loaderCleared,
-                          (state.metadataTitle?.isEmpty ?? true) && (state.metadataShortDescription?.isEmpty ?? true)
-                    else { return }
-                    evaluateLoaderCleared(with: currentMarkdown)
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async { [self] in
+                        // Throttle noisy updates: only consider stream text for clearing
+                        // the loader if we still have no metadata and the loader is visible.
+                        guard !loaderCleared,
+                              (state.metadataTitle?.isEmpty ?? true) && (state.metadataShortDescription?.isEmpty ?? true)
+                        else { return }
+                        evaluateLoaderCleared(with: currentMarkdown)
+                    }
                 }
                 .onChange(of: state.metadataTitle) {
-                    logMetadataVisibleIfNeeded()
-                    evaluateMetadataVisibility()
-                    evaluateLoaderCleared(with: displayedMarkdown)
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async { [self] in
+                        logMetadataVisibleIfNeeded()
+                        evaluateMetadataVisibility()
+                        evaluateLoaderCleared(with: displayedMarkdown)
+                    }
                 }
                 .onChange(of: state.metadataShortDescription) {
-                    logMetadataVisibleIfNeeded()
-                    evaluateMetadataVisibility()
-                    evaluateLoaderCleared(with: displayedMarkdown)
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async { [self] in
+                        logMetadataVisibleIfNeeded()
+                        evaluateMetadataVisibility()
+                        evaluateLoaderCleared(with: displayedMarkdown)
+                    }
                 }
                 .onChange(of: state.isStreaming) {
-                    if !state.isStreaming {
-                        // Streaming ended: snap to final text (no animation) to avoid cut-offs
-                        markdownAnimationTask?.cancel()
-                        let final = currentMarkdown
-                        displayedMarkdown = final
-                        evaluateLoaderCleared(with: final)
-                        loaderCleared = true
-                        logStreamEnded()
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        if !state.isStreaming {
+                            // Streaming ended: snap to final text (no animation) to avoid cut-offs
+                            markdownAnimationTask?.cancel()
+                            let final = currentMarkdown
+                            displayedMarkdown = final
+                            evaluateLoaderCleared(with: final)
+                            loaderCleared = true
+                            logStreamEnded()
+                        }
                     }
                 }
                 .onChange(of: loaderCleared) {
-                    if loaderCleared {
-                        scrollToContent(using: scrollProxy)
-                        let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
-                        if hasMetadata && !metadataVisible {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                metadataVisible = true
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async {
+                        if loaderCleared {
+                            scrollToContent(using: scrollProxy)
+                            let hasMetadata = (state.metadataTitle?.isEmpty == false) || (state.metadataShortDescription?.isEmpty == false)
+                            if hasMetadata && !metadataVisible {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    metadataVisible = true
+                                }
                             }
+                        } else {
+                            hasScrolledToContent = false
                         }
-                    } else {
-                        hasScrolledToContent = false
                     }
                 }
             }

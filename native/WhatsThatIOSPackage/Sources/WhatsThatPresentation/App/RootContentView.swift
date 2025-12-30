@@ -187,7 +187,11 @@ public struct RootContentView: View {
                 fetchVoiceSampleURL: fetchVoiceSampleURL,
                 loadIPoPPreferences: loadIPoPPreferences,
                 saveIPoPPreferences: saveIPoPPreferences,
-                onSetCreditBalance: setCreditBalance
+                onSetCreditBalance: { amount in
+                    #if DEBUG
+                    await setCreditBalance(amount)
+                    #endif
+                }
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }

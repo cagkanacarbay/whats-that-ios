@@ -655,6 +655,15 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         pendingMedia = media
         pollingTask?.cancel()
         pollingTask = nil
+        
+        // Optimistically decrement credits as requested by user
+        Task { [weak self] in
+            guard let self else { return }
+            let adjusted = await self.creditBalanceStore.adjust(by: -1)
+            await MainActor.run {
+                self.creditBalance = adjusted
+            }
+        }
 
         do {
             // Deterministic confirm-stage path: if coordinates exist and nearby are missing,
@@ -753,6 +762,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             } else {
                 self.error = .analysisFailed(message)
                 self.flowState = .error(message: message)
+                
+                // Refresh credits to ensure we aren't out of sync (e.g. if failure happened before consumption)
+                Task { [weak self] in
+                    guard let self else { return }
+                    if let updated = try? await self.creditBalanceStore.refresh() {
+                        await MainActor.run {
+                            self.creditBalance = updated
+                        }
+                    }
+                }
             }
         }
     }
@@ -962,8 +981,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 // Use the authoritative server balance
                 updated = await self.creditBalanceStore.set(serverBalance)
             } else {
-                // Fallback for polling recovery: optimistically decrement
-                updated = await self.creditBalanceStore.adjust(by: -1)
+                // Polling recovery: credit was already optimistically decremented in performAnalysis.
+                // Just retrieve the current value to check if exhausted.
+                updated = await self.creditBalanceStore.getCached()
             }
             await MainActor.run {
                 self.creditBalance = updated

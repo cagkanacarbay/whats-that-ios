@@ -20,6 +20,9 @@ private let supabaseAuthLogger = Logger(subsystem: "WhatsThatIOS", category: "Su
 public final actor SupabaseAuthService: AuthService {
     private let client: SupabaseClient
     private let configuration: AppConfiguration
+#if USE_REMOTE_DEPS && canImport(Security)
+    private let deviceIdentifierService: DeviceIdentifierServicing
+#endif
 #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit)
     private var googleSignInService: GoogleSignInServicing?
 #endif
@@ -31,11 +34,13 @@ public final actor SupabaseAuthService: AuthService {
     public init(
         client: SupabaseClient,
         configuration: AppConfiguration,
+        deviceIdentifierService: DeviceIdentifierServicing,
         googleSignInService: GoogleSignInServicing?,
         appleSignInService: SignInWithAppleServicing?
     ) {
         self.client = client
         self.configuration = configuration
+        self.deviceIdentifierService = deviceIdentifierService
         self.googleSignInService = googleSignInService
         self.appleSignInService = appleSignInService
     }
@@ -43,29 +48,35 @@ public final actor SupabaseAuthService: AuthService {
     public init(
         client: SupabaseClient,
         configuration: AppConfiguration,
+        deviceIdentifierService: DeviceIdentifierServicing,
         googleSignInService: GoogleSignInServicing?
     ) {
         self.client = client
         self.configuration = configuration
+        self.deviceIdentifierService = deviceIdentifierService
         self.googleSignInService = googleSignInService
     }
 #elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
     public init(
         client: SupabaseClient,
         configuration: AppConfiguration,
+        deviceIdentifierService: DeviceIdentifierServicing,
         appleSignInService: SignInWithAppleServicing?
     ) {
         self.client = client
         self.configuration = configuration
+        self.deviceIdentifierService = deviceIdentifierService
         self.appleSignInService = appleSignInService
     }
 #else
     public init(
         client: SupabaseClient,
-        configuration: AppConfiguration
+        configuration: AppConfiguration,
+        deviceIdentifierService: DeviceIdentifierServicing
     ) {
         self.client = client
         self.configuration = configuration
+        self.deviceIdentifierService = deviceIdentifierService
     }
 #endif
 
@@ -95,24 +106,44 @@ public final actor SupabaseAuthService: AuthService {
         }
     }
 
-    public func signIn(email: String, password: String) async throws -> AuthSession {
+    public func signIn(email: String, password: String) async throws -> SignInResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         do {
             try await client.auth.signIn(email: normalizedEmail, password: password)
-            return try await currentSession()
+            return .authenticated(try await currentSession())
         } catch {
+            // Check for email not confirmed error - this is a valid outcome, not an error
+            if let authError = error as? Supabase.AuthError,
+               case let .api(_, errorCode, _, _) = authError,
+               errorCode == .emailNotConfirmed {
+                supabaseAuthLogger.info("Sign in requires email verification for \(normalizedEmail)")
+                return .verificationRequired
+            }
             throw mapSignInError(error)
         }
     }
 
-    public func signUp(email: String, password: String) async throws -> AuthSession {
+    public func signUp(email: String, password: String) async throws -> SignUpResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        // Get device ID for free credit abuse prevention
+        let deviceId = deviceIdentifierService.getOrCreateDeviceId()
+        
         do {
-            _ = try await client.auth.signUp(
+            let response = try await client.auth.signUp(
                 email: normalizedEmail,
-                password: password
+                password: password,
+                data: ["device_id": .string(deviceId)]
             )
-            return try await currentSession()
+            
+            // Check if email confirmation is required (no session returned)
+            // This happens when Supabase has "Confirm email" enabled
+            if response.session == nil {
+                supabaseAuthLogger.info("Signup successful but email confirmation required for \(normalizedEmail)")
+                return .verificationRequired
+            }
+            
+            return .authenticated(try await currentSession())
         } catch {
             throw mapSignUpError(error)
         }
@@ -147,6 +178,10 @@ public final actor SupabaseAuthService: AuthService {
                 accessToken: account.accessToken
             )
             try await client.auth.signInWithIdToken(credentials: credentials)
+            
+            // Record device ID for credit tracking (OAuth flows don't pass metadata through trigger)
+            await recordDeviceIdForCreditTracking()
+            
             return try await currentSession()
         } catch {
             throw mapSignInError(error)
@@ -182,6 +217,10 @@ public final actor SupabaseAuthService: AuthService {
                 nonce: account.nonce
             )
             try await client.auth.signInWithIdToken(credentials: credentials)
+            
+            // Record device ID for credit tracking (OAuth flows don't pass metadata through trigger)
+            await recordDeviceIdForCreditTracking()
+            
             return try await currentSession()
         } catch {
             supabaseAuthLogger.error("Supabase Apple sign-in exchange failed: \(error, privacy: .public)")
@@ -341,16 +380,79 @@ public final actor SupabaseAuthService: AuthService {
         }
     }
 
+    public func verifyEmailFromLink(url: URL) async throws {
+        let params = parseSupabaseParameters(from: url)
+        
+        // Handle token_hash verification (most common for email confirmation)
+        if let tokenHash = params["token_hash"],
+           !tokenHash.isEmpty,
+           let type = params["type"]?.lowercased() {
+            do {
+                // Map string type to EmailOTPType
+                let emailType: EmailOTPType
+                switch type {
+                case "signup":
+                    emailType = .signup
+                case "email":
+                    emailType = .email
+                case "email_change":
+                    emailType = .emailChange
+                default:
+                    emailType = .signup
+                }
+                _ = try await client.auth.verifyOTP(tokenHash: tokenHash, type: emailType)
+                supabaseAuthLogger.info("Email verification successful via token_hash")
+                return
+            } catch {
+                supabaseAuthLogger.error("Email verification failed: \(error.localizedDescription, privacy: .public)")
+                throw DomainAuthError.unknown
+            }
+        }
+        
+        // Handle PKCE code exchange
+        if let code = params["code"], !code.isEmpty {
+            do {
+                _ = try await client.auth.exchangeCodeForSession(authCode: code)
+                supabaseAuthLogger.info("Email verification successful via code exchange")
+                return
+            } catch {
+                supabaseAuthLogger.error("Email verification code exchange failed: \(error.localizedDescription, privacy: .public)")
+                throw DomainAuthError.unknown
+            }
+        }
+        
+        // Handle access_token + refresh_token (alternative format)
+        if let accessToken = params["access_token"],
+           let refreshToken = params["refresh_token"],
+           !accessToken.isEmpty,
+           !refreshToken.isEmpty {
+            do {
+                _ = try await client.auth.setSession(accessToken: accessToken, refreshToken: refreshToken)
+                supabaseAuthLogger.info("Email verification successful via session tokens")
+                return
+            } catch {
+                supabaseAuthLogger.error("Email verification session setup failed: \(error.localizedDescription, privacy: .public)")
+                throw DomainAuthError.unknown
+            }
+        }
+        
+        supabaseAuthLogger.error("Email verification link missing required tokens")
+        throw DomainAuthError.unknown
+    }
+
     private func mapSignInError(_ error: Error) -> DomainAuthError {
         if let authError = error as? Supabase.AuthError,
-           case let .api(_, errorCode, _, _) = authError {
+           case let .api(description, errorCode, _, _) = authError {
+            supabaseAuthLogger.error("Sign in API error: \(String(describing: errorCode), privacy: .public) - \(description, privacy: .public)")
             switch errorCode {
             case .invalidCredentials:
                 return .invalidCredentials
             case .emailAddressNotAuthorized:
                 return .invalidCredentials
+            case .overEmailSendRateLimit:
+                return .rateLimitExceeded
             default:
-                break
+                return .internalError(description)
             }
         }
 
@@ -358,15 +460,32 @@ public final actor SupabaseAuthService: AuthService {
         if nsError.code == 400 {
             return .invalidCredentials
         }
+        if nsError.code == 429 {
+            return .rateLimitExceeded
+        }
+        
+        supabaseAuthLogger.error("Sign in unknown error: \(error.localizedDescription, privacy: .public)")
         return .unknown
     }
 
     private func mapSignUpError(_ error: Error) -> DomainAuthError {
-        if let authError = error as? Supabase.AuthError,
-           case let .api(_, errorCode, _, _) = authError {
-            switch errorCode {
-            case .userAlreadyExists:
-                return .emailAlreadyInUse
+        if let authError = error as? Supabase.AuthError {
+            switch authError {
+            case let .weakPassword(_, reasons):
+                supabaseAuthLogger.error("Sign up password rejected as weak: \(reasons, privacy: .public)")
+                return .passwordTooWeak
+            case let .api(description, errorCode, _, _):
+                supabaseAuthLogger.error("Sign up API error: \(String(describing: errorCode), privacy: .public) - \(description, privacy: .public)")
+                switch errorCode {
+                case .userAlreadyExists:
+                    return .emailAlreadyInUse
+                case .overEmailSendRateLimit:
+                    return .rateLimitExceeded
+                case .weakPassword:
+                    return .passwordTooWeak
+                default:
+                    return .internalError(description)
+                }
             default:
                 break
             }
@@ -376,8 +495,14 @@ public final actor SupabaseAuthService: AuthService {
         if nsError.code == 422 {
             return .emailAlreadyInUse
         }
+        if nsError.code == 429 {
+            return .rateLimitExceeded
+        }
+        
+        supabaseAuthLogger.error("Sign up unknown error: \(error.localizedDescription, privacy: .public)")
         return .unknown
     }
+
 
     private func parseSupabaseParameters(from url: URL) -> [String: String] {
         var parameters = Self.extractParameters(from: url)
@@ -519,6 +644,24 @@ public final actor SupabaseAuthService: AuthService {
         return nil
     }
     #endif
+    
+    // MARK: - Device ID Tracking
+    
+    /// Records the device ID for credit tracking via RPC.
+    /// This is needed for OAuth flows where we can't pass user metadata through the signup trigger.
+    private func recordDeviceIdForCreditTracking() async {
+        #if USE_REMOTE_DEPS && canImport(Security)
+        let deviceId = deviceIdentifierService.getOrCreateDeviceId()
+        
+        do {
+            try await client.rpc("record_device_for_credit_tracking", params: ["p_device_id": deviceId]).execute()
+            supabaseAuthLogger.debug("Recorded device ID for credit tracking")
+        } catch {
+            // Non-fatal: log but don't fail the sign-in
+            supabaseAuthLogger.error("Failed to record device ID for credit tracking: \(error.localizedDescription)")
+        }
+        #endif
+    }
 }
 
 private extension Session {

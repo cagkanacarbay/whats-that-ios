@@ -112,6 +112,7 @@ public extension AppDependencyContainer {
         )
 
         let discoveryRepository = SupabaseDiscoveryRepository(client: client)
+        let deviceIdentifierService = DeviceIdentifierService()
         let authService: SupabaseAuthService
         #if USE_REMOTE_DEPS && canImport(GoogleSignIn) && canImport(UIKit) && USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
         let googleService = try configuration.googleClientID.map { clientID in
@@ -121,6 +122,7 @@ public extension AppDependencyContainer {
         authService = SupabaseAuthService(
             client: client,
             configuration: configuration,
+            deviceIdentifierService: deviceIdentifierService,
             googleSignInService: googleService,
             appleSignInService: appleService
         )
@@ -131,6 +133,7 @@ public extension AppDependencyContainer {
         authService = SupabaseAuthService(
             client: client,
             configuration: configuration,
+            deviceIdentifierService: deviceIdentifierService,
             googleSignInService: googleService
         )
         #elseif USE_REMOTE_DEPS && canImport(AuthenticationServices) && canImport(UIKit)
@@ -138,12 +141,14 @@ public extension AppDependencyContainer {
         authService = SupabaseAuthService(
             client: client,
             configuration: configuration,
+            deviceIdentifierService: deviceIdentifierService,
             appleSignInService: appleService
         )
         #else
         authService = SupabaseAuthService(
             client: client,
-            configuration: configuration
+            configuration: configuration,
+            deviceIdentifierService: deviceIdentifierService
         )
         #endif
         let onboardingRepository = UserDefaultsOnboardingRepository()

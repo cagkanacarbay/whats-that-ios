@@ -211,7 +211,19 @@ public struct RootContentView: View {
         .preferredColorScheme(appearance.colorScheme)
         .onAppear(perform: syncBrandTheme)
         .onReceive(passwordResetLinkCoordinator.urlPublisher) { url in
-            handlePasswordResetURL(url)
+            #if DEBUG
+            print("[DeepLink] Received URL: \(url.absoluteString)")
+            print("[DeepLink] isEmailVerificationURL: \(isEmailVerificationURL(url))")
+            print("[DeepLink] Path: \(url.path)")
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                print("[DeepLink] Query items: \(components.queryItems ?? [])")
+            }
+            #endif
+            if isEmailVerificationURL(url) {
+                handleEmailVerificationURL(url)
+            } else {
+                handlePasswordResetURL(url)
+            }
         }
         .onChange(of: viewModel.flowState) { previous, current in
             guard previous != current else { return }
@@ -297,6 +309,10 @@ public struct RootContentView: View {
             return "Sign in cancelled"
         case .accountDeletionFailed:
             return "Couldn't delete account"
+        case .rateLimitExceeded:
+            return "Too many attempts"
+        case .internalError:
+            return "Whoops"
         case .unknown:
             return "Something went wrong"
         }
@@ -310,7 +326,7 @@ public struct RootContentView: View {
         case .emailAlreadyInUse:
             return "An account with this email already exists. Try signing in instead."
         case .passwordTooWeak:
-            return "Your password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a symbol."
+            return "This password may have been exposed in a data breach. Please choose a different one."
         case .passwordResetFailed:
             return "There was an issue resetting your password. Please try again in a few minutes."
         case .passwordResetRateLimited:
@@ -327,6 +343,10 @@ public struct RootContentView: View {
             return "This sign in was cancelled."
         case .accountDeletionFailed:
             return "We couldn't delete your account. Please try again or contact support."
+        case .rateLimitExceeded:
+            return "Too many requests. Please wait a few minutes before trying again."
+        case .internalError(let message):
+            return message
         case .unknown:
             return "Please try again."
         }
@@ -378,13 +398,32 @@ public struct RootContentView: View {
                 isPerformingAction: viewModel.isPerformingAuthAction,
                 initialMode: authStartMode,
                 onSignIn: { email, password in
-                    try await handleAuthOperation {
-                        try await viewModel.signIn(email: email, password: password)
+                    let outcome = try await viewModel.signIn(email: email, password: password)
+                    switch outcome {
+                    case .session:
+                        return .success
+                    case .verificationRequired(let email):
+                        return .verificationRequired(email: email)
                     }
                 },
                 onSignUp: { email, password in
-                    try await handleAuthOperation {
-                        try await viewModel.signUp(email: email, password: password)
+                    do {
+                        let outcome = try await viewModel.signUp(email: email, password: password)
+                        switch outcome {
+                        case .session:
+                            return .success
+                        case .verificationRequired:
+                            return .verificationRequired
+                        }
+                    } catch {
+                        // For generic errors, we want to show the alert.
+                        // check handleAuthOperation usage: it rethrows.
+                        // We must rethrow to let AuthenticationFlowView handle the failure state (stop loading).
+                        // AND we want RootContentView to show the alert.
+                        try await handleAuthOperation { throw error }
+                        // The compiler needs a return, but handleAuthOperation throws.
+                        // So this line is unreachable but required for flow analysis sometimes.
+                        throw error
                     }
                 },
                 onForgotPassword: { email in
@@ -566,5 +605,47 @@ public struct RootContentView: View {
         }
 
         return url.absoluteString
+    }
+
+    // MARK: - Email Verification Handling
+
+    private func isEmailVerificationURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        
+        // Check for custom scheme deep link: whatsthat://auth/verify
+        // In this URL structure: host = "auth", path = "/verify"
+        if scheme == "whatsthat" {
+            let host = url.host?.lowercased() ?? ""
+            let path = url.path.lowercased()
+            return host == "auth" && path == "/verify"
+        }
+        
+        // Check for https URL: https://whats-that.app/auth/verify
+        if scheme == "https" {
+            let path = url.path.lowercased()
+            return path.hasPrefix("/auth/verify")
+        }
+        
+        // Check query params for signup type as fallback
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let type = components.queryItems?.first(where: { $0.name == "type" })?.value?.lowercased() {
+            return type == "signup" || type == "email"
+        }
+        
+        return false
+    }
+
+    private func handleEmailVerificationURL(_ url: URL) {
+        Task {
+            let error = await viewModel.verifyEmail(from: url)
+            await MainActor.run {
+                if let error {
+                    authError = error
+                } else {
+                    // Verification builds the session automatically, so no need to alert or switch mode manually.
+                    // The view model's session state will update, triggering the flow transition.
+                }
+            }
+        }
     }
 }

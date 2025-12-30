@@ -41,13 +41,12 @@ public struct CreditPurchaseResult: Equatable, Sendable {
 public protocol CreditsStore: Sendable {
     func loadProducts() async throws -> [CreditProduct]
     func purchase(productId: String) async throws -> CreditPurchaseResult
-    /// Called when the user opens the credits UI. Default no-op.
-    /// Implementations may perform an optional receipt sync here.
-    func syncReceiptsOnCreditsOpen() async
+    /// Manually sync App Store receipts. Triggered by user tapping "Restore Purchases".
+    func restorePurchases() async throws
 }
 
 public extension CreditsStore {
-    func syncReceiptsOnCreditsOpen() async {}
+    func restorePurchases() async throws {}
 }
 
 public struct CreditPackDefinition: Identifiable, Equatable, Sendable {
@@ -77,15 +76,15 @@ public enum CreditPackCatalog {
         CreditPackDefinition(
             id: "100.credits",
             creditAmount: 100,
-            fallbackTitle: "Explorer Pack",
-            fallbackDescription: "Unlock 100 discoveries for your next adventures.",
+            fallbackTitle: "100 Credits",
+            fallbackDescription: "Create up to 100 discoveries or 50 discoveries and 50 audio guides.",
             iconSystemName: "sparkles"
         ),
         CreditPackDefinition(
             id: "1000.credits",
             creditAmount: 1000,
-            fallbackTitle: "Trailblazer Pack",
-            fallbackDescription: "Fuel a thousand discoveries with our best value bundle.",
+            fallbackTitle: "1,000 Credits",
+            fallbackDescription: "Create up to 1,000 discoveries or 500 discoveries and 500 audio guides.",
             iconSystemName: "globe.americas.fill"
         )
     ]

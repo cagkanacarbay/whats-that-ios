@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 import OSLog
 import CoreLocation
 import WhatsThatShared
@@ -33,6 +34,7 @@ struct PostOnboardingCarousel: View {
     @StateObject private var permissionsCoordinator = OnboardingPermissionsCoordinator()
     @State private var isRequestingLocation = false
     @State private var showLocationSettingsAlert = false
+
     private let logger = Logger(subsystem: "com.whatsthat.onboarding", category: "PostOnboardingCarousel")
 
     init(
@@ -143,6 +145,7 @@ struct PostOnboardingCarousel: View {
         } message: {
             Text("For the best experience with location-based features, please enable location access in your device settings.")
         }
+
     }
 
     @ViewBuilder
@@ -310,11 +313,18 @@ struct PostOnboardingCarousel: View {
         
         let enteringSlide = slides[newIndex]
         if enteringSlide.kind == .voicePicker {
+            // Set playback category to bypass silent mode for voice samples
+            let audioSession = AVAudioSession.sharedInstance()
+            try? audioSession.setCategory(.playback, mode: .default, options: .mixWithOthers)
+            try? audioSession.setActive(true)
+            
             Task {
                 await voicePickerViewModel.autoplaySelectedVoice()
             }
         }
     }
+
+
 
     private func requestLocationPermissionIfNeeded() {
         switch permissionsCoordinator.locationStatus {

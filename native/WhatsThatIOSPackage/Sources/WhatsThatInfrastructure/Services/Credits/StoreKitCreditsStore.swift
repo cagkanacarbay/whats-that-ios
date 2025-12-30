@@ -47,35 +47,28 @@ public actor StoreKitCreditsStore: CreditsStore {
         self.urlSession = urlSession
     }
 
-    public func syncReceiptsOnCreditsOpen() async {
-        // Always attempt a receipt sync when the user opens the Credits screen,
-        // regardless of current receipt presence. This ensures the prompt
-        // (if needed) happens here rather than during background flows.
-        try? await AppStore.sync()
+    public func restorePurchases() async throws {
+        // Manually sync App Store receipts. This is triggered by user action
+        // (Restore Purchases button) rather than automatically on screen load.
+        try await AppStore.sync()
     }
 
     public func loadProducts() async throws -> [CreditProduct] {
         let products = try await Product.products(for: productIdentifiers)
         cachedProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
 
+        // Always use our local titles and descriptions for consistent branding.
+        // Only take the price from Apple (localized for the user's region).
         return CreditPackCatalog.standardPacks.map { definition in
-            if let product = cachedProducts[definition.id] {
-                return CreditProduct(
-                    id: product.id,
-                    title: product.displayName,
-                    description: product.description,
-                    displayPrice: product.displayPrice,
-                    creditAmount: definition.creditAmount
-                )
-            } else {
-                return CreditProduct(
-                    id: definition.id,
-                    title: definition.fallbackTitle,
-                    description: definition.fallbackDescription,
-                    displayPrice: "Unavailable",
-                    creditAmount: definition.creditAmount
-                )
-            }
+            let displayPrice = cachedProducts[definition.id]?.displayPrice ?? "Unavailable"
+            
+            return CreditProduct(
+                id: definition.id,
+                title: definition.fallbackTitle,
+                description: definition.fallbackDescription,
+                displayPrice: displayPrice,
+                creditAmount: definition.creditAmount
+            )
         }
     }
 

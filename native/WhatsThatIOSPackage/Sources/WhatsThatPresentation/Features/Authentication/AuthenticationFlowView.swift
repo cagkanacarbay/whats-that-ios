@@ -3,10 +3,11 @@ import WhatsThatDomain
 import WhatsThatShared
 
 struct AuthenticationFlowView: View {
-    enum Mode {
+    enum Mode: Equatable, Hashable {
         case signIn
         case signUp
         case forgotPassword
+        case emailVerificationSent(email: String)
     }
 
     enum PasswordResetResult {
@@ -14,9 +15,19 @@ struct AuthenticationFlowView: View {
         case failure(AuthError)
     }
 
+    public enum SignUpResult {
+        case success
+        case verificationRequired
+    }
+
+    public enum SignInResult {
+        case success
+        case verificationRequired(email: String)
+    }
+
     let isPerformingAction: Bool
-    let onSignIn: (String, String) async throws -> Void
-    let onSignUp: (String, String) async throws -> Void
+    let onSignIn: (String, String) async throws -> SignInResult
+    let onSignUp: (String, String) async throws -> SignUpResult
     let onForgotPassword: (String) async -> PasswordResetResult
     let onGoogle: () async throws -> Void
     let onApple: () async throws -> Void
@@ -28,8 +39,8 @@ struct AuthenticationFlowView: View {
     init(
         isPerformingAction: Bool,
         initialMode: Mode = .signUp,
-        onSignIn: @escaping (String, String) async throws -> Void,
-        onSignUp: @escaping (String, String) async throws -> Void,
+        onSignIn: @escaping (String, String) async throws -> SignInResult,
+        onSignUp: @escaping (String, String) async throws -> SignUpResult,
         onForgotPassword: @escaping (String) async -> PasswordResetResult,
         onGoogle: @escaping () async throws -> Void,
         onApple: @escaping () async throws -> Void
@@ -45,7 +56,9 @@ struct AuthenticationFlowView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let viewportHeight = geo.size.height
+            // Guard against NaN or invalid values during keyboard animations
+            let rawHeight = geo.size.height
+            let viewportHeight = rawHeight.isFinite && rawHeight > 0 ? rawHeight : nil
             ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: BrandSpacing.large) {
                         Image("BrandLogo")
@@ -87,6 +100,11 @@ struct AuthenticationFlowView: View {
                                 focusedAnchor = field?.anchorID
                             }
                         )
+                    case .emailVerificationSent(let email):
+                        EmailVerificationSentView(
+                            email: email,
+                            onBackToLogin: { mode = .signIn }
+                        )
                     }
 
                     if let globalError {
@@ -102,6 +120,7 @@ struct AuthenticationFlowView: View {
                     .padding(.horizontal, BrandSpacing.large)
                     .padding(.bottom, BrandSpacing.large)
                     // Center vertically when content is shorter than viewport.
+                    // Only apply minHeight when we have a valid viewport size.
                     .frame(minHeight: viewportHeight, alignment: .center)
                 }
             }
@@ -113,10 +132,18 @@ struct AuthenticationFlowView: View {
     private func handleSignIn(email: String, password: String, completion: @escaping (Result<Void, AuthError>) -> Void) {
         Task {
             do {
-                try await onSignIn(email, password)
-                await MainActor.run { completion(.success(())) }
-            } catch let error as AuthError {
-                await MainActor.run { completion(.failure(error)) }
+                let result = try await onSignIn(email, password)
+                await MainActor.run {
+                    switch result {
+                    case .success:
+                        completion(.success(()))
+                    case .verificationRequired(let email):
+                        mode = .emailVerificationSent(email: email)
+                        completion(.success(()))
+                    }
+                }
+            } catch let authError as AuthError {
+                await MainActor.run { completion(.failure(authError)) }
             } catch {
                 await MainActor.run { completion(.failure(.unknown)) }
             }
@@ -126,8 +153,16 @@ struct AuthenticationFlowView: View {
     private func handleSignUp(email: String, password: String, completion: @escaping (Result<Void, AuthError>) -> Void) {
         Task {
             do {
-                try await onSignUp(email, password)
-                await MainActor.run { completion(.success(())) }
+                let result = try await onSignUp(email, password)
+                await MainActor.run {
+                    switch result {
+                    case .success:
+                        completion(.success(()))
+                    case .verificationRequired:
+                        mode = .emailVerificationSent(email: email)
+                        completion(.success(()))
+                    }
+                }
             } catch let error as AuthError {
                 await MainActor.run { completion(.failure(error)) }
             } catch {

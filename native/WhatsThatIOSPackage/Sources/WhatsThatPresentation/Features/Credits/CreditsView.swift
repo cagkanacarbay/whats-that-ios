@@ -31,6 +31,7 @@ public struct CreditsView: View {
                     VStack(alignment: .leading, spacing: 32) {
                         balanceCard
                         packSection
+                        restorePurchasesSection
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 80)
@@ -220,6 +221,40 @@ public struct CreditsView: View {
                 }
             }
         }
+    }
+
+    private var restorePurchasesSection: some View {
+        VStack(alignment: .center, spacing: 12) {
+            Button {
+                Task { await viewModel.restorePurchases() }
+            } label: {
+                HStack(spacing: 6) {
+                    if viewModel.isRestoring {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.8)
+                            .tint(palette.textSecondary)
+                    }
+                    Text("Restore Purchases")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(palette.textSecondary)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 20)
+                .background(
+                    Capsule()
+                        .stroke(palette.textSecondary.opacity(0.4), lineWidth: 1.5)
+                )
+            }
+            .disabled(viewModel.isRestoring || viewModel.isLoading)
+
+            Text("If a purchase didn't sync correctly, tap here to restore your credits from the App Store.")
+                .font(.system(size: 12))
+                .foregroundStyle(palette.textSecondary.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 16)
     }
 
     private func toastBanner(_ toast: CreditsViewModel.ToastMessage) -> some View {

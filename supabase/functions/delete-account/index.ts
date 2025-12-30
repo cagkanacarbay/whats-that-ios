@@ -81,6 +81,40 @@ serve(async (req: Request) => {
             auth: { persistSession: false }
         });
 
+        // Step 0: Record user identifiers BEFORE deletion (belt-and-suspenders)
+        // This ensures even if the signup trigger failed to record, deletion will
+        try {
+            if (user.email) {
+                await adminClient.rpc('record_identifier_for_credit_tracking', {
+                    p_identifier_type: 'email',
+                    p_raw_value: user.email,
+                    p_user_id: userId
+                });
+            }
+
+            // Fetch and record provider identities
+            const { data: identities } = await adminClient
+                .from('auth.identities')
+                .select('provider, provider_id')
+                .eq('user_id', userId);
+
+            for (const identity of identities ?? []) {
+                if (identity.provider_id) {
+                    await adminClient.rpc('record_identifier_for_credit_tracking', {
+                        p_identifier_type: `${identity.provider}_sub`,
+                        p_raw_value: identity.provider_id,
+                        p_user_id: userId
+                    });
+                }
+            }
+            logger.info('Recorded user identifiers for credit tracking');
+        } catch (identifierError) {
+            // Non-fatal: log but continue with deletion
+            logger.error('Failed to record identifiers for credit tracking', {
+                error: identifierError instanceof Error ? identifierError.message : String(identifierError)
+            });
+        }
+
         // Step 1: Fetch user's discoveries to get image paths and discovery IDs
         const { data: discoveries, error: discoveriesError } = await adminClient
             .from('discoveries')

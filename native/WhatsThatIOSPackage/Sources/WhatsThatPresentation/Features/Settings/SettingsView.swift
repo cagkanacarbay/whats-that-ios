@@ -1,6 +1,9 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
+#if DEBUG
+import Security
+#endif
 
 struct SettingsView: View {
     private let makeCreditsView: (@escaping (Int?) -> Void) -> AnyView
@@ -565,6 +568,38 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $isNearbyInspectorPresented) {
                 makeNearbyCacheInspector()
+            }
+            
+            // Device ID for free credit tracking
+            Button {
+                Task {
+                    // Clear device ID directly from Keychain
+                    let query: [String: Any] = [
+                        kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: "com.whatsthat.WhatsThatIOS",
+                        kSecAttrAccount as String: "com.whatsthat.device_id"
+                    ]
+                    SecItemDelete(query as CFDictionary)
+                    cacheAlertMessage = "Device ID cleared - you'll get a new ID on next signup"
+                    showCacheAlert = true
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "iphone.slash")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clear Device ID")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                        Text("For testing free credit abuse prevention")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
             }
         }
     }

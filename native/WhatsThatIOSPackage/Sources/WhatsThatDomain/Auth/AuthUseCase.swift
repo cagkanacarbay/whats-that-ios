@@ -16,12 +16,12 @@ public actor AuthUseCase: Sendable {
     }
 
     @discardableResult
-    public func signIn(email: String, password: String) async throws -> AuthSession {
+    public func signIn(email: String, password: String) async throws -> SignInResult {
         try await service.signIn(email: email, password: password)
     }
 
     @discardableResult
-    public func signUp(email: String, password: String) async throws -> AuthSession {
+    public func signUp(email: String, password: String) async throws -> SignUpResult {
         try await service.signUp(email: email, password: password)
     }
 
@@ -55,4 +55,9 @@ public actor AuthUseCase: Sendable {
     public func deleteAccount() async throws {
         try await service.deleteAccount()
     }
+
+    public func verifyEmailFromLink(url: URL) async throws {
+        try await service.verifyEmailFromLink(url: url)
+    }
 }
+

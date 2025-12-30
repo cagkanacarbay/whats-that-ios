@@ -1,4 +1,5 @@
 import Foundation
+import StoreKit
 import SwiftUI
 import WhatsThatDomain
 
@@ -48,6 +49,7 @@ public final class CreditsViewModel: ObservableObject {
     @Published public private(set) var isFetchingProducts = false
     @Published public private(set) var isRefreshingBalance = false
     @Published public private(set) var isPurchasing = false
+    @Published public private(set) var isRestoring = false
     @Published public private(set) var balance: Int?
     @Published public private(set) var creditPacks: [CreditPackItem] = []
     @Published public private(set) var activePurchaseIdentifier: String?
@@ -86,33 +88,76 @@ public final class CreditsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // Perform an optional receipt sync when the user opens Credits.
-            // This avoids prompting at app launch and ensures receipts are fresh.
-            await store.syncReceiptsOnCreditsOpen()
-
             // Pre-populate with cached balance while we refresh.
             if let cached = await balanceStore.getCached() {
                 updateBalance(cached)
             }
 
-            isRefreshingBalance = true
-            async let balanceTask: Int = {
-                defer { Task { await MainActor.run { self.isRefreshingBalance = false } } }
-                do {
-                    return try await self.balanceStore.refreshIfStale()
-                } catch {
-                    // If refresh fails, fall back to repository as a one-off.
-                    return try await self.fetchBalance()
-                }
-            }()
-            async let productsTask = fetchProducts()
-
-            let balanceValue = try await balanceTask
-            let productsValue = try await productsTask
-
-            updateBalance(balanceValue)
+            // Fetch products from StoreKit
+            let productsValue = try await fetchProducts()
             updateProducts(productsValue)
+
+            // Refresh balance from our database
+            isRefreshingBalance = true
+            defer { isRefreshingBalance = false }
+            do {
+                let balanceValue = try await balanceStore.refreshIfStale()
+                updateBalance(balanceValue)
+            } catch {
+                // If refresh fails, fall back to repository as a one-off.
+                let balanceValue = try await fetchBalance()
+                updateBalance(balanceValue)
+            }
         } catch {
+            present(error: error)
+        }
+    }
+
+    public func restorePurchases() async {
+        if isRestoring { return }
+        isRestoring = true
+        defer { isRestoring = false }
+
+        let previousBalance = balance ?? 0
+        
+        do {
+            try await store.restorePurchases()
+            
+            // After restoring, refresh the balance to pick up any restored credits
+            let balanceValue = try await balanceStore.refresh(force: true)
+            updateBalance(balanceValue)
+            
+            if balanceValue > previousBalance {
+                let restoredAmount = balanceValue - previousBalance
+                toastMessage = ToastMessage(
+                    title: "Restore complete",
+                    message: "Restored \(restoredAmount) credits. Your balance has been updated.",
+                    style: .success
+                )
+            } else {
+                toastMessage = ToastMessage(
+                    title: "Sync complete",
+                    message: "Your balance is up to date.",
+                    style: .info
+                )
+            }
+        } catch {
+            // Check if it's a cancellation error to stay silent.
+            if case StoreKitError.userCancelled = error {
+                return
+            }
+            
+            let nsError = error as NSError
+            if nsError.domain == "com.apple.StoreKit.ExternalNotificationService" && nsError.code == 2 {
+                // User cancelled - stay silent
+                return
+            }
+            
+            // Fallback for other StoreKit cancellation patterns or real errors
+            if error.localizedDescription.contains("cancelled") {
+                return
+            }
+
             present(error: error)
         }
     }

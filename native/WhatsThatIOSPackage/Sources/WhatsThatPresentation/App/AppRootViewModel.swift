@@ -60,15 +60,26 @@ public final class AppRootViewModel: ObservableObject {
         updateFlow(session: latestSession)
     }
 
-    public func signIn(email: String, password: String) async throws {
-        guard !isPerformingAuthAction else { return }
+    public enum SignInOutcome {
+        case session(AuthSession)
+        case verificationRequired(email: String)
+    }
+
+    public func signIn(email: String, password: String) async throws -> SignInOutcome {
+        guard !isPerformingAuthAction else { return .session(latestSession) }
 
         isPerformingAuthAction = true
         defer { isPerformingAuthAction = false }
 
         do {
-            let session = try await authUseCase.signIn(email: email, password: password)
-            updateFlow(session: session)
+            let result = try await authUseCase.signIn(email: email, password: password)
+            switch result {
+            case .authenticated(let session):
+                updateFlow(session: session)
+                return .session(session)
+            case .verificationRequired:
+                return .verificationRequired(email: email)
+            }
         } catch let error as AuthError {
             throw error
         } catch {
@@ -76,17 +87,33 @@ public final class AppRootViewModel: ObservableObject {
         }
     }
 
-    public func signUp(email: String, password: String) async throws {
-        guard !isPerformingAuthAction else { return }
+    public enum SignUpOutcome {
+        case session(AuthSession)
+        case verificationRequired
+    }
+
+    public func signUp(email: String, password: String) async throws -> SignUpOutcome {
+        guard !isPerformingAuthAction else {
+             // Return early or throw? Generally we guard in UI, but safe to throw invalid state or just return
+             // If we return, we need a valid outcome. Let's stick to existing guard logic but throws is cleaner for rate limiting etc.
+             // Actually existing logic just returns if performing.
+             // But the signature expects a return.
+             // Let's assume the UI prevents this, but for safety throw rate limit or ignored.
+             return .session(latestSession) 
+        }
 
         isPerformingAuthAction = true
         defer { isPerformingAuthAction = false }
 
         do {
-            let session = try await authUseCase.signUp(email: email, password: password)
-            updateFlow(session: session)
-        } catch let error as AuthError {
-            throw error
+            let result = try await authUseCase.signUp(email: email, password: password)
+            switch result {
+            case .authenticated(let session):
+                updateFlow(session: session)
+                return .session(session)
+            case .verificationRequired:
+                return .verificationRequired
+            }
         } catch {
             throw AuthError.unknown
         }
@@ -187,6 +214,17 @@ public final class AppRootViewModel: ObservableObject {
 
     public func cancelPasswordResetFlow() async {
         try? await signOut()
+    }
+
+    public func verifyEmail(from url: URL) async -> AuthError? {
+        do {
+            try await authUseCase.verifyEmailFromLink(url: url)
+            return nil
+        } catch let error as AuthError {
+            return error
+        } catch {
+            return .unknown
+        }
     }
 
     // MARK: - Private

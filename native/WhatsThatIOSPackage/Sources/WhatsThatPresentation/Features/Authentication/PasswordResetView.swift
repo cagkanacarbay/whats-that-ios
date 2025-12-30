@@ -27,7 +27,9 @@ struct PasswordResetView: View {
                 .ignoresSafeArea()
 
             GeometryReader { geo in
-                let viewportHeight = geo.size.height
+                // Guard against NaN or invalid values during keyboard animations
+                let rawHeight = geo.size.height
+                let viewportHeight = rawHeight.isFinite && rawHeight > 0 ? rawHeight : nil
                 ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: BrandSpacing.large) {
                             VStack(spacing: BrandSpacing.small) {
@@ -115,6 +117,7 @@ struct PasswordResetView: View {
                         .padding(.horizontal, BrandSpacing.large)
                         .padding(.bottom, BrandSpacing.large)
                         // Center vertically when content is shorter than viewport.
+                        // Only apply minHeight when we have a valid viewport size.
                         .frame(minHeight: viewportHeight, alignment: .center)
                     }
                 }

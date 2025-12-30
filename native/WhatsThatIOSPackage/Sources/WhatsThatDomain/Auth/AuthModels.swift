@@ -80,6 +80,16 @@ public enum AuthSession: Equatable, Sendable {
     }
 }
 
+public enum SignUpResult: Equatable, Sendable {
+    case authenticated(AuthSession)
+    case verificationRequired
+}
+
+public enum SignInResult: Equatable, Sendable {
+    case authenticated(AuthSession)
+    case verificationRequired
+}
+
 public enum AuthError: LocalizedError, Equatable, Sendable {
     case invalidCredentials
     case emailAlreadyInUse
@@ -92,6 +102,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
     case passwordSame
     case cancelled
     case accountDeletionFailed
+    case rateLimitExceeded
+    case internalError(String)
     case unknown
 
     public var errorDescription: String? {
@@ -100,8 +112,9 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "We couldn't sign you in with those details. Double-check your email and password."
         case .emailAlreadyInUse:
             return "An account with this email already exists. Try signing in instead."
+
         case .passwordTooWeak:
-            return "Try a stronger password with at least 8 characters."
+            return "This password may have been exposed in a data breach. Please choose a different one."
         case .passwordResetFailed:
             return "We couldn't send the reset instructions. Please try again in a few minutes."
         case .passwordResetRateLimited:
@@ -118,6 +131,10 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "The sign-in flow was cancelled."
         case .accountDeletionFailed:
             return "We couldn't delete your account. Please try again or contact support."
+        case .rateLimitExceeded:
+            return "Too many requests. Please wait a few minutes before trying again."
+        case .internalError(let message):
+            return message
         case .unknown:
             return "Something went wrong. Please try again."
         }
@@ -127,8 +144,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
 public protocol AuthService: Sendable {
     func currentSession() async throws -> AuthSession
     func sessionUpdates() async -> AsyncStream<AuthSession>
-    func signIn(email: String, password: String) async throws -> AuthSession
-    func signUp(email: String, password: String) async throws -> AuthSession
+    func signIn(email: String, password: String) async throws -> SignInResult
+    func signUp(email: String, password: String) async throws -> SignUpResult
     func signInWithGoogle() async throws -> AuthSession
     func signInWithApple() async throws -> AuthSession
     func signOut() async throws
@@ -136,4 +153,5 @@ public protocol AuthService: Sendable {
     func bootstrapPasswordResetSession(from url: URL) async throws -> AuthenticatedUser
     func updatePassword(to newPassword: String) async throws
     func deleteAccount() async throws
+    func verifyEmailFromLink(url: URL) async throws
 }

@@ -18,6 +18,7 @@ struct DiscoveryConfirmationView: View {
     let onShowLocationPermissions: () -> Void
     let onShowMissingUploadLocation: () -> Void
     let onShowOutOfCredits: () -> Void
+    @Binding var generateAudioGuide: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var bottomOverlayHeight: CGFloat = 0
@@ -194,7 +195,8 @@ struct DiscoveryConfirmationView: View {
                         if let onRequestCredits {
                             onRequestCredits()
                         }
-                    }
+                    },
+                    generateAudioGuide: $generateAudioGuide
                 )
                 .padding(.top, previewBottomSpacing)
                 .padding(.horizontal, BrandSpacing.large)

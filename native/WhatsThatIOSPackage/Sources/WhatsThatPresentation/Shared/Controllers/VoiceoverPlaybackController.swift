@@ -320,6 +320,26 @@ public extension VoiceoverPlaybackController {
 
     func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
         log.debug("[requestVoiceover] CALLED for id=\(discovery.id), title='\(discovery.title)'")
+        
+        // Optimistically set processing state immediately to update UI without waiting for Task scheduling
+        // Use activePreferences as a best guess; the Task will update with resolved preferences shortly.
+        self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+            discoveryId: discovery.id,
+            status: .processing,
+            audioURL: nil,
+            provider: nil,
+            ttsModel: preferences?.ttsModel ?? self.activePreferences.ttsModel,
+            voiceModelId: preferences?.voiceModelId ?? self.activePreferences.voiceModelId,
+            fileName: nil,
+            fileExtension: nil,
+            requestedAt: Date(),
+            updatedAt: Date(),
+            errorReason: nil,
+            wasExistingResponse: false,
+            wasRefunded: false
+        )
+        markPending(discovery.id)
+        
         Task { [weak self] in
             guard let self else {
                 log.error("[requestVoiceover] self is nil, aborting")

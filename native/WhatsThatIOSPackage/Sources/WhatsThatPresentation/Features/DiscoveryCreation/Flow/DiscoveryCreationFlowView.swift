@@ -199,7 +199,8 @@ struct DiscoveryCreationFlowView: View {
                 onRequestCredits: makeCreditsHandler,
                 onShowLocationPermissions: { showLocationPermissionsAlert() },
                 onShowMissingUploadLocation: { presentMissingUploadLocationSheet() },
-                onShowOutOfCredits: { showOutOfCreditsAlert() }
+                onShowOutOfCredits: { showOutOfCreditsAlert() },
+                generateAudioGuide: $viewModel.generateAudioGuide
             )
         case .analyzing:
             streamingStage
@@ -212,7 +213,8 @@ struct DiscoveryCreationFlowView: View {
             viewModel: viewModel,
             imageData: viewModel.confirmationState?.displayImageData,
             capturedAt: viewModel.confirmationState?.media.createdAt,
-            onCancel: { viewModel.cancelFlow() }
+            onCancel: { viewModel.cancelFlow() },
+            makeCreditsViewModel: makeCreditsViewModel
         )
     }
 

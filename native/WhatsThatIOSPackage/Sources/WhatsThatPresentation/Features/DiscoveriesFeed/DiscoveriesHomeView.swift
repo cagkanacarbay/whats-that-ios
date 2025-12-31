@@ -254,6 +254,7 @@ struct DiscoveriesHomeView: View {
                 if storeObserver.isPaginating {
                     HStack(spacing: BrandSpacing.small) {
                         ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .progressViewStyle(.circular)
                         Text("Loading more")
                             .font(.system(size: 14, weight: .semibold))
@@ -593,6 +594,7 @@ struct DiscoveriesHomeView: View {
 
     private func refreshIndicator(opacity: Double) -> some View {
         ProgressView()
+            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
             .progressViewStyle(.circular)
             .controlSize(.large)
             .scaleEffect(1.1, anchor: .center)

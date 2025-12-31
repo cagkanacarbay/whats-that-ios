@@ -11,6 +11,7 @@ public enum MainTabDestination {
 }
 
 struct MainTabView: View {
+    @Environment(\.colorScheme) private var colorScheme
     private enum Tab: Hashable {
         case camera
         case discoveries
@@ -146,6 +147,7 @@ struct MainTabView: View {
             }
             
             // Global mini player overlay - wrapped to properly observe controller changes
+            // Use zIndex(2) when analyzing to appear above the creation overlay (zIndex 1)
             MiniPlayerVisibilityWrapper(
                 controller: audioServices.playbackController,
                 miniPlayerPresence: audioServices.miniPlayerPresence,
@@ -166,10 +168,12 @@ struct MainTabView: View {
                 .padding(.bottom, 49 + 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            .zIndex(activeOverlayPhase == .analyzing ? 2 : 0)
             
             // Generation complete toast - positioned above mini player
             GenerationToastOverlay(audioServices: audioServices)
         }
+        .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
         .alert("Processing Discovery", isPresented: $showingProcessingAlert) {
             Button("OK") { showingProcessingAlert = false }
         } message: {

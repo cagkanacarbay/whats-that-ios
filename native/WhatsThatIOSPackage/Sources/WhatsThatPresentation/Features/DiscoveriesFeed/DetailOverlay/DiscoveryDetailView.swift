@@ -397,8 +397,6 @@ private struct DiscoveryDetailContentView: View {
                         if let audioServices {
                             DiscoveryAudioControls(
                                 discovery: discovery,
-                                voiceoverStatus: voiceoverStatus,
-                                isPlaying: isPlaying,
                                 audioServices: audioServices,
                                 scrollOffset: $audioControlsScrollOffset
                             )
@@ -473,30 +471,6 @@ private struct DiscoveryDetailContentView: View {
     // - asset is available, or
     // - an error occurred and a retry makes sense, or
     // - playback previously failed for this discovery (retry)
-
-
-    private var voiceoverStatus: AudioGuideRowStatus {
-        guard let asset = voiceoverController.normalizedAsset(for: discovery.id) else {
-            return .empty
-        }
-        switch asset.status {
-        case .ready:
-            return .ready(duration: nil)
-        case .processing:
-            return .generating
-        case .failed:
-            return .failed
-        case .none, .missing:
-            return .empty
-        }
-    }
-
-    private var isPlaying: Bool {
-        if case .playing(let id) = voiceoverController.playbackState {
-            return id == discovery.id
-        }
-        return false
-    }
 
     @ViewBuilder
     private func detailDescriptionView(isReady: Bool) -> some View {

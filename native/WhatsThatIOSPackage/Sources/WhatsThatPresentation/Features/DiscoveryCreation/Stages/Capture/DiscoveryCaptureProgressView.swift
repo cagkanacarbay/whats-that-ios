@@ -15,7 +15,7 @@ struct DiscoveryCaptureProgressView: View {
                     .progressViewStyle(.circular)
                     .controlSize(.large)
                     .scaleEffect(1.25)
-                    .tint(palette.primaryAction)
+                    .tint(BrandColors.spinner)
                 Text("Preparing…")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(palette.textPrimary)

@@ -151,12 +151,12 @@ struct AudioGuideRowView<MenuContent: View>: View {
             case .generating, .generationQueued:
                 Color.black.opacity(0.4)
                 ProgressView()
-                    .tint(.white)
+                    .tint(BrandColors.spinner)
                     .scaleEffect(0.85)
             case .checking:
                 Color.black.opacity(0.3)
                 ProgressView()
-                    .tint(.white)
+                    .tint(BrandColors.spinner)
                     .controlSize(.small)
             case .failed:
                 Color.black.opacity(0.4)
@@ -211,6 +211,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
             case .checking:
                 HStack(spacing: 4) {
                     ProgressView()
+                        .tint(BrandColors.spinner)
                         .controlSize(.mini)
                     Text("Checking...")
                         .font(.caption)

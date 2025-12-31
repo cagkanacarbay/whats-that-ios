@@ -61,6 +61,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     @Published var showPollingFailedAlert: Bool = false
     @Published var showFreeCreditsExhaustedAtAudioGeneration: Bool = false
     @Published var showFreeCreditsExhaustedAtConfirm: Bool = false
+    
+    /// Whether to generate an audio guide for this discovery. Defaults to the user's global setting
+    /// from VoiceoverPreferences but can be overridden per-discovery without affecting the global setting.
+    @Published var generateAudioGuide: Bool = true
 
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
@@ -503,6 +507,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         confirmationState = initialConfirmationState
         flowState = .confirming(initialConfirmationState)
         currentMedia = media
+        
+        // Load the default value for generateAudioGuide from preferences
+        if let store = voiceoverPreferencesStore {
+            let prefs = await store.load()
+            generateAudioGuide = prefs.autoEnabled
+        }
 
         // Debug: dump nearby cache state as we enter confirmation
         await locationService.debugLogNearbyState(current: initialLocation)
@@ -1006,21 +1016,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
         
         // Trigger auto TTS if enabled.
-        Task { [weak self] in
-            guard let self,
-                  let voiceoverRepository,
-                  let preferencesStore = voiceoverPreferencesStore else { return }
-            
-            let preferences = await preferencesStore.load()
-            print("[DiscoveryCreationFlowViewModel] autoTTS check: autoEnabled=\(preferences.autoEnabled), voiceModelId='\(preferences.voiceModelId)'")
-            guard preferences.autoEnabled, !preferences.voiceModelId.isEmpty else { return }
-            print("[DiscoveryCreationFlowViewModel] autoTTS=enabled voiceModelId=\(preferences.voiceModelId) discoveryId=\(discoveryId)")
-            _ = await voiceoverRepository.requestVoiceover(
-                for: discoveryId,
-                voiceModelId: preferences.voiceModelId,
-                ttsModel: preferences.ttsModel
-            )
-        }
+        // MOVED TO VIEW: We now handle this in DiscoveryStreamingStageView so that
+        // VoiceoverPlaybackController is properly involved and can update UI state.
     }
 
     func retryWithPendingMedia() {

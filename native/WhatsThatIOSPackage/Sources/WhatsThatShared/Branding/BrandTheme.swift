@@ -12,7 +12,12 @@ public enum BrandColors {
         public static let primaryActionPressed = Color(hex: "#30A46C")
         public static let accentText = Color(hex: "#1F2933")
         public static let bodyText = Color(hex: "#4B5563")
+        
+        /// Tab bar selected icon/text color in light mode
+        public static let tabSelected = Color(hex: "#FFA830")
     }
+
+    public static let spinner = logo
 
     public enum Dark {
         public static let background = Color(hex: "#080A15")
@@ -45,6 +50,8 @@ public extension Color {
         Scanner(string: cleanedHex).scanHexInt64(&int)
 
         let r, g, b: UInt64
+        var a: UInt64 = 255
+        
         switch cleanedHex.count {
         case 3: // RGB (12-bit)
             (r, g, b) = (
@@ -58,8 +65,15 @@ public extension Color {
                 (int >> 8) & 0xFF,
                 int & 0xFF
             )
+        case 8: // RGBA (32-bit)
+            (r, g, b, a) = (
+                (int >> 24) & 0xFF,
+                (int >> 16) & 0xFF,
+                (int >> 8) & 0xFF,
+                int & 0xFF
+            )
         default:
-            (r, g, b) = (1, 1, 1)
+            (r, g, b) = (255, 128, 0) // Fallback to orange for debugging
         }
 
         self.init(
@@ -67,7 +81,7 @@ public extension Color {
             red: Double(r) / 255,
             green: Double(g) / 255,
             blue: Double(b) / 255,
-            opacity: 1
+            opacity: Double(a) / 255
         )
     }
 }

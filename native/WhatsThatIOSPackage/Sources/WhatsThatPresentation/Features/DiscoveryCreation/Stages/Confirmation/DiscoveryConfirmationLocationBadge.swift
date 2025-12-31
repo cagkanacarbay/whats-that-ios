@@ -1,5 +1,5 @@
 import SwiftUI
-
+import WhatsThatShared
 struct DiscoveryConfirmationLocationBadge: View {
     enum Content {
         case resolved(action: () -> Void)
@@ -43,7 +43,7 @@ struct DiscoveryConfirmationLocationBadge: View {
         case .resolving:
             ProgressView()
                 .progressViewStyle(.circular)
-                .tint(palette.overlayButtonForeground)
+                .tint(BrandColors.spinner)
             .foregroundStyle(palette.overlayButtonForeground.opacity(0.9))
             .padding(.horizontal, DiscoveryCreationViewConstants.overlayCapsuleHorizontalPadding)
             .padding(.vertical, DiscoveryCreationViewConstants.overlayCapsuleVerticalPadding)

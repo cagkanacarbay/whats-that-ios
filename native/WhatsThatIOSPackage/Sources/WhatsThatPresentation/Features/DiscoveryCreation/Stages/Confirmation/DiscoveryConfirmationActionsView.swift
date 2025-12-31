@@ -14,20 +14,29 @@ struct DiscoveryConfirmationActionsView: View {
     let onContinue: () -> Void
     let onOutOfCredits: () -> Void
     let onCreditsTap: (() -> Void)?
+    @Binding var generateAudioGuide: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button(action: { onCreditsTap?() }) {
-                Text(creditDisplayText)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(creditTint)
-                    .padding(.horizontal, BrandSpacing.small)
-                    .padding(.top, BrandSpacing.small / 2)
-                    .padding(.bottom, 1)
-                    .contentShape(Rectangle())
+            HStack(alignment: .center) {
+                Button(action: { onCreditsTap?() }) {
+                    Text(creditDisplayText)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(creditTint)
+                        .padding(.horizontal, BrandSpacing.small)
+                        .padding(.top, BrandSpacing.small / 2)
+                        .padding(.bottom, 1)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Allow opening Credits even if balance is loading/unknown.
+                
+                Spacer()
+                
+                AudioToggleView(isOn: $generateAudioGuide, palette: palette)
+                    .padding(.trailing, 4) // Add slight trailing padding for visual balance
             }
-            .buttonStyle(.plain)
-            // Allow opening Credits even if balance is loading/unknown.
+            .padding(.bottom, 4)
 
             HStack(spacing: BrandSpacing.small) {
                 Button(action: onRetake) {

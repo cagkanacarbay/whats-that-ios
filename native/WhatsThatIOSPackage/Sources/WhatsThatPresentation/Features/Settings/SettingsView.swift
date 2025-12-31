@@ -227,6 +227,7 @@ struct SettingsView: View {
     private var audioGuidesSection: some View {
         Section(header: Text("Audio guides")) {
             Toggle("Auto-generate audio guides after analysis (1 credit)", isOn: autoGenerateAudioGuideBinding)
+                .tint(BrandColors.logo)
                 .disabled(voicePickerViewModel.isAutoToggleLocked)
             
             if voicePickerViewModel.isAutoToggleLocked {
@@ -260,6 +261,7 @@ struct SettingsView: View {
                         } else if voicePickerViewModel.voices.isEmpty {
                             HStack(spacing: 8) {
                                 ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                                     .progressViewStyle(.circular)
                                 Text("Loading voices")
                                     .font(.footnote)
@@ -337,6 +339,7 @@ struct SettingsView: View {
                     HStack {
                         if viewModel.isRequestingPasswordReset {
                             ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                                 .progressViewStyle(.circular)
                         }
                         Text("Email me a reset link")
@@ -360,6 +363,7 @@ struct SettingsView: View {
                 HStack {
                     if viewModel.isSigningOut {
                         ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .progressViewStyle(.circular)
                     }
                     Text("Sign out")
@@ -396,6 +400,7 @@ struct SettingsView: View {
 
                     if viewModel.isLoadingCredits {
                         ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .progressViewStyle(.circular)
                     } else if let balance = viewModel.creditBalance {
                         Text("\(balance)")
@@ -446,6 +451,7 @@ struct SettingsView: View {
                 HStack {
                     if viewModel.isClearingAppStore {
                         ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .progressViewStyle(.circular)
                     }
                     Text("Clear App Store account cache")
@@ -465,6 +471,7 @@ struct SettingsView: View {
                 HStack {
                     if viewModel.isProcessing {
                         ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .progressViewStyle(.circular)
                     }
                     Text("Reset onboarding experience")
@@ -947,6 +954,7 @@ private struct DeletingAccountOverlay: View {
 
             VStack(spacing: BrandSpacing.large) {
                 ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                     .progressViewStyle(.circular)
                     .scaleEffect(1.5)
                     .tint(.white)

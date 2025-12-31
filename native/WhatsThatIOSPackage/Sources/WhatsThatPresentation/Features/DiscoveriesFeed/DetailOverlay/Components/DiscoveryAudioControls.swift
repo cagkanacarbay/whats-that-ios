@@ -4,9 +4,30 @@ import WhatsThatShared
 
 struct DiscoveryAudioControls: View {
     let discovery: DiscoverySummary
-    let voiceoverStatus: AudioGuideRowStatus
-    let isPlaying: Bool
     @Binding var scrollOffset: CGFloat
+
+    private var voiceoverStatus: AudioGuideRowStatus {
+        guard let asset = voiceoverController.normalizedAsset(for: discovery.id) else {
+            return .empty
+        }
+        switch asset.status {
+        case .ready:
+            return .ready(duration: nil)
+        case .processing:
+            return .generating
+        case .failed:
+            return .failed
+        case .none, .missing:
+            return .empty
+        }
+    }
+
+    private var isPlaying: Bool {
+        if case .playing(let id) = voiceoverController.playbackState {
+            return id == discovery.id
+        }
+        return false
+    }
     
     @Environment(\.colorScheme) private var colorScheme
     
@@ -63,15 +84,11 @@ struct DiscoveryAudioControls: View {
     
     init(
         discovery: DiscoverySummary,
-        voiceoverStatus: AudioGuideRowStatus,
-        isPlaying: Bool,
         audioServices: AudioServicesContainer,
         scrollOffset: Binding<CGFloat>,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self.discovery = discovery
-        self.voiceoverStatus = voiceoverStatus
-        self.isPlaying = isPlaying
         self._scrollOffset = scrollOffset
         self._voiceoverController = ObservedObject(wrappedValue: audioServices.playbackController)
         self.queueStore = audioServices.queueStore

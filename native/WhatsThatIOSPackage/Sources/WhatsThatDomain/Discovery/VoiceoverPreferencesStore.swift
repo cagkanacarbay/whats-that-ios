@@ -39,8 +39,10 @@ public actor VoiceoverPreferencesStore: Sendable {
         let autoEnabled = defaults.object(forKey: key("autoEnabled")) as? Bool ?? true
         // Use saved voiceModelId, then passed default (if non-empty), then Adrian as ultimate fallback
         let savedVoiceModelId = defaults.string(forKey: key("voiceModelId"))
+        let effectiveSaved = (savedVoiceModelId?.isEmpty == false) ? savedVoiceModelId : nil
         let effectiveDefault = (defaultVoiceModelId?.isEmpty == false) ? defaultVoiceModelId : nil
-        let voiceModelId = savedVoiceModelId 
+        
+        let voiceModelId = effectiveSaved 
             ?? effectiveDefault 
             ?? Self.defaultVoiceModelId
         let ttsModel = defaults.string(forKey: key("ttsModel")) ?? defaultTtsModel

@@ -11,20 +11,24 @@ struct DiscoveryStreamingStageView: View {
     let imageData: Data?
     let capturedAt: Date?
     let onCancel: () -> Void
+    private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
         imageData: Data?,
         capturedAt: Date?,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self._viewModel = ObservedObject(initialValue: viewModel)
         self.imageData = imageData
         self.capturedAt = capturedAt
         self.onCancel = onCancel
+        self.makeCreditsViewModel = makeCreditsViewModel
     }
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.audioServices) private var audioServices
     @State private var displayedMarkdown: String = ""
     @State private var loaderCleared: Bool = false
     @State private var shuffledMessages: [String] = DiscoveryStreamingStageView.loadingMessages.shuffled()
@@ -97,6 +101,8 @@ struct DiscoveryStreamingStageView: View {
     private var shouldShowLoader: Bool {
         !loaderCleared
     }
+    
+
 
     var body: some View {
         GeometryReader { proxy in
@@ -128,6 +134,12 @@ struct DiscoveryStreamingStageView: View {
                                     .compositingGroup(),
                                 alignment: .bottom
                             )
+
+                        // Audio controls - shown when stream completes and discovery summary is available
+                        // Placed at top to match DiscoveryDetailView
+                        audioControlsSection
+                            .padding(.top, -6)
+                            .padding(.horizontal, BrandSpacing.large)
 
                         markdownSection
                             .id(ScrollTarget.markdown)
@@ -462,6 +474,57 @@ struct DiscoveryStreamingStageView: View {
             isStreaming: state.isStreaming
         )
     }
+    
+    @ViewBuilder
+    private var audioControlsSection: some View {
+        // Show audio controls only when:
+        // 1. Stream has finished
+        // 2. Discovery summary is available (hydrated from server)
+        // 3. Audio services are available
+        // OTHERWISE: Reserve space to prevent layout jump
+        Group {
+            if !state.isStreaming,
+               let discovery = state.discoverySummary,
+               let audioServices {
+                DiscoveryAudioControls(
+                    discovery: discovery,
+                    audioServices: audioServices,
+                    scrollOffset: .constant(100), // Force "embedded" mode
+                    makeCreditsViewModel: makeCreditsViewModel
+                )
+                .onAppear {
+                    // Prefetch voiceover status for this discovery
+                    audioServices.playbackController.prefetch(for: [discovery.id])
+                }
+                .onChange(of: discovery) { _, newDiscovery in
+                    // If we just got a summary and auto-generation is on, trigger it via controller
+                    if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
+                        print("[DiscoveryStreamingStageView] Auto-triggering voiceover for id=\(newDiscovery.id) per viewModel.generateAudioGuide=true")
+                        hasTriggeredAutoGeneration = true
+                        // Do NOT pass activePreferences here; let the controller load the persisted preferences.
+                        // Passing empty defaults from an uninitialized controller would overwrite the user's saved voice model.
+                        audioServices.playbackController.requestVoiceover(for: newDiscovery)
+                    }
+                }
+                .task {
+                    // Also check on initial mount of this sub-component if discovery is already there
+                    if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
+                        print("[DiscoveryStreamingStageView] Auto-triggering voiceover (task) for id=\(discovery.id)")
+                        hasTriggeredAutoGeneration = true
+                        // Do NOT pass activePreferences here; let the controller load the persisted preferences.
+                        audioServices.playbackController.requestVoiceover(for: discovery)
+                    }
+                }
+            } else {
+                // Reserve space matching DiscoveryAudioControls height (approx 50pt)
+                Color.clear
+                    .frame(height: 50)
+            }
+        }
+        .padding(.bottom, BrandSpacing.small)
+    }
+
+    @State private var hasTriggeredAutoGeneration: Bool = false
 
     private static let loadingMessages: [String] = [
         "Identifying landmarks…",

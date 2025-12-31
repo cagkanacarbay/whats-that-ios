@@ -28,6 +28,7 @@ public struct VoicePickerView: View {
         VStack(spacing: 0) {
             if viewModel.voices.isEmpty {
                 ProgressView()
+                    .tint(BrandColors.spinner)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Voice List
@@ -115,7 +116,7 @@ struct VoiceRow: View {
                     if isLoading {
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(palette.primaryAction)
+                            .tint(BrandColors.spinner)
                             .frame(width: 20, height: 20)
                     } else if isPlaying {
                         Image(systemName: "pause.fill")

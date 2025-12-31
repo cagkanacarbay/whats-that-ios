@@ -39,7 +39,7 @@ struct VoiceoverDetailButton: View {
                 } else {
                     ProgressView()
                         .progressViewStyle(.circular)
-                        .tint(palette.overlayButtonForeground)
+                        .tint(BrandColors.spinner)
                 }
 
                 Text(buttonTitle)

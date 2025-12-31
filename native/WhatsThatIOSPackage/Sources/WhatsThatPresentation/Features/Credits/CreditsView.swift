@@ -149,6 +149,7 @@ public struct CreditsView: View {
                                 .foregroundStyle(palette.textPrimary)
                             if viewModel.isRefreshingBalance {
                                 ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                                     .progressViewStyle(.circular)
                             }
                         }
@@ -156,6 +157,7 @@ public struct CreditsView: View {
                     } else {
                         HStack(spacing: 6) {
                             ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                                 .progressViewStyle(.circular)
                             Text("Loading…")
                                 .font(.system(size: 20, weight: .semibold))
@@ -204,6 +206,7 @@ public struct CreditsView: View {
 
                 if viewModel.isFetchingProducts {
                     ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                         .progressViewStyle(.circular)
                 }
             }
@@ -231,9 +234,8 @@ public struct CreditsView: View {
                 HStack(spacing: 6) {
                     if viewModel.isRestoring {
                         ProgressView()
-                            .progressViewStyle(.circular)
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                             .scaleEffect(0.8)
-                            .tint(palette.textSecondary)
                     }
                     Text("Restore Purchases")
                         .font(.system(size: 14, weight: .semibold))

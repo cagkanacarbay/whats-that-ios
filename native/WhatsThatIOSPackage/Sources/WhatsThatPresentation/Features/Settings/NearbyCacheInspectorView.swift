@@ -1,6 +1,6 @@
 import SwiftUI
 import WhatsThatDomain
-
+import WhatsThatShared
 public struct NearbyCacheInspectorView: View {
     let loadSnapshots: () async -> [NearbyPlacesSnapshot]
     let loadCurrent: () async -> DiscoveryLocation?
@@ -62,6 +62,7 @@ public struct NearbyCacheInspectorView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if isLoading {
                         ProgressView()
+                            .tint(BrandColors.spinner)
                     } else {
                         Button("Refresh") { Task { await refresh() } }
                     }

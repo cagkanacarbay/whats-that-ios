@@ -32,7 +32,7 @@ struct DiscoveryStreamingLoaderView: View {
     private var pollingMessage: some View {
         VStack(spacing: BrandSpacing.medium) {
             ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: palette.textPrimary))
+                .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                 .scaleEffect(1.2)
             
             Text(state.statusMessage ?? "Checking for your discovery...")

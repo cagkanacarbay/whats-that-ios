@@ -750,6 +750,7 @@ private struct UpNextRowContainer: View {
                 }
             } else {
                 ProgressView()
+                    .tint(BrandColors.spinner)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 12)
             }
@@ -851,7 +852,7 @@ struct DiscoverListView: View {
             if viewModel.isLoadingMore {
                  HStack(spacing: BrandSpacing.small) {
                      ProgressView()
-                         .progressViewStyle(.circular)
+                         .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                      Text("Loading more")
                          .font(.system(size: 14, weight: .semibold))
                  }

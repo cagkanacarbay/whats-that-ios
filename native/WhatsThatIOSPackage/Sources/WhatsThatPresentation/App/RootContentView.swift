@@ -486,6 +486,7 @@ public struct RootContentView: View {
                     onSettings: {
                         isSettingsPresented = true
                     },
+                    isSettingsPresented: $isSettingsPresented,
                     makeCreditsViewModel: makeCreditsViewModel
                 )
                 .onAppear {

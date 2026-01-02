@@ -22,6 +22,8 @@ struct DiscoveriesHomeView: View {
     @Binding private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
+    /// When true, the settings icon shows as selected (filled with orange)
+    private var isSettingsSelected: Bool
     private let onQuickCamera: (() -> Void)?
     private let onQuickUpload: (() -> Void)?
     private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
@@ -61,6 +63,7 @@ struct DiscoveriesHomeView: View {
         audioGuidesTargetDiscoverySummary: Binding<DiscoverySummary?>,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
+        isSettingsSelected: Bool = false,
         onQuickCamera: (() -> Void)? = nil,
         onQuickUpload: (() -> Void)? = nil,
         onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil
@@ -74,6 +77,7 @@ struct DiscoveriesHomeView: View {
         self._audioGuidesTargetDiscoverySummary = audioGuidesTargetDiscoverySummary
         self.onSignOut = onSignOut
         self.onSettings = onSettings
+        self.isSettingsSelected = isSettingsSelected
         self.onQuickCamera = onQuickCamera
         self.onQuickUpload = onQuickUpload
         self.onOpenAudioGuide = onOpenAudioGuide
@@ -201,7 +205,8 @@ struct DiscoveriesHomeView: View {
                     metrics: metrics,
                     backgroundColor: backgroundColor,
                     onSignOut: onSignOut,
-                    onSettings: onSettings
+                    onSettings: onSettings,
+                    isSettingsSelected: isSettingsSelected
                 )
                     .onPreferenceChange(HeaderHeightPreferenceKey.self) { value in
                         guard value > 0 else { return }

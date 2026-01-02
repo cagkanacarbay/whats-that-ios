@@ -8,6 +8,8 @@ struct DiscoveriesHeaderView: View {
     let backgroundColor: Color
     let onSignOut: () -> Void
     let onSettings: (() -> Void)?
+    /// When true, the settings icon shows filled with the tab selected color (orange)
+    var isSettingsSelected: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -18,7 +20,7 @@ struct DiscoveriesHeaderView: View {
                     .foregroundStyle(headerTitleColor)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
-                settingsMenu
+                settingsButton
             }
             .padding(.horizontal, BrandSpacing.large)
             .padding(.top, metrics.headerTopPadding)
@@ -59,17 +61,18 @@ struct DiscoveriesHeaderView: View {
     }
 
     @ViewBuilder
-    private var settingsMenu: some View {
+    private var settingsButton: some View {
         if let onSettings {
-            Menu {
+            Button {
+                onSettings()
+            } label: {
+                settingsIcon
+                    .accessibilityLabel("Settings")
+            }
+            .contextMenu {
                 Button("Sign out", role: .destructive) {
                     onSignOut()
                 }
-            } label: {
-                menuIcon
-                    .accessibilityLabel("Settings")
-            } primaryAction: {
-                onSettings()
             }
         } else {
             Menu {
@@ -77,43 +80,29 @@ struct DiscoveriesHeaderView: View {
                     onSignOut()
                 }
             } label: {
-                menuIcon
+                settingsIcon
                     .accessibilityLabel("Options")
             }
         }
     }
 
-    private var menuIcon: some View {
-        let palette = BrandTheme.palette(for: colorScheme)
+    /// Settings gear icon - always uses gearshape.fill, color matches tab bar (orange when selected, gray when not)
+    private var settingsIcon: some View {
+        let tabSelectedColor = colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected
+        // Gray matches the default tab bar unselected color
+        let unselectedColor = Color.gray
+        let iconColor = isSettingsSelected ? tabSelectedColor : unselectedColor
 
         return Image(systemName: "gearshape.fill")
-            .font(.system(size: 18, weight: .semibold))
+            .font(.system(size: 22, weight: .medium))
             .symbolRenderingMode(.monochrome)
-            .foregroundStyle(headerTitleColor)
-            .frame(width: 34, height: 34)
-            .background(.thinMaterial, in: Circle())
-            .overlay(
-                Circle()
-                    .stroke(headerIconBorderColor(palette: palette), lineWidth: 0.75)
-            )
-            .shadow(color: headerIconShadowColor, radius: 2, y: 1)
-            .padding(4) // ensures a ~44pt hit target
+            .foregroundStyle(iconColor)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var headerTitleColor: Color {
         colorScheme == .dark ? Color.white : BrandColors.Light.accentText
-    }
-
-    private func headerIconBorderColor(palette: BrandTheme.Palette) -> Color {
-        colorScheme == .dark ? Color.white.opacity(0.18) : palette.border.opacity(0.6)
-    }
-
-    private var headerIconShadowColor: Color {
-        colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08)
-    }
-
-    private var shadowColor: Color {
-        colorScheme == .dark ? Color.black.opacity(0.6) : Color.black.opacity(0.12)
     }
 
     private var hairlineColor: Color {

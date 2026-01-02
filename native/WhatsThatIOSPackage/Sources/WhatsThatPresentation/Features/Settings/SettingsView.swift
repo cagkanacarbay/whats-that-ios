@@ -843,9 +843,10 @@ private struct AudioGuidePickerSheet: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Select an audio guide narrator")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Color.primary)
-                .padding(.horizontal, BrandSpacing.large)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
 
             VoicePickerView(
                 viewModel: viewModel,

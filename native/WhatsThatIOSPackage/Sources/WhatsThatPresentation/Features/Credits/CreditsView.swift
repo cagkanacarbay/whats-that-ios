@@ -95,9 +95,10 @@ public struct CreditsView: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Credits")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Color.primary)
-                .padding(.horizontal, BrandSpacing.large)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
         }
     }
 
@@ -126,63 +127,62 @@ public struct CreditsView: View {
     }
 
     private var balanceCard: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .center, spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(palette.primaryAction.opacity(0.15))
-                        .frame(width: 60, height: 60)
-                    Image(systemName: "wallet.pass.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(palette.primaryAction)
-                }
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(BrandColors.Light.tabSelected.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(BrandColors.Light.tabSelected.opacity(0.3), lineWidth: 1.5)
+                    )
+                    .frame(width: 52, height: 52)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(BrandColors.Light.tabSelected)
+            }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Current balance")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(palette.textSecondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Current balance")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(palette.textSecondary)
 
-                    if let balance = viewModel.balance {
-                        HStack(spacing: 8) {
-                            Text("\(balance) credits")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(palette.textPrimary)
-                            if viewModel.isRefreshingBalance {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
-                                    .progressViewStyle(.circular)
-                            }
-                        }
-                    
-                    } else {
-                        HStack(spacing: 6) {
+                if let balance = viewModel.balance {
+                    HStack(spacing: 8) {
+                        Text("\(balance) credits")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(palette.textPrimary)
+                        if viewModel.isRefreshingBalance {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
+                                .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.Light.tabSelected))
                                 .progressViewStyle(.circular)
-                            Text("Loading…")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(palette.textPrimary)
                         }
                     }
+
+                } else {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.Light.tabSelected))
+                            .progressViewStyle(.circular)
+                        Text("Loading…")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(palette.textPrimary)
+                    }
                 }
-                Spacer()
             }
+
+            Spacer()
 
             Button {
                 Task { await viewModel.refreshBalance() }
             } label: {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Refresh balance")
-                }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(palette.primaryAction)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 16)
-                .background(
-                    Capsule()
-                        .fill(palette.primaryAction.opacity(0.12))
-                )
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.primaryAction)
+                    .padding(12)
+                    .background(
+                        Circle()
+                            .fill(palette.primaryAction.opacity(0.12))
+                    )
             }
             .disabled(viewModel.isLoading || viewModel.isFetchingProducts)
         }
@@ -206,7 +206,7 @@ public struct CreditsView: View {
 
                 if viewModel.isFetchingProducts {
                     ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
+                        .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.Light.tabSelected))
                         .progressViewStyle(.circular)
                 }
             }
@@ -234,7 +234,7 @@ public struct CreditsView: View {
                 HStack(spacing: 6) {
                     if viewModel.isRestoring {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.Light.tabSelected))
                             .scaleEffect(0.8)
                     }
                     Text("Restore Purchases")
@@ -256,7 +256,7 @@ public struct CreditsView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 16)
+        .padding(.top, 8)
     }
 
     private func toastBanner(_ toast: CreditsViewModel.ToastMessage) -> some View {
@@ -326,14 +326,18 @@ private struct CreditPackCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
-                Image(systemName: pack.iconSystemName)
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(theme.primaryAction)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(theme.primaryAction.opacity(0.1))
-                    )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(BrandColors.Light.tabSelected.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(BrandColors.Light.tabSelected.opacity(0.3), lineWidth: 1.5)
+                        )
+                        .frame(width: 52, height: 52)
+                    Image(systemName: pack.iconSystemName)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(BrandColors.Light.tabSelected)
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(pack.title)

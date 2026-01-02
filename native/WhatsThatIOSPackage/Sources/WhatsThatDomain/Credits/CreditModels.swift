@@ -78,14 +78,14 @@ public enum CreditPackCatalog {
             creditAmount: 100,
             fallbackTitle: "100 Credits",
             fallbackDescription: "Create up to 100 discoveries or 50 discoveries and 50 audio guides.",
-            iconSystemName: "sparkles"
+            iconSystemName: "banknote"
         ),
         CreditPackDefinition(
             id: "1000.credits",
             creditAmount: 1000,
             fallbackTitle: "1,000 Credits",
             fallbackDescription: "Create up to 1,000 discoveries or 500 discoveries and 500 audio guides.",
-            iconSystemName: "globe.americas.fill"
+            iconSystemName: "crown"
         )
     ]
 }

@@ -39,6 +39,8 @@ struct MainTabView: View {
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
+    /// Binding indicating whether the settings sheet is currently presented
+    @Binding private var isSettingsPresented: Bool
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     init(
@@ -50,12 +52,14 @@ struct MainTabView: View {
         initialTab: MainTabDestination = .discoveries,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
+        isSettingsPresented: Binding<Bool> = .constant(false),
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
         self.onSignOut = onSignOut
         self.onSettings = onSettings
+        self._isSettingsPresented = isSettingsPresented
         self.makeCreditsViewModel = makeCreditsViewModel
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
@@ -93,6 +97,7 @@ struct MainTabView: View {
                     audioGuidesTargetDiscoverySummary: $audioGuidesTargetDiscoverySummary,
                     onSignOut: onSignOut,
                     onSettings: onSettings,
+                    isSettingsSelected: isSettingsPresented,
                     onQuickCamera: { selectedTab = .camera },
                     onQuickUpload: { selectedTab = .upload },
                     onOpenAudioGuide: { discovery in

@@ -28,7 +28,7 @@ public struct VoicePickerView: View {
         VStack(spacing: 0) {
             if viewModel.voices.isEmpty {
                 ProgressView()
-                    .tint(BrandColors.spinner)
+                    .tint(BrandColors.Light.tabSelected)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Voice List
@@ -106,24 +106,27 @@ struct VoiceRow: View {
             HStack(spacing: BrandSpacing.medium) {
                 // Icon / Indicator
                 ZStack {
-                    Circle()
-                        .fill(isSelected ? palette.primaryAction.opacity(0.1) : palette.surface)
-                        .frame(width: 48, height: 48)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(BrandColors.Light.tabSelected.opacity(0.1))
                         .overlay(
-                            Circle().stroke(palette.border, lineWidth: isSelected ? 0 : 1)
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(BrandColors.Light.tabSelected.opacity(0.3), lineWidth: 1.5)
                         )
+                        .frame(width: 48, height: 48)
                     
                     if isLoading {
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(BrandColors.spinner)
+                            .tint(BrandColors.Light.tabSelected)
                             .frame(width: 20, height: 20)
                     } else if isPlaying {
                         Image(systemName: "pause.fill")
-                            .foregroundStyle(palette.primaryAction)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(BrandColors.Light.tabSelected)
                     } else {
                         Image(systemName: "play.fill")
-                            .foregroundStyle(isSelected ? palette.primaryAction : palette.textSecondary)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(BrandColors.Light.tabSelected)
                     }
                 }
                 

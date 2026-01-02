@@ -39,11 +39,18 @@ struct IPoPPreferencesListView: View {
         List {
             ForEach(Array(viewModel.orderedDraft.enumerated()), id: \.element.rawValue) { index, dimension in
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: iconName(for: dimension))
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 22)
-                        .padding(.top, 2)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(BrandColors.Light.tabSelected.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(BrandColors.Light.tabSelected.opacity(0.3), lineWidth: 1.5)
+                            )
+                            .frame(width: 36, height: 36)
+                        Image(systemName: iconName(for: dimension))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(BrandColors.Light.tabSelected)
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
@@ -53,13 +60,14 @@ struct IPoPPreferencesListView: View {
                             if index == 0 {
                                 Text("Most important")
                                     .font(.caption)
+                                    .fontWeight(.medium)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
                                     .background(
                                         Capsule()
-                                            .foregroundStyle(Color.accentColor.opacity(0.12))
+                                            .fill(BrandColors.Light.tabSelected.opacity(0.12))
                                     )
-                                    .foregroundStyle(Color.accentColor)
+                                    .foregroundStyle(BrandColors.Light.tabSelected)
                             }
                         }
                         Text(viewModel.subtitle(for: dimension))
@@ -73,7 +81,7 @@ struct IPoPPreferencesListView: View {
                     Text("\(index + 1)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .padding(.top, 4)
+                        .padding(.top, 12)
                 }
                 .padding(.vertical, 4)
             }
@@ -87,11 +95,11 @@ struct IPoPPreferencesListView: View {
     private func iconName(for dimension: IPoPDimension) -> String {
         switch dimension {
         case .ideas:
-            return "lightbulb"
+            return "lightbulb.fill"
         case .people:
-            return "person.2"
+            return "person.2.fill"
         case .objects:
-            return "cube"
+            return "cube.fill"
         case .physical:
             return "figure.walk"
         }
@@ -128,20 +136,24 @@ struct IPoPPreferencesSheet: View {
 
             VStack(alignment: .leading, spacing: BrandSpacing.small) {
                 Text("Content Preferences")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(Color.primary)
-                    .padding(.horizontal, BrandSpacing.large)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
 
                 Text("Put these in the order that matters to you. We’ll shape our answers based on your preferences.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .padding(.horizontal, BrandSpacing.large)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("I care about…")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.primary)
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .padding(.horizontal, BrandSpacing.large)
                         .padding(.top, BrandSpacing.large)
+                        .padding(.bottom, BrandSpacing.small)
 
                     IPoPPreferencesListView(viewModel: viewModel)
                         .frame(maxHeight: .infinity)
@@ -151,6 +163,7 @@ struct IPoPPreferencesSheet: View {
             Text(IPoPStrings.usageNote)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .padding(.horizontal, BrandSpacing.large)
 
             if let error = viewModel.errorMessage {

@@ -245,13 +245,13 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .imageScale(.large)
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Voice model")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(Color.primary)
 
                         if let selectedVoiceName {
@@ -277,7 +277,7 @@ struct SettingsView: View {
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
                 .padding(.vertical, 4)
@@ -294,14 +294,14 @@ struct SettingsView: View {
                 isIPoPSheetPresented = true
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                    Image(systemName: "person.fill.questionmark")
+                        .imageScale(.large)
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Content preferences")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(Color.primary)
 
                         if let summary = ipopPreferencesViewModel.summaryOrder {
@@ -312,11 +312,12 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
                 .padding(.vertical, 4)
@@ -388,12 +389,12 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .imageScale(.large)
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 24)
 
                     Text("Credits")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.body.weight(.medium))
                         .foregroundStyle(Color.primary)
 
                     Spacer()
@@ -404,16 +405,16 @@ struct SettingsView: View {
                             .progressViewStyle(.circular)
                     } else if let balance = viewModel.creditBalance {
                         Text("\(balance)")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                             .foregroundStyle(Color.secondary)
                     } else {
                         Text("—")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                             .foregroundStyle(Color.secondary)
                     }
 
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
                 .padding(.vertical, 4)
@@ -425,8 +426,15 @@ struct SettingsView: View {
         Section(header: Text("Theme")) {
             Picker(selection: appearanceBinding) {
                 ForEach(AppAppearance.allCases) { mode in
-                    Label(mode.displayName, systemImage: mode.symbolName)
-                        .tag(mode)
+                    Label {
+                        Text(mode.displayName)
+                    } icon: {
+                        Image(systemName: mode.symbolName)
+                            .imageScale(.large)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 24)
+                    }
+                    .tag(mode)
                 }
             } label: {
                 EmptyView()
@@ -501,7 +509,7 @@ struct SettingsView: View {
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Override Local Credits")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("Sets cached balance (does not sync to server)")
                             .font(.caption)
@@ -547,7 +555,7 @@ struct SettingsView: View {
                         .foregroundStyle(Color.orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Reset Free Credits Alert")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("Re-show 'credits exhausted' alert next time balance hits 0")
                             .font(.caption)
@@ -567,7 +575,7 @@ struct SettingsView: View {
                         .frame(width: 28, height: 28)
                         .foregroundStyle(Color.accentColor)
                     Text("Nearby places cache (dev)")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.body.weight(.medium))
                         .foregroundStyle(Color.primary)
                     Spacer()
                 }
@@ -598,7 +606,7 @@ struct SettingsView: View {
                         .foregroundStyle(Color.orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Clear Device ID")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("For testing free credit abuse prevention")
                             .font(.caption)
@@ -700,7 +708,7 @@ struct SettingsView: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body.weight(.medium))
                     .foregroundStyle(Color.primary)
                 Text(subtitle)
                     .font(.caption)
@@ -785,6 +793,8 @@ struct SettingsView: View {
             ForEach(items, id: \.self) { item in
                 Text(item)
                     .font(.caption)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(
@@ -794,7 +804,7 @@ struct SettingsView: View {
                     .foregroundStyle(Color.accentColor)
             }
         }
-        .dynamicTypeSize(.large)
+        .dynamicTypeSize(...DynamicTypeSize.large)
     }
 
     private func confirmVoiceSelection() {
@@ -819,7 +829,12 @@ private struct AudioGuidePickerSheet: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var hasConfirmed = false
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
@@ -831,9 +846,9 @@ private struct AudioGuidePickerSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                         Text("Settings")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                     }
                     .foregroundStyle(Color.accentColor)
                 }
@@ -843,7 +858,7 @@ private struct AudioGuidePickerSheet: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Select an audio guide narrator")
-                .font(.system(size: 24, weight: .semibold))
+                .font(.title2.weight(.semibold))
                 .foregroundStyle(Color.primary)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
@@ -863,6 +878,7 @@ private struct AudioGuidePickerSheet: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.large)
         }
+        .background(palette.background)
         .onDisappear {
             if !hasConfirmed {
                 onCancel()
@@ -890,9 +906,9 @@ private struct DeleteAccountConfirmationSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                         Text("Cancel")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.callout.weight(.semibold))
                     }
                     .foregroundStyle(Color.accentColor)
                 }
@@ -902,7 +918,7 @@ private struct DeleteAccountConfirmationSheet: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Delete your account?")
-                .font(.system(size: 24, weight: .bold))
+                .font(.title2.weight(.bold))
                 .foregroundStyle(Color.primary)
                 .padding(.horizontal, BrandSpacing.large)
 

@@ -94,7 +94,7 @@ struct PostOnboardingCarousel: View {
         ),
         Slide(
             title: "Unlock local insights.",
-            message: "With location permissions, discoveries will be attuned to where you are. Used only to improve your experience—never sold.",
+            message: "We use location permissions to attune responses to where you are. Used only to improve your experience—never sold.",
             imageName: "post3",
             kind: .locationPermission
         ),
@@ -129,9 +129,10 @@ struct PostOnboardingCarousel: View {
     private var coreView: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
+            let screenHeight = proxy.size.height
             let topInset: CGFloat = 0
             let bottomInset = proxy.safeAreaInsets.bottom
-            content(width: width, topInset: topInset, bottomInset: bottomInset)
+            content(width: width, topInset: topInset, bottomInset: bottomInset, containerHeight: screenHeight)
                 .frame(width: width, height: proxy.size.height)
         }
         .alert("Location Access", isPresented: $showLocationSettingsAlert) {
@@ -149,7 +150,7 @@ struct PostOnboardingCarousel: View {
     }
 
     @ViewBuilder
-    private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
+    private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat, containerHeight: CGFloat) -> some View {
         TabView(selection: selectionBinding) {
             ForEach(slides.indices, id: \.self) { idx in
                 switch slides[idx].kind {
@@ -184,7 +185,8 @@ struct PostOnboardingCarousel: View {
                             titleColor: titleColor,
                             bodyColor: bodyColor,
                             containerWidth: width,
-                            topInset: topInset
+                            topInset: topInset,
+                            containerHeight: containerHeight
                         )
                         .tag(idx)
                     }

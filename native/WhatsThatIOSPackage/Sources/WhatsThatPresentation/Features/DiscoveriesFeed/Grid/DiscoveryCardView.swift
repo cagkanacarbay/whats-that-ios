@@ -7,13 +7,31 @@ struct DiscoveryCardView: View {
     let width: CGFloat
     let height: CGFloat
     let isHidden: Bool
+    let isDeleting: Bool
     let onSelect: (DiscoverySummary, URL?) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private let cardCornerRadius: CGFloat = BrandCornerRadius.large
 
+    init(
+        discovery: DiscoverySummary,
+        width: CGFloat,
+        height: CGFloat,
+        isHidden: Bool,
+        isDeleting: Bool = false,
+        onSelect: @escaping (DiscoverySummary, URL?) -> Void
+    ) {
+        self.discovery = discovery
+        self.width = width
+        self.height = height
+        self.isHidden = isHidden
+        self.isDeleting = isDeleting
+        self.onSelect = onSelect
+    }
+
     var body: some View {
         Button {
+            guard !isDeleting else { return }
             onSelect(discovery, imageURL)
         } label: {
             ZStack(alignment: .bottom) {
@@ -23,7 +41,14 @@ struct DiscoveryCardView: View {
                     width: width,
                     height: height
                 )
+                .opacity(isDeleting ? 0.5 : 1.0)
+                
                 DiscoveryCardChrome(discovery: discovery)
+                    .opacity(isDeleting ? 0.3 : 1.0)
+                
+                if isDeleting {
+                    DeletingOverlayView()
+                }
             }
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
@@ -35,6 +60,11 @@ struct DiscoveryCardView: View {
         }
         .buttonStyle(.plain)
         .opacity(isHidden ? 0 : 1)
+        .disabled(isDeleting)
+        .animation(.easeInOut(duration: 0.25), value: isDeleting)
+        .onChange(of: isDeleting) { _, newValue in
+            print("[DEBUG Card] Discovery \(discovery.id) isDeleting changed to \(newValue)")
+        }
     }
 
     private var imageURL: URL? {

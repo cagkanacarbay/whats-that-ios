@@ -48,6 +48,11 @@ struct DiscoveryDetailShareHandler: DiscoveryDetailShareHandling {
             )
         ]
 
+        // Add plain string as fallback for apps that don't properly use UIActivityItemSource
+        // (e.g., WhatsApp Business). The DiscoveryShareMetadataItem returns nil for messaging
+        // activities to avoid duplication with this fallback string.
+        items.append(message)
+
         if let shareImage {
             items.append(shareImage)
         } else if let imageURL = context.imageURL {
@@ -225,7 +230,27 @@ final class DiscoveryShareMetadataItem: NSObject, UIActivityItemSource {
         _ activityViewController: UIActivityViewController,
         itemForActivityType activityType: UIActivity.ActivityType?
     ) -> Any? {
-        message
+        // Return nil for messaging and sharing activities to avoid duplication with the
+        // plain String fallback. These apps will use the fallback string while still
+        // getting rich previews from LPLinkMetadata.
+        if let activityType {
+            let messagingActivities: Set<UIActivity.ActivityType> = [
+                .message,
+                .mail,
+                .postToFacebook,
+                .postToTwitter,
+                // WhatsApp and WhatsApp Business use custom activity types
+                UIActivity.ActivityType(rawValue: "net.whatsapp.WhatsApp.ShareExtension"),
+                UIActivity.ActivityType(rawValue: "net.whatsapp.WhatsApp.Business.ShareExtension")
+            ]
+            if messagingActivities.contains(activityType) ||
+               activityType.rawValue.lowercased().contains("whatsapp") ||
+               activityType.rawValue.lowercased().contains("message") ||
+               activityType.rawValue.lowercased().contains("telegram") {
+                return nil
+            }
+        }
+        return message
     }
 
     func activityViewController(

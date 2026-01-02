@@ -10,6 +10,8 @@ struct DiscoveriesGridView: View {
     let cardSpacing: CGFloat
     @Binding var cardFrames: [Int64: CGRect]
     let activeDiscoveryId: Int64?
+    /// The discovery ID currently being deleted, if any
+    var deletingDiscoveryId: Int64? = nil
     let onLoadMore: (DiscoverySummary) async -> Void
     let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
     // Empty-state quick actions
@@ -75,7 +77,9 @@ struct DiscoveriesGridView: View {
                     discovery: discovery,
                     width: cardWidth,
                     height: cardHeight,
-                    isHidden: activeDiscoveryId == discovery.id,
+                    // Don't hide if we're deleting - need to show the delete animation
+                    isHidden: activeDiscoveryId == discovery.id && deletingDiscoveryId != discovery.id,
+                    isDeleting: deletingDiscoveryId == discovery.id,
                     onSelect: { selectedDiscovery, imageURL in
                         let frame = cardFrames[selectedDiscovery.id] ?? .zero
                         onSelect(selectedDiscovery, imageURL, frame)

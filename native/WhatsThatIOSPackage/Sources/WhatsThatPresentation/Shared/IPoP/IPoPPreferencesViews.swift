@@ -34,6 +34,11 @@ enum IPoPStrings {
 
 struct IPoPPreferencesListView: View {
     @ObservedObject var viewModel: IPoPPreferencesViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
 
     var body: some View {
         List {
@@ -84,11 +89,14 @@ struct IPoPPreferencesListView: View {
                         .padding(.top, 12)
                 }
                 .padding(.vertical, 4)
+                .listRowBackground(palette.surface)
             }
             .onMove(perform: viewModel.move)
         }
         .environment(\.editMode, .constant(.active))
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(palette.background)
         .padding(.top, -BrandSpacing.small)
     }
 
@@ -112,7 +120,12 @@ struct IPoPPreferencesSheet: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var hasSaved = false
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
@@ -180,6 +193,7 @@ struct IPoPPreferencesSheet: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.large)
         }
+        .background(palette.background)
         .onAppear {
             viewModel.resetDraftToPersistedOrDefault()
         }

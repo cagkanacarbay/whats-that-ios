@@ -165,7 +165,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         }
     }
 
-    func dismiss(reason: DismissReason = .backButton) {
+    func dismiss(reason: DismissReason = .backButton, animated: Bool = true) {
         guard let context = snapshot.context else { return }
         guard !snapshot.isClosing else { return }
 
@@ -178,7 +178,7 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         }
 
         snapshot.dismissProgress = 1
-        resetGestureState(animated: true, resetDismissProgress: false)
+        resetGestureState(animated: animated, resetDismissProgress: false)
         snapshot.isClosing = true
         snapshot.phase = .closing
 
@@ -187,19 +187,25 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
 
         let sessionId = context.sessionId
 
-        // Unified one-pass close: fade chrome and collapse in a single animation.
-        // Important: schedule the progress animation to the next runloop tick so that
-        // the initial frame of the uniform transform starts at transformProgress = 0.
-        // This avoids a visible jump to the target (small) scale at gesture release.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard self.snapshot.context?.sessionId == sessionId else { return }
-            withAnimation(self.heroAnimator.closeAnimation()) {
-                self.snapshot.progress = 0
+        if animated {
+            // Unified one-pass close: fade chrome and collapse in a single animation.
+            // Important: schedule the progress animation to the next runloop tick so that
+            // the initial frame of the uniform transform starts at transformProgress = 0.
+            // This avoids a visible jump to the target (small) scale at gesture release.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard self.snapshot.context?.sessionId == sessionId else { return }
+                withAnimation(self.heroAnimator.closeAnimation()) {
+                    self.snapshot.progress = 0
+                }
             }
+            scheduleCloseCleanup(for: sessionId)
+        } else {
+            // Instant close - no animation, clear immediately
+            snapshot.progress = 0
+            snapshot = DiscoveryDetailOverlaySnapshot()
+            voiceoverController.isDetailOverlayActive = false
         }
-
-        scheduleCloseCleanup(for: sessionId)
     }
 
     func resetIfNeeded() {

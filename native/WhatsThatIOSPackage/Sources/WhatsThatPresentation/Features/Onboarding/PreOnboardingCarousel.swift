@@ -30,15 +30,16 @@ struct PreOnboardingCarousel: View {
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
+            let screenHeight = proxy.size.height
             let topInset: CGFloat = 0
             let bottomInset = proxy.safeAreaInsets.bottom
-            content(width: width, topInset: topInset, bottomInset: bottomInset)
+            content(width: width, topInset: topInset, bottomInset: bottomInset, containerHeight: screenHeight)
                 .frame(width: width, height: proxy.size.height)
         }
     }
 
     @ViewBuilder
-    private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> some View {
+    private func content(width: CGFloat, topInset: CGFloat, bottomInset: CGFloat, containerHeight: CGFloat) -> some View {
         TabView(selection: $index) {
             ForEach(slides.indices, id: \.self) { idx in
                 OnboardingSlidePage(
@@ -48,7 +49,8 @@ struct PreOnboardingCarousel: View {
                     titleColor: titleColor,
                     bodyColor: bodyColor,
                     containerWidth: width,
-                    topInset: topInset
+                    topInset: topInset,
+                    containerHeight: containerHeight
                 )
                 .tag(idx)
             }

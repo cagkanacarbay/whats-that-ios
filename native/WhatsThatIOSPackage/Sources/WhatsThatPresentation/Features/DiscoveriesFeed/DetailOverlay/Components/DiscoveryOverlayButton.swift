@@ -46,6 +46,7 @@ struct DiscoveryDetailOptionsSheet: View {
     let isDeleting: Bool
     let onDelete: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showDeleteConfirmation = false
     private let sheetCornerRadius: CGFloat = 24
     private let sheetWidth: CGFloat = 320
 
@@ -78,11 +79,19 @@ struct DiscoveryDetailOptionsSheet: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: sheetCornerRadius, style: .continuous)
-                    .stroke(palette.border.opacity(0.1), lineWidth: 1)
+                    .stroke(BrandColors.Light.tabSelected.opacity(0.3), lineWidth: 1.5)
             }
             .padding(.horizontal, BrandSpacing.large)
         }
         .transition(.scale.combined(with: .opacity))
+        .alert("Delete Discovery?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                onDelete?()
+            }
+        } message: {
+            Text("All data related to this discovery will be permanently deleted and cannot be recovered.")
+        }
     }
 
     private var destructiveButton: some View {
@@ -90,7 +99,7 @@ struct DiscoveryDetailOptionsSheet: View {
 
         return Button {
             guard !isDisabled else { return }
-            onDelete?()
+            showDeleteConfirmation = true
         } label: {
             ZStack {
                 Text(isDeleting ? "Deleting…" : "Delete")
@@ -102,13 +111,14 @@ struct DiscoveryDetailOptionsSheet: View {
                     if isDeleting {
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(Color.white)
+                            .tint(deleteForeground)
                     }
                 }
             }
             .padding(.horizontal, BrandSpacing.medium)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(deleteForeground)
@@ -116,7 +126,7 @@ struct DiscoveryDetailOptionsSheet: View {
         .cornerRadius(BrandCornerRadius.medium)
         .overlay {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium, style: .continuous)
-                .stroke(deleteBorder, lineWidth: 1)
+                .stroke(deleteBorder, lineWidth: 1.5)
         }
         .opacity(isDisabled ? 0.5 : 1)
         .disabled(isDisabled)
@@ -132,6 +142,7 @@ struct DiscoveryDetailOptionsSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .padding(.horizontal, BrandSpacing.medium)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(palette.textPrimary)
@@ -139,7 +150,7 @@ struct DiscoveryDetailOptionsSheet: View {
         .cornerRadius(BrandCornerRadius.medium)
         .overlay {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium, style: .continuous)
-                .stroke(cancelBorder, lineWidth: 1)
+                .stroke(cancelBorder, lineWidth: 1.5)
         }
         .disabled(isDeleting)
         .opacity(isDeleting ? 0.6 : 1)
@@ -154,22 +165,23 @@ struct DiscoveryDetailOptionsSheet: View {
     }
 
     private var deleteBackground: Color {
-        Color(uiColor: .systemRed).opacity(colorScheme == .dark ? 0.5 : 0.9)
+        Color.red.opacity(0.12)
     }
 
     private var deleteBorder: Color {
-        Color(uiColor: .systemRed).opacity(colorScheme == .dark ? 0.6 : 0.85)
+        Color.red.opacity(0.3)
     }
 
     private var deleteForeground: Color {
-        Color.white
+        Color.red
     }
 
     private var cancelBackground: Color {
-        palette.secondaryAction
+        palette.secondaryAction.opacity(0.3)
     }
 
     private var cancelBorder: Color {
-        palette.border.opacity(0.25)
+        palette.border.opacity(0.5)
     }
 }
+

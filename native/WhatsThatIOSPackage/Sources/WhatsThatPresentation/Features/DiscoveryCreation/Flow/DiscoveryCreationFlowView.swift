@@ -96,28 +96,36 @@ struct DiscoveryCreationFlowView: View {
                 )
             ) { alert(for: $0) }
             .onChange(of: viewModel.error) { _, error in
-                if let error {
-                    activeAlert = .flowError(IdentifiedError(error: error))
-                } else if case .flowError = activeAlert {
-                    activeAlert = nil
+                DispatchQueue.main.async {
+                    if let error {
+                        activeAlert = .flowError(IdentifiedError(error: error))
+                    } else if case .flowError = activeAlert {
+                        activeAlert = nil
+                    }
                 }
             }
             .onChange(of: viewModel.showPollingFailedAlert) { _, showAlert in
                 if showAlert {
-                    activeAlert = .pollingFailed
-                    viewModel.showPollingFailedAlert = false
+                    DispatchQueue.main.async {
+                        activeAlert = .pollingFailed
+                        viewModel.showPollingFailedAlert = false
+                    }
                 }
             }
             .onChange(of: viewModel.showFreeCreditsExhaustedAtAudioGeneration) { _, showAlert in
                 if showAlert {
-                    activeAlert = .freeCreditsExhaustedAtAudioGeneration
-                    viewModel.showFreeCreditsExhaustedAtAudioGeneration = false
+                    DispatchQueue.main.async {
+                        activeAlert = .freeCreditsExhaustedAtAudioGeneration
+                        viewModel.showFreeCreditsExhaustedAtAudioGeneration = false
+                    }
                 }
             }
             .onChange(of: viewModel.showFreeCreditsExhaustedAtConfirm) { _, showAlert in
                 if showAlert {
-                    activeAlert = .freeCreditsExhaustedAtConfirm
-                    viewModel.showFreeCreditsExhaustedAtConfirm = false
+                    DispatchQueue.main.async {
+                        activeAlert = .freeCreditsExhaustedAtConfirm
+                        viewModel.showFreeCreditsExhaustedAtConfirm = false
+                    }
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in

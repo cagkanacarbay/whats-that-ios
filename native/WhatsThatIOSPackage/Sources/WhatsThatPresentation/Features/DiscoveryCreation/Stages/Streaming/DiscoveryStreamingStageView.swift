@@ -20,7 +20,7 @@ struct DiscoveryStreamingStageView: View {
         onCancel: @escaping () -> Void,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
-        self._viewModel = ObservedObject(initialValue: viewModel)
+        self.viewModel = viewModel
         self.imageData = imageData
         self.capturedAt = capturedAt
         self.onCancel = onCancel
@@ -105,7 +105,13 @@ struct DiscoveryStreamingStageView: View {
 
 
     var body: some View {
-        GeometryReader { proxy in
+        // Safety guard: if analysis state is nil (e.g. flow cancelled), do not render the stage.
+        // This prevents "update multiple times per frame" crashes caused by the view trying to
+        // process an empty/default state before it is removed from the hierarchy.
+        if viewModel.analysisState == nil {
+            Color.clear
+        } else {
+            GeometryReader { proxy in
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -241,6 +247,7 @@ struct DiscoveryStreamingStageView: View {
                     }
                 }
             }
+        }
         }
     }
 
@@ -497,13 +504,16 @@ struct DiscoveryStreamingStageView: View {
                     audioServices.playbackController.prefetch(for: [discovery.id])
                 }
                 .onChange(of: discovery) { _, newDiscovery in
-                    // If we just got a summary and auto-generation is on, trigger it via controller
-                    if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
-                        print("[DiscoveryStreamingStageView] Auto-triggering voiceover for id=\(newDiscovery.id) per viewModel.generateAudioGuide=true")
-                        hasTriggeredAutoGeneration = true
-                        // Do NOT pass activePreferences here; let the controller load the persisted preferences.
-                        // Passing empty defaults from an uninitialized controller would overwrite the user's saved voice model.
-                        audioServices.playbackController.requestVoiceover(for: newDiscovery)
+                    // Defer to next runloop to prevent "update multiple times per frame" error
+                    DispatchQueue.main.async { [self] in
+                        // If we just got a summary and auto-generation is on, trigger it via controller
+                        if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
+                            print("[DiscoveryStreamingStageView] Auto-triggering voiceover for id=\(newDiscovery.id) per viewModel.generateAudioGuide=true")
+                            hasTriggeredAutoGeneration = true
+                            // Do NOT pass activePreferences here; let the controller load the persisted preferences.
+                            // Passing empty defaults from an uninitialized controller would overwrite the user's saved voice model.
+                            audioServices.playbackController.requestVoiceover(for: newDiscovery)
+                        }
                     }
                 }
                 .task {

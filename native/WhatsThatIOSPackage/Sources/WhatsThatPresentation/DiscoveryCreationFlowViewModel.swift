@@ -179,16 +179,22 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         ephemeralFreshTask?.cancel()
         ephemeralFreshTask = nil
         ephemeralFreshInFlight = false
+        pollingTask?.cancel()
+        pollingTask = nil
+        
+        // Update flowState FIRST to remove the active view from hierarchy
+        flowState = .cancelled
+        
+        // Then clear the state data
         confirmationState = nil
         analysisState = nil
         currentMedia = nil
         freshLocationForAnalysis = nil
-        pollingTask?.cancel()
-        pollingTask = nil
         pendingMedia = nil
         analysisStartTime = nil
-        flowState = .cancelled
         error = nil
+        
+        // Finally reset to idle
         flowState = .idle
     }
 
@@ -1036,8 +1042,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private func handleAnalysisCancellation() async {
         analysisTask?.cancel()
         analysisTask = nil
-        analysisState = nil
+        
+        // Update flowState FIRST to remove the active view
         flowState = .cancelled
+        
+        // Then clear data
+        analysisState = nil
+        
         flowState = .idle
     }
 

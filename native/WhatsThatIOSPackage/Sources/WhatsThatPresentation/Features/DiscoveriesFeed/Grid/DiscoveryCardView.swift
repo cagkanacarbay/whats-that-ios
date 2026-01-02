@@ -62,9 +62,6 @@ struct DiscoveryCardView: View {
         .opacity(isHidden ? 0 : 1)
         .disabled(isDeleting)
         .animation(.easeInOut(duration: 0.25), value: isDeleting)
-        .onChange(of: isDeleting) { _, newValue in
-            print("[DEBUG Card] Discovery \(discovery.id) isDeleting changed to \(newValue)")
-        }
     }
 
     private var imageURL: URL? {

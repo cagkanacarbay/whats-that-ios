@@ -38,11 +38,7 @@ struct DeletingOverlayView: View {
             }
         }
         .onAppear {
-            print("[DEBUG DeletingOverlay] Overlay appeared, starting animation")
             isAnimating = true
-        }
-        .onDisappear {
-            print("[DEBUG DeletingOverlay] Overlay disappeared")
         }
     }
 }

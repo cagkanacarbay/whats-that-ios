@@ -518,29 +518,23 @@ struct DiscoveriesHomeView: View {
 
     private func handleDeleteRequest(for discovery: DiscoverySummary) {
         guard !isDeletionInProgress else { return }
-        print("[DEBUG Delete] Starting delete for discovery \(discovery.id)")
         deletingDiscoveryId = discovery.id
         isDeletionInProgress = true
-        print("[DEBUG Delete] Set deletingDiscoveryId=\(String(describing: deletingDiscoveryId)), isDeletionInProgress=\(isDeletionInProgress)")
         
         // Dismiss the detail view INSTANTLY (no animation) so the user immediately sees the delete animation on the grid
-        print("[DEBUG Delete] Dismissing detail view instantly...")
         detailCoordinator.dismiss(reason: .backButton, animated: false)
-        print("[DEBUG Delete] Detail view dismiss called (instant)")
 
         Task {
             do {
                 try await deletionUseCase.delete(discovery)
                 await storeObserver.remove(discovery)
                 await MainActor.run {
-                    print("[DEBUG Delete] Delete succeeded, clearing deletingDiscoveryId")
                     deletingDiscoveryId = nil
                     isDeletionInProgress = false
                 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? "We couldn't delete this discovery. Try again later."
                 await MainActor.run {
-                    print("[DEBUG Delete] Delete failed: \(message)")
                     deletionErrorMessage = message
                     deletingDiscoveryId = nil
                     isDeletionInProgress = false

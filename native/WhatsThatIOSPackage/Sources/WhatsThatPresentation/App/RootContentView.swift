@@ -203,7 +203,7 @@ public struct RootContentView: View {
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
         .alert(
-            alertTitle,
+            authError?.alertTitle ?? "Something went wrong",
             isPresented: Binding(
                 get: { authError != nil },
                 set: { isPresented in
@@ -213,7 +213,7 @@ public struct RootContentView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(alertMessage)
+            Text(authError?.errorDescription ?? "Please try again.")
         }
         .preferredColorScheme(appearance.colorScheme)
         .onAppear(perform: syncBrandTheme)
@@ -289,75 +289,7 @@ public struct RootContentView: View {
         return nil
     }
 
-    // MARK: - Alert Copy
 
-    private var alertTitle: String {
-        guard let authError else { return "Something went wrong" }
-        switch authError {
-        case .invalidCredentials:
-            return "Invalid credentials"
-        case .emailAlreadyInUse:
-            return "Email already in use"
-        case .passwordTooWeak:
-            return "Weak password"
-        case .passwordResetFailed:
-            return "Whoops"
-        case .passwordResetRateLimited:
-            return "Too many attempts"
-        case .passwordResetLinkInvalid:
-            return "Invalid link"
-        case .passwordResetLinkExpired:
-            return "Link expired"
-        case .passwordUpdateFailed:
-            return "Update failed"
-        case .passwordSame:
-            return "Use a different password"
-        case .cancelled:
-            return "Sign in cancelled"
-        case .accountDeletionFailed:
-            return "Couldn't delete account"
-        case .rateLimitExceeded:
-            return "Too many attempts"
-        case .internalError:
-            return "Whoops"
-        case .unknown:
-            return "Something went wrong"
-        }
-    }
-
-    private var alertMessage: String {
-        guard let authError else { return "Please try again." }
-        switch authError {
-        case .invalidCredentials:
-            return "We couldn't sign you in. Check your email and password are correct."
-        case .emailAlreadyInUse:
-            return "An account with this email already exists. Try signing in instead."
-        case .passwordTooWeak:
-            return "This password may have been exposed in a data breach. Please choose a different one."
-        case .passwordResetFailed:
-            return "There was an issue resetting your password. Please try again in a few minutes."
-        case .passwordResetRateLimited:
-            return "For security reasons, we have rate-limited your request. Please try again in a few minutes."
-        case .passwordResetLinkInvalid:
-            return "That reset link isn't valid anymore. Please request a fresh one."
-        case .passwordResetLinkExpired:
-            return "Your reset link has expired. Request a new one to continue."
-        case .passwordUpdateFailed:
-            return "We couldn't update your password. Please try again."
-        case .passwordSame:
-            return "Your new password is the same as your current password. Please choose a different one."
-        case .cancelled:
-            return "This sign in was cancelled."
-        case .accountDeletionFailed:
-            return "We couldn't delete your account. Please try again or contact support."
-        case .rateLimitExceeded:
-            return "Too many requests. Please wait a few minutes before trying again."
-        case .internalError(let message):
-            return message
-        case .unknown:
-            return "Please try again."
-        }
-    }
 
     private var backgroundColor: Color {
         colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
@@ -405,12 +337,17 @@ public struct RootContentView: View {
                 isPerformingAction: viewModel.isPerformingAuthAction,
                 initialMode: authStartMode,
                 onSignIn: { email, password in
-                    let outcome = try await viewModel.signIn(email: email, password: password)
-                    switch outcome {
-                    case .session:
-                        return .success
-                    case .verificationRequired(let email):
-                        return .verificationRequired(email: email)
+                    do {
+                        let outcome = try await viewModel.signIn(email: email, password: password)
+                        switch outcome {
+                        case .session:
+                            return .success
+                        case .verificationRequired(let email):
+                            return .verificationRequired(email: email)
+                        }
+                    } catch {
+                        try await handleAuthOperation { throw error }
+                        throw error
                     }
                 },
                 onSignUp: { email, password in
@@ -438,8 +375,10 @@ public struct RootContentView: View {
                         try await viewModel.requestPasswordReset(email: email)
                         return .success
                     } catch let error as AuthError {
+                        try? await handleAuthOperation { throw error }
                         return .failure(error)
                     } catch {
+                        try? await handleAuthOperation { throw error }
                         return .failure(.unknown)
                     }
                 },

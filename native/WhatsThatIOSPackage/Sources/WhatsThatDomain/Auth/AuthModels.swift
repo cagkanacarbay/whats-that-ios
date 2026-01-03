@@ -139,6 +139,40 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "Something went wrong. Please try again."
         }
     }
+
+    /// Short title suitable for alert dialogs
+    public var alertTitle: String {
+        switch self {
+        case .invalidCredentials:
+            return "Invalid credentials"
+        case .emailAlreadyInUse:
+            return "Email already in use"
+        case .passwordTooWeak:
+            return "Weak password"
+        case .passwordResetFailed:
+            return "Whoops"
+        case .passwordResetRateLimited:
+            return "Too many attempts"
+        case .passwordResetLinkInvalid:
+            return "Invalid link"
+        case .passwordResetLinkExpired:
+            return "Link expired"
+        case .passwordUpdateFailed:
+            return "Update failed"
+        case .passwordSame:
+            return "Use a different password"
+        case .cancelled:
+            return "Sign in cancelled"
+        case .accountDeletionFailed:
+            return "Couldn't delete account"
+        case .rateLimitExceeded:
+            return "Too many attempts"
+        case .internalError:
+            return "Whoops"
+        case .unknown:
+            return "Something went wrong"
+        }
+    }
 }
 
 public protocol AuthService: Sendable {

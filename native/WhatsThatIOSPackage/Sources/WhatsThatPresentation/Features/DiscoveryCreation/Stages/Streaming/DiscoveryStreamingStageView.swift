@@ -503,28 +503,6 @@ struct DiscoveryStreamingStageView: View {
                     // Prefetch voiceover status for this discovery
                     audioServices.playbackController.prefetch(for: [discovery.id])
                 }
-                .onChange(of: discovery) { _, newDiscovery in
-                    // Defer to next runloop to prevent "update multiple times per frame" error
-                    DispatchQueue.main.async { [self] in
-                        // If we just got a summary and auto-generation is on, trigger it via controller
-                        if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
-                            print("[DiscoveryStreamingStageView] Auto-triggering voiceover for id=\(newDiscovery.id) per viewModel.generateAudioGuide=true")
-                            hasTriggeredAutoGeneration = true
-                            // Do NOT pass activePreferences here; let the controller load the persisted preferences.
-                            // Passing empty defaults from an uninitialized controller would overwrite the user's saved voice model.
-                            audioServices.playbackController.requestVoiceover(for: newDiscovery)
-                        }
-                    }
-                }
-                .task {
-                    // Also check on initial mount of this sub-component if discovery is already there
-                    if viewModel.generateAudioGuide && !hasTriggeredAutoGeneration {
-                        print("[DiscoveryStreamingStageView] Auto-triggering voiceover (task) for id=\(discovery.id)")
-                        hasTriggeredAutoGeneration = true
-                        // Do NOT pass activePreferences here; let the controller load the persisted preferences.
-                        audioServices.playbackController.requestVoiceover(for: discovery)
-                    }
-                }
             } else {
                 // Reserve space matching DiscoveryAudioControls height (approx 50pt)
                 Color.clear
@@ -534,7 +512,7 @@ struct DiscoveryStreamingStageView: View {
         .padding(.bottom, BrandSpacing.small)
     }
 
-    @State private var hasTriggeredAutoGeneration: Bool = false
+
 
     private static let loadingMessages: [String] = [
         "Identifying landmarks…",

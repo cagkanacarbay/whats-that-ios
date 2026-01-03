@@ -251,6 +251,18 @@ public extension AppDependencyContainer {
     ) -> DiscoveryCreationFlowViewModel {
         discoveryCreationProvider.makeViewModel(for: type)
     }
+    
+    /// Configure the DiscoverySessionManager singleton with required services.
+    /// Should be called once during app startup.
+    @MainActor
+    func configureDiscoverySessionManager() {
+        DiscoverySessionManager.shared.configure(
+            analysisClient: discoveryCreationProvider.analysisClient,
+            historyRepository: discoveryCreationProvider.historyRepository,
+            creditBalanceStore: discoveryCreationProvider.creditBalanceStore,
+            imageEncoder: discoveryCreationProvider.imageEncoder
+        )
+    }
 
     @MainActor
     func makeVoiceoverPlaybackController() -> VoiceoverPlaybackController {

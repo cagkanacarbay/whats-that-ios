@@ -140,7 +140,11 @@ public struct AppRootView: View {
             }
         )
         .task {
-            // Listen for StoreKit transaction updates to avoid missing successful purchases.
+            // Configure DiscoverySessionManager for background discovery processing
+            await MainActor.run {
+                container.configureDiscoverySessionManager()
+            }
+            // Listen for StoreKit transaction updates at app launch.
             await container.startStoreKitTransactionListener()
             #if os(iOS)
             // Seed permission cache on launch

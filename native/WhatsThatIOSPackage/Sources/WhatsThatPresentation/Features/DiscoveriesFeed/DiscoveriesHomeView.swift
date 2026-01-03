@@ -163,7 +163,6 @@ struct DiscoveriesHomeView: View {
                     }
                 }
                 .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
-                    print("[DEBUG DiscoveriesHomeView] >>> onChange openFirstDetailFromAudioGuides fired: newValue=\(newValue)")
                     // Defer to next runloop to prevent "update multiple times per frame" error
                     DispatchQueue.main.async {
                         if newValue {
@@ -342,31 +341,34 @@ struct DiscoveriesHomeView: View {
     }
 
     private func presentPendingDiscoveryIfNeeded() {
-        print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded called, pendingDiscoveryId=\(String(describing: pendingDiscoveryId))")
-        guard let pendingId = pendingDiscoveryId,
-              !detailCoordinator.snapshot.phase.isActive
-        else {
-            print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded: early exit (no pending or overlay active)")
+        guard let pendingId = pendingDiscoveryId else {
             return
         }
 
-        print("[DEBUG DiscoveriesHomeView] Looking for discovery \(pendingId) in \(storeObserver.discoveries.count) discoveries")
         guard let discovery = storeObserver.discoveries.first(where: { $0.id == pendingId }) else {
-            print("[DEBUG DiscoveriesHomeView] presentPendingDiscoveryIfNeeded: discovery \(pendingId) NOT FOUND in feed")
+            return
+        }
+
+        let isOverlayActive = detailCoordinator.snapshot.phase.isActive
+        let activeId = detailCoordinator.snapshot.context?.discovery.id
+
+        // If already showing the pending discovery, just clear the pending ID
+        if isOverlayActive, let activeId, activeId == pendingId {
+            pendingDiscoveryId = nil
             return
         }
 
         let startFrame = resolveStartFrame(for: discovery.id) ?? fallbackStartFrame()
+        // No animation when replacing an active overlay (instant switch)
+        let shouldAnimate = !isOverlayActive
 
         pendingDiscoveryId = nil
-        let animated = true
-        print("[DEBUG DiscoveriesHomeView] Presenting discovery \(discovery.id)")
-        discoveriesHomeLogger.info("Pending discovery resolved id=\(discovery.id, privacy: .public) animated=\(animated, privacy: .public)")
+        discoveriesHomeLogger.info("Pending discovery resolved id=\(discovery.id, privacy: .public) animated=\(shouldAnimate, privacy: .public)")
         handleDiscoverySelection(
             discovery: discovery,
             imageURL: imageURL(for: discovery),
             startFrame: startFrame,
-            animated: animated,
+            animated: shouldAnimate,
             fromAudioGuides: false
         )
     }
@@ -448,17 +450,13 @@ struct DiscoveriesHomeView: View {
     }
 
     private func resolveOpenFromAudioGuidesIfNeeded() {
-        print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded called, openFirstDetailFromAudioGuides=\(openFirstDetailFromAudioGuides)")
         guard openFirstDetailFromAudioGuides else {
-            print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: early exit (flag is false)")
             return
         }
 
         // Require an explicit target from Audio Guides; do not fall back to first.
         let targetId = audioGuidesTargetDiscoveryId ?? audioGuidesTargetDiscoverySummary?.id
-        print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: targetId=\(String(describing: targetId)), hasSummary=\(audioGuidesTargetDiscoverySummary != nil)")
         guard let discoveryId = targetId else {
-            print("[DEBUG DiscoveriesHomeView] resolveOpenFromAudioGuidesIfNeeded: no discovery attached")
             discoveriesHomeLogger.info("AudioGuides Text tap: no discovery attached to guide")
             return
         }

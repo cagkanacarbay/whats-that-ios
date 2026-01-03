@@ -18,7 +18,8 @@ public struct RootContentView: View {
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
-    private let makeAudioServicesContainer: (() -> AudioServicesContainer)?
+    /// Single shared AudioServicesContainer instance created once and passed to MainTabView
+    @StateObject private var audioServicesContainer: AudioServicesContainer
     @StateObject private var storeObserver: DiscoveryStoreObserver
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
@@ -71,7 +72,13 @@ public struct RootContentView: View {
         #endif
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
-        self.makeAudioServicesContainer = makeAudioServicesContainer
+        // Create AudioServicesContainer once here as StateObject to ensure single instance
+        if let factory = makeAudioServicesContainer {
+            _audioServicesContainer = StateObject(wrappedValue: factory())
+        } else {
+            // Create a placeholder that will never be used (non-iOS)
+            fatalError("AudioServicesContainer factory is required on iOS")
+        }
         _storeObserver = StateObject(wrappedValue: storeObserver)
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
@@ -472,29 +479,24 @@ public struct RootContentView: View {
             )
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         case .main:
-            if let makeAudioServicesContainer {
-                MainTabView(
-                    storeObserver: storeObserver,
-                    deletionUseCase: deletionUseCase,
-                    cameraViewModel: makeCreationViewModel(.camera),
-                    uploadViewModel: makeCreationViewModel(.upload),
-                    audioServicesFactory: makeAudioServicesContainer,
-                    initialTab: mainTabDestination,
-                    onSignOut: {
-                        Task { try? await viewModel.signOut() }
-                    },
-                    onSettings: {
-                        isSettingsPresented = true
-                    },
-                    isSettingsPresented: $isSettingsPresented,
-                    makeCreditsViewModel: makeCreditsViewModel
-                )
-                .onAppear {
-                    mainTabDestination = .discoveries
-                }
-            } else {
-                Text("Audio services are available on iOS builds only.")
-                    .font(.headline)
+            MainTabView(
+                storeObserver: storeObserver,
+                deletionUseCase: deletionUseCase,
+                cameraViewModel: makeCreationViewModel(.camera),
+                uploadViewModel: makeCreationViewModel(.upload),
+                audioServices: audioServicesContainer,
+                initialTab: mainTabDestination,
+                onSignOut: {
+                    Task { try? await viewModel.signOut() }
+                },
+                onSettings: {
+                    isSettingsPresented = true
+                },
+                isSettingsPresented: $isSettingsPresented,
+                makeCreditsViewModel: makeCreditsViewModel
+            )
+            .onAppear {
+                mainTabDestination = .discoveries
             }
         }
     }

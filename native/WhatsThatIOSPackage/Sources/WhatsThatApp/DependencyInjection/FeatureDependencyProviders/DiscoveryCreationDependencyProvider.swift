@@ -9,11 +9,12 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
     private let recentHistoryLimit: Int
     private let captureService: DiscoveryCaptureService
     private let selectionService: DiscoverySelectionService
-    private let historyRepository: DiscoveryHistoryRepository
+    // Exposed for DiscoverySessionManager configuration
+    let historyRepository: DiscoveryHistoryRepository
     private let creditsRepository: DiscoveryCreditsRepository
-    private let creditBalanceStore: CreditBalanceStore
-    private let analysisClient: DiscoveryAnalysisClient
-    private let imageEncoder: DiscoveryImageEncodingService
+    let creditBalanceStore: CreditBalanceStore
+    let analysisClient: DiscoveryAnalysisClient
+    let imageEncoder: DiscoveryImageEncodingService
     private let pushService: DiscoveryPushService
     private let locationService: DiscoveryLocationService
     private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?

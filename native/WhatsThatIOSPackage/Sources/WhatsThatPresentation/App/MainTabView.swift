@@ -22,7 +22,8 @@ struct MainTabView: View {
     @State private var selectedTab: Tab
     @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
-    @StateObject private var audioServices: AudioServicesContainer
+    /// AudioServicesContainer is passed from RootContentView to ensure single shared instance
+    @ObservedObject private var audioServices: AudioServicesContainer
     @ObservedObject private var storeObserver: DiscoveryStoreObserver
     @State private var pendingDiscoveryId: Int64?
     @State private var awaitingSummaryId: Int64?
@@ -31,10 +32,9 @@ struct MainTabView: View {
     @State private var audioGuidesMode: AudioGuidesDisplayMode = .hero
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
-    @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
-    
-    // Background polling/UX state
-    @State private var showingProcessingAlert = false
+    @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?    
+    // Reference to session manager (singleton, not StateObject since it's shared globally)
+    private var sessionManager: DiscoverySessionManager { DiscoverySessionManager.shared }
 
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
@@ -48,7 +48,7 @@ struct MainTabView: View {
         deletionUseCase: DiscoveryDeletionUseCase,
         cameraViewModel: DiscoveryCreationFlowViewModel,
         uploadViewModel: DiscoveryCreationFlowViewModel,
-        audioServicesFactory: @escaping () -> AudioServicesContainer,
+        audioServices: AudioServicesContainer,
         initialTab: MainTabDestination = .discoveries,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
@@ -64,7 +64,7 @@ struct MainTabView: View {
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
-        _audioServices = StateObject(wrappedValue: audioServicesFactory())
+        _audioServices = ObservedObject(wrappedValue: audioServices)
     }
 
     // Convenience accessor
@@ -177,13 +177,11 @@ struct MainTabView: View {
             
             // Generation complete toast - positioned above mini player
             GenerationToastOverlay(audioServices: audioServices)
+            
+            // Discovery completion toast - for background created discoveries
+            discoveryCompletionToast
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
-        .alert("Processing Discovery", isPresented: $showingProcessingAlert) {
-            Button("OK") { showingProcessingAlert = false }
-        } message: {
-            Text("Your discovery is being processed. We'll let you know when it's ready.")
-        }
         .audioServices(audioServices)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
@@ -193,17 +191,31 @@ struct MainTabView: View {
             cameraViewModel.onAnalysisBegan = handleAnalysisBegan
             uploadViewModel.onAnalysisBegan = handleAnalysisBegan
             
-            cameraViewModel.onStreamInterrupted = handleStreamInterrupted
-            uploadViewModel.onStreamInterrupted = handleStreamInterrupted
             cameraViewModel.onPollingDiscoveryReady = { discovery in
-                print("[DEBUG MainTabView] onPollingDiscoveryReady CALLBACK RECEIVED for discovery \(discovery.id)")
                 handlePollingDiscoveryReady(discovery)
             }
             uploadViewModel.onPollingDiscoveryReady = { discovery in
-                print("[DEBUG MainTabView] onPollingDiscoveryReady CALLBACK RECEIVED for discovery \(discovery.id)")
                 handlePollingDiscoveryReady(discovery)
             }
-            print("[DEBUG MainTabView] onAppear: callbacks assigned")
+            
+            // Note: Audio generation is now triggered exclusively via sessionManager.onDiscoveryCompleted
+            // (configured below) which runs before sessionDidComplete updates UI state.
+            
+            // Configure session manager callbacks for background discovery completion
+            sessionManager.onDiscoveryCompleted = { [weak audioServices, weak storeObserver] summary, generateAudio in
+                // Refresh discovery list to include new discovery
+                Task { @MainActor in
+                    await storeObserver?.upsert(summary)
+                }
+                // Trigger audio generation if user requested it
+                if generateAudio {
+                    audioServices?.playbackController.requestVoiceover(for: summary)
+                }
+            }
+            sessionManager.onDiscoveryFailed = { _, _ in
+                // Background discovery failures are silently ignored for now
+            }
+
 
             handleTabChange(to: selectedTab, isInitial: true)
         }
@@ -231,31 +243,58 @@ struct MainTabView: View {
     }
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
-        print("[DEBUG MainTabView] handleTabChange: to \(tab), isInitial: \(isInitial), activeOverlayTab: \(String(describing: activeOverlayTab))")
         switch tab {
         case .camera:
-            uploadViewModel.cancelFlow()
+            // Check if upload is analyzing - unsubscribe to allow background completion
+            if case .analyzing = uploadViewModel.flowState {
+                uploadViewModel.unsubscribe()
+            } else {
+                uploadViewModel.cancelFlow()
+            }
             cameraViewModel.startFlow()
             activeOverlayTab = nil
         case .upload:
-            cameraViewModel.cancelFlow()
+            // Check if camera is analyzing - unsubscribe to allow background completion
+            if case .analyzing = cameraViewModel.flowState {
+                cameraViewModel.unsubscribe()
+            } else {
+                cameraViewModel.cancelFlow()
+            }
             uploadViewModel.startFlow()
             activeOverlayTab = nil
         case .discoveries:
+            // Unsubscribe or cancel based on whether analyzing
             if activeOverlayTab != .camera {
-                cameraViewModel.cancelFlow()
+                if case .analyzing = cameraViewModel.flowState {
+                    cameraViewModel.unsubscribe()
+                } else {
+                    cameraViewModel.cancelFlow()
+                }
             }
             if activeOverlayTab != .upload {
-                uploadViewModel.cancelFlow()
+                if case .analyzing = uploadViewModel.flowState {
+                    uploadViewModel.unsubscribe()
+                } else {
+                    uploadViewModel.cancelFlow()
+                }
             }
             if isInitial {
                 cameraViewModel.cancelFlow()
                 uploadViewModel.cancelFlow()
             }
         case .audioGuides:
-             cameraViewModel.cancelFlow()
-             uploadViewModel.cancelFlow()
-             activeOverlayTab = nil
+            // Unsubscribe or cancel based on whether analyzing
+            if case .analyzing = cameraViewModel.flowState {
+                cameraViewModel.unsubscribe()
+            } else {
+                cameraViewModel.cancelFlow()
+            }
+            if case .analyzing = uploadViewModel.flowState {
+                uploadViewModel.unsubscribe()
+            } else {
+                uploadViewModel.cancelFlow()
+            }
+            activeOverlayTab = nil
         }
     }
 
@@ -322,24 +361,13 @@ struct MainTabView: View {
         selectedTab = .discoveries
     }
 
-    private func handleStreamInterrupted(_ media: DiscoveryCapturedMedia) {
-        print("[DEBUG MainTabView] handleStreamInterrupted called")
-        activeOverlayTab = nil
-        selectedTab = .discoveries
-        showingProcessingAlert = true
-        print("[DEBUG MainTabView] showingProcessingAlert set to true")
-    }
-
     private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
-        print("[DEBUG MainTabView] handlePollingDiscoveryReady called for discovery \(discovery.id)")
-        
-        // Just upsert the discovery so it appears in the Discoveries tab
+        // Upsert the discovery so it appears in the Discoveries tab
         // The ViewModel handles populating the streaming view with discovery data
         // User will dismiss the streaming view via normal flow (X button or swipe)
         Task {
             await storeObserver.upsert(discovery)
             await audioServices.discoveryStore.upsert(discovery)
-            print("[DEBUG MainTabView] Discovery \(discovery.id) upserted to stores")
         }
     }
 
@@ -377,7 +405,6 @@ struct MainTabView: View {
     private func updateOverlayVisibility(for tab: Tab, state: DiscoveryCreationFlowState) {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: state) {
-            print("[DEBUG MainTabView] updateOverlayVisibility(state): clearing activeOverlayTab from \(tab) due to state \(state.phase)")
             activeOverlayTab = nil
         }
     }
@@ -385,7 +412,6 @@ struct MainTabView: View {
     private func updateOverlayVisibility(for tab: Tab, phase: DiscoveryCreationPhase) {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: phase) {
-            print("[DEBUG MainTabView] updateOverlayVisibility(phase): clearing activeOverlayTab from \(tab) due to phase \(phase)")
             activeOverlayTab = nil
         }
     }
@@ -414,47 +440,27 @@ struct MainTabView: View {
         }
     }
 
-    /// Whether to show the global mini player
-    private var shouldShowMiniPlayer: Bool {
-        // Must have something playing
-        guard voiceoverController.currentDiscovery != nil else { return false }
-        
-        // Only show in active playback states
-        switch voiceoverController.playbackState {
-        case .idle, .failed:
-            return false
-        default:
-            break
-        }
-        
-        // Audio Guides: show in list mode, hide in hero mode (hero has its own full player)
-        if selectedTab == .audioGuides {
-            return audioGuidesMode == .list
-        }
-        
-        // Hide during capture/selection/confirmation stages of the creation overlay
-        if let phase = activeOverlayPhase {
-            switch phase {
-            case .capturingInitial, .capturingRetake, .selectingInitial, .selectingRetake, .confirming, .requestingPermissions:
-                return false
-            case .analyzing, .idle, .cancelled, .error:
-                break
-            }
-        }
-        
-        // Update mini player presence for scroll insets
-        DispatchQueue.main.async {
-            audioServices.miniPlayerPresence.updateVisibility(true)
-        }
-        
-        return true
-    }
-
     private func imageURL(for discovery: DiscoverySummary) -> URL? {
         guard let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
             return nil
         }
         return URL(string: path)
+    }
+    
+    /// Toast overlay for background discovery completion - extracted to reduce body complexity
+    @ViewBuilder
+    private var discoveryCompletionToast: some View {
+        DiscoveryCompletionToastOverlay(
+            audioServices: audioServices,
+            onViewDiscovery: { discoveryId in
+                // Navigate to discoveries tab and open the discovery
+                self.pendingDiscoveryId = discoveryId
+                self.selectedTab = .discoveries
+            },
+            onGenerateAudio: { summary in
+                self.audioServices.playbackController.requestVoiceover(for: summary)
+            }
+        )
     }
 
     private static func tab(for destination: MainTabDestination) -> Tab {
@@ -590,6 +596,131 @@ private struct GenerationToastOverlay: View {
     }
     
     /// Badge showing how many toasts are pending
+    @ViewBuilder
+    private func pendingCountBadge(count: Int) -> some View {
+        Text("\(count)")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white)
+            .frame(minWidth: 22, minHeight: 22)
+            .background(
+                Circle()
+                    .fill(BrandColors.logo)
+            )
+            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Discovery Completion Toast Overlay
+
+/// Wrapper that observes DiscoverySessionManager to show discovery completion toast
+/// Also observes VoiceoverPlaybackController to track audio generation state
+private struct DiscoveryCompletionToastOverlay: View {
+    @ObservedObject var sessionManager = DiscoverySessionManager.shared
+    @ObservedObject var audioServices: AudioServicesContainer
+    let onViewDiscovery: (Int64) -> Void
+    let onGenerateAudio: (DiscoverySummary) -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    
+    // Mini player constants (from MiniPlayerView)
+    private let miniPlayerHeight: CGFloat = 110
+    private let miniPlayerBottomPadding: CGFloat = 49 + 2
+    private let tabBarOffset: CGFloat = 49 + 8
+    private let toastMiniPlayerGap: CGFloat = 8
+    
+    private var isMiniPlayerVisible: Bool {
+        guard audioServices.playbackController.currentDiscovery != nil else { return false }
+        switch audioServices.playbackController.playbackState {
+        case .idle, .failed:
+            return false
+        default:
+            return true
+        }
+    }
+    
+    private var bottomPadding: CGFloat {
+        isMiniPlayerVisible 
+            ? miniPlayerBottomPadding + miniPlayerHeight + toastMiniPlayerGap
+            : tabBarOffset
+    }
+    
+    /// Compute audio button state for a discovery based on VoiceoverPlaybackController
+    private func audioState(for discoveryId: Int64, wasGenerating: Bool) -> DiscoveryCompletionToastView.AudioButtonState {
+        if let asset = audioServices.playbackController.assetStates[discoveryId] {
+            switch asset.status {
+            case .ready:
+                return .ready
+            case .processing:
+                return .generating
+            default:
+                // If toast was created with generateAudioGuide=true but we don't have an asset yet,
+                // assume it's still generating
+                return wasGenerating ? .generating : .notGenerated
+            }
+        } else {
+            // No asset tracked yet - if toast says we're generating, trust that
+            return wasGenerating ? .generating : .notGenerated
+        }
+    }
+    
+    var body: some View {
+        let toasts = sessionManager.pendingCompletionToasts
+        let toastCount = toasts.count
+        
+        if let frontToast = toasts.first {
+            let currentAudioState = audioState(
+                for: frontToast.discovery.id,
+                wasGenerating: frontToast.generateAudioGuide
+            )
+            
+            ZStack(alignment: .topTrailing) {
+                DiscoveryCompletionToastView(
+                    toast: frontToast,
+                    onViewDiscovery: {
+                        onViewDiscovery(frontToast.discovery.id)
+                        sessionManager.dismissCompletionToast()
+                    },
+                    onPlayNow: {
+                        // Start playback and dismiss toast
+                        audioServices.playbackController.togglePlayback(for: frontToast.discovery)
+                        sessionManager.dismissCompletionToast()
+                    },
+                    onPlayNext: {
+                        // Add to queue as next and dismiss toast
+                        audioServices.queueStore.playNext(frontToast.discovery.id)
+                        sessionManager.dismissCompletionToast()
+                    },
+                    onAddToQueue: {
+                        // Add to end of queue and dismiss toast
+                        audioServices.queueStore.addToEnd(frontToast.discovery.id)
+                        sessionManager.dismissCompletionToast()
+                    },
+                    onGenerateAudio: {
+                        onGenerateAudio(frontToast.discovery)
+                        // Don't dismiss - let user see generating state
+                    },
+                    onDismiss: {
+                        sessionManager.dismissCompletionToast()
+                    },
+                    audioState: currentAudioState
+                )
+                
+                // Badge showing remaining toast count (if more than 1)
+                if toastCount > 1 {
+                    pendingCountBadge(count: toastCount)
+                        .offset(x: -8, y: -8)
+                }
+            }
+            .id(frontToast.id)
+            .padding(.bottom, bottomPadding)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.25), value: frontToast.id)
+            // Also animate when audio state changes
+            .animation(.easeInOut(duration: 0.2), value: currentAudioState == .ready)
+            .zIndex(9) // Below audio generation toast (10)
+        }
+    }
+    
     @ViewBuilder
     private func pendingCountBadge(count: Int) -> some View {
         Text("\(count)")

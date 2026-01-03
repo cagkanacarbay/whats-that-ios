@@ -70,10 +70,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
     var onAnalysisBegan: ((DiscoveryCreationFlowType) -> Void)?
 
-    /// Called when stream is interrupted (e.g., backgrounding). Parent should navigate to discoveries tab.
-    var onStreamInterrupted: ((DiscoveryCapturedMedia) -> Void)?
     /// Called when polling finds the completed discovery. Parent should upsert discovery to store.
     var onPollingDiscoveryReady: ((DiscoverySummary) -> Void)?
+    
+    // Note: Audio generation is now triggered exclusively via DiscoverySessionManager.onDiscoveryCompleted
+    // (configured in MainTabView) rather than through a ViewModel callback.
 
     private let configuration: Configuration
     private let captureService: DiscoveryCaptureService
@@ -116,6 +117,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var pendingMedia: DiscoveryCapturedMedia?
     private var analysisStartTime: Date?
     private var pollingTask: Task<Void, Never>?
+    
+    /// Session ID for tracking the current discovery session in the session manager.
+    private var currentSessionId: UUID?
     
     /// Returns polling intervals - short for debugging, normal for production
     private var pollingIntervals: [TimeInterval] {
@@ -197,6 +201,43 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         // Finally reset to idle
         flowState = .idle
     }
+    
+    /// Unsubscribe from the current session and clean up local state.
+    /// The session continues running in the background - only event forwarding stops.
+    /// Call this when the overlay closes mid-stream.
+    func unsubscribe() {
+        debugLog("unsubscribe()")
+        
+        // Unsubscribe from session manager (stream continues in background)
+        if let sessionId = currentSessionId {
+            DiscoverySessionManager.shared.unsubscribe(from: sessionId)
+            currentSessionId = nil
+        }
+        
+        // Cancel local tasks that are no longer needed
+        analysisTask?.cancel()
+        analysisTask = nil
+        ephemeralFreshTask?.cancel()
+        ephemeralFreshTask = nil
+        ephemeralFreshInFlight = false
+        pollingTask?.cancel()
+        pollingTask = nil
+        
+        // Update flowState FIRST to remove the active view from hierarchy
+        flowState = .cancelled
+        
+        // Then clear the state data
+        confirmationState = nil
+        analysisState = nil
+        currentMedia = nil
+        freshLocationForAnalysis = nil
+        pendingMedia = nil
+        analysisStartTime = nil
+        error = nil
+        
+        // Finally reset to idle
+        flowState = .idle
+    }
 
     func retake() {
         startFlow(retake: true)
@@ -221,7 +262,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         onAnalysisBegan?(configuration.type)
         analysisTask?.cancel()
         analysisTask = Task { [weak self] in
-            await self?.performAnalysis(media: media, confirmation: state)
+            await self?.startAnalysisSession(media: media, confirmation: state)
         }
     }
 
@@ -658,7 +699,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
     }
 
-    private func performAnalysis(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
+    /// Start an analysis session by delegating to the session manager.
+    /// The session manager owns the stream; we subscribe to receive events.
+    private func startAnalysisSession(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
         defer { analysisTask = nil }
         let initialState = DiscoveryAnalysisState(
             statusMessage: "Preparing analysis…",
@@ -724,37 +767,23 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 nearbyPlacesContext: effectiveConfirmation.nearbyPlacesContext
             )
 
-            let sessionId = UUID()
-            let stream = analysisClient.startAnalysis(
+            // Start session with session manager - we subscribe to receive events
+            // The session manager now owns the stream
+            currentSessionId = DiscoverySessionManager.shared.startSession(
                 payload: payload,
-                sessionId: sessionId,
-                cancellationHandler: { [weak self] in
-                    await self?.handleAnalysisCancellation()
-                }
+                media: media,
+                generateAudioGuide: generateAudioGuide,
+                subscriber: self
             )
-
-            for try await event in stream {
-                handle(event: event)
-            }
-        } catch is CancellationError {
-            print("[DEBUG] Caught CancellationError")
-            await handleAnalysisCancellation()
-        } catch let error as DiscoveryAnalysisError where error == .streamInterrupted {
-            print("[DEBUG] Caught DiscoveryAnalysisError.streamInterrupted - starting polling")
-            debugLog("Analysis stream interrupted. Starting polling fallback.")
-            // Keep the streaming UI visible but update status to show we're polling
-            analysisState = analysisStateUpdated { state in
-                state.isStreaming = false
-                state.isPolling = true
-                state.statusMessage = "Connection interrupted. Checking for your discovery..."
-            }
-            // Republish flowState to update UI
-            if let analysisState {
-                flowState = .analyzing(analysisState)
-            }
-            startPollingForCompletion()
+            
+            print("[DiscoveryCreationFlowViewModel] Started session \(currentSessionId?.uuidString ?? "nil") via session manager")
+            
+            // Note: We no longer consume the stream here directly.
+            // Events will be delivered via handleSessionEvent() from the subscriber protocol.
+            // The analysisTask is kept alive to maintain strong reference, but we don't iterate a stream.
+            
         } catch {
-            print("[DEBUG] Caught generic error: \(type(of: error)) - \(error.localizedDescription)")
+            print("[DEBUG] Error building payload: \(type(of: error)) - \(error.localizedDescription)")
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
             if Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
@@ -828,7 +857,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
             // Do not republish flowState here; wait for the final end signal.
             onDiscoveryCreated?(discoveryId)
-            hydrateDiscoverySummaryIfNeeded(for: discoveryId)
+            cacheDiscoveryImageIfNeeded(for: discoveryId)
             handleSuccessfulCreation(discoveryId: discoveryId, serverCreditBalance: serverCreditBalance)
         case let .error(message, status):
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
@@ -938,8 +967,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     @MainActor
     private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
-        print("[DEBUG VM] handlePollingDiscoveryReady: discovery \(discovery.id)")
-        
         // Populate the analysis state with discovery data
         // This mimics what would have happened if the stream completed normally
         analysisState = DiscoveryAnalysisState(
@@ -956,7 +983,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         
         // Update flowState to trigger UI refresh with the populated data
         flowState = .analyzing(analysisState!)
-        print("[DEBUG VM] Updated analysisState with discovery data, title=\(discovery.title)")
         
         // Notify MainTabView to upsert the discovery (so it appears in Discoveries tab)
         // But DON'T navigate - let user dismiss the streaming view normally
@@ -1005,7 +1031,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 self.creditBalance = updated
             }
             
-            // Check if we should show the "credits exhausted" alert
+        // Check if we should show the "credits exhausted" alert
             // This triggers when credits reach 0 for the first time
             let finalBalance = updated ?? serverCreditBalance ?? 0
             let tracker = FreeCreditsAlertTracker.shared
@@ -1021,9 +1047,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
         }
         
-        // Trigger auto TTS if enabled.
-        // MOVED TO VIEW: We now handle this in DiscoveryStreamingStageView so that
-        // VoiceoverPlaybackController is properly involved and can update UI state.
+        // Note: Audio generation is now triggered exclusively by sessionDidComplete
+        // to avoid race conditions with multiple code paths.
     }
 
     func retryWithPendingMedia() {
@@ -1037,19 +1062,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private static func messageIndicatesInsufficientCredits(_ message: String) -> Bool {
         let lower = message.lowercased()
         return lower.contains("insufficient") || lower.contains("credit") || lower.contains("no credits")
-    }
-
-    private func handleAnalysisCancellation() async {
-        analysisTask?.cancel()
-        analysisTask = nil
-        
-        // Update flowState FIRST to remove the active view
-        flowState = .cancelled
-        
-        // Then clear data
-        analysisState = nil
-        
-        flowState = .idle
     }
 
     private func analysisStateUpdated(_ transform: (inout DiscoveryAnalysisState) -> Void) -> DiscoveryAnalysisState {
@@ -1154,12 +1166,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
     }
 
-    private func syncFlowStateWithAnalysis() {
-        if let analysisState {
-            flowState = .analyzing(analysisState)
-        }
-    }
-
     private func canStartFlow(retake: Bool) -> Bool {
         switch flowState {
         case .idle, .cancelled, .error:
@@ -1174,7 +1180,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
     }
 
-    private func hydrateDiscoverySummaryIfNeeded(for discoveryId: Int64) {
+    /// Caches the discovery image data locally.
+    /// Note: Summary and audio generation callbacks are handled by sessionDidComplete.
+    private func cacheDiscoveryImageIfNeeded(for discoveryId: Int64) {
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -1204,14 +1212,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                         signedURL: remoteURL
                     )
                 }
-
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.analysisState = self.analysisStateUpdated { state in
-                        state.discoverySummary = summary
-                    }
-                    self.onDiscoverySummaryReady?(summary)
-                }
+                // Note: Audio generation and UI state updates are handled by
+                // DiscoverySessionManager.handleCompletion via onDiscoveryCompleted and sessionDidComplete
             } catch {
                 // Intentionally ignore fetch errors; the detail view can defer to the feed refresh.
             }
@@ -1230,5 +1232,98 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return country
         }
         return String(format: "%.4f, %.4f", location.latitude, location.longitude)
+    }
+}
+
+// MARK: - DiscoverySessionSubscriber Conformance
+
+extension DiscoveryCreationFlowViewModel: DiscoverySessionSubscriber {
+    
+    /// Called by DiscoverySessionManager for each stream event.
+    /// We forward to our existing handle(event:) method.
+    public func handleSessionEvent(_ event: DiscoveryAnalysisEvent) {
+        handle(event: event)
+    }
+    
+    /// Called when the session completes successfully.
+    /// This is called even if we're still subscribed (overlay is visible).
+    public func sessionDidComplete(discoveryId: Int64, summary: DiscoverySummary?) {
+        debugLog("sessionDidComplete: discoveryId=\(discoveryId)")
+        
+        // The session manager has already notified us via handleSessionEvent with .complete
+        // This callback provides an opportunity for any additional cleanup or state updates
+        
+        // Ensure we have the summary in our analysis state
+        if let summary = summary {
+            // Note: Audio generation is triggered by DiscoverySessionManager.onDiscoveryCompleted
+            // (in MainTabView) which is called for ALL completions. We only handle state updates here.
+            analysisState = analysisStateUpdated { state in
+                state.discoverySummary = summary
+            }
+            onDiscoverySummaryReady?(summary)
+        }
+        
+        // Clear the session ID since it's complete
+        currentSessionId = nil
+    }
+    
+    /// Called when the session fails with an error.
+    public func sessionDidFail(error: Error) {
+        debugLog("sessionDidFail: \(error.localizedDescription)")
+        
+        // Special handling for stream interruption - start polling fallback
+        if let analysisError = error as? DiscoveryAnalysisError, analysisError == .streamInterrupted {
+            debugLog("Stream interrupted - starting polling fallback")
+            // Keep the streaming UI visible but update status to show we're polling
+            analysisState = analysisStateUpdated { state in
+                state.isStreaming = false
+                state.isPolling = true
+                state.statusMessage = "Connection interrupted. Checking for your discovery..."
+            }
+            // Republish flowState to update UI
+            if let analysisState {
+                flowState = .analyzing(analysisState)
+            }
+            startPollingForCompletion()
+            return
+        }
+        
+        let message = error.localizedDescription
+        if Self.messageIndicatesInsufficientCredits(message) {
+            // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
+            Task { [weak self] in
+                guard let self else { return }
+                let updated = await self.creditBalanceStore.set(0)
+                await MainActor.run {
+                    self.creditBalance = updated
+                    // Return to confirmation stage with the same image
+                    if let confirmState = self.confirmationState {
+                        self.flowState = .confirming(confirmState)
+                        // Show credits exhausted alert with "Get Credits" option
+                        self.showFreeCreditsExhaustedAtConfirm = true
+                    } else {
+                        // Fallback if confirmation state is unavailable
+                        self.error = .noCredits
+                        self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
+                    }
+                }
+            }
+        } else {
+            self.error = .analysisFailed(message)
+            self.flowState = .error(message: message)
+            
+            // Refresh credits to ensure we aren't out of sync
+            Task { [weak self] in
+                guard let self else { return }
+                if let updated = try? await self.creditBalanceStore.refresh() {
+                    await MainActor.run {
+                        self.creditBalance = updated
+                    }
+                }
+            }
+        }
+        
+        // Clear the session ID since it's complete
+        currentSessionId = nil
     }
 }

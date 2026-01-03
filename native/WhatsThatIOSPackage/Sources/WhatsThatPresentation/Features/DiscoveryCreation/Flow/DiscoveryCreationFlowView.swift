@@ -221,7 +221,10 @@ struct DiscoveryCreationFlowView: View {
             viewModel: viewModel,
             imageData: viewModel.confirmationState?.displayImageData,
             capturedAt: viewModel.confirmationState?.media.createdAt,
-            onCancel: { viewModel.cancelFlow() },
+            onCancel: {
+                // Transfer to background instead of cancelling - discovery continues processing
+                viewModel.unsubscribe()
+            },
             makeCreditsViewModel: makeCreditsViewModel
         )
     }

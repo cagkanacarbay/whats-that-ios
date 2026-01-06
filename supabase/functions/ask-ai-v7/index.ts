@@ -21,7 +21,7 @@ import type { Logger } from '../_shared/logger.ts';
 
 // --- Constants ---
 const CREDITS_PER_DISCOVERY = 1;
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const OPENAI_MODEL = "gpt-5-mini";
 const CLAUDE_MODEL = "claude-3-5-sonnet-20241022";
 const STREAM_RETRY_LIMIT = 3;
@@ -576,6 +576,9 @@ serve(async (req: Request) => {
                   inlineData: {
                     mimeType: 'image/jpeg',
                     data: base64Image,
+                  },
+                  mediaResolution: {
+                    level: 'media_resolution_high',
                   },
                 },
               ],

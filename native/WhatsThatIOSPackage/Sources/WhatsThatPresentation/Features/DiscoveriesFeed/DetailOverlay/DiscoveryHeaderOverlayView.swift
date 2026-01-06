@@ -82,7 +82,6 @@ struct DiscoveryHeaderOverlayView: View {
                             action: onClose,
                             accessibilityLabel: "Back"
                         )
-                        .recordOverlayInteractiveRegion()
                     }
                     
                     Spacer()
@@ -95,7 +94,6 @@ struct DiscoveryHeaderOverlayView: View {
                             accessibilityLabel: "More options",
                             isDisabled: !isOptionsEnabled
                         )
-                        .recordOverlayInteractiveRegion()
                     }
                 }
                 .frame(maxWidth: contentWidth ?? .infinity)
@@ -126,7 +124,6 @@ struct DiscoveryHeaderOverlayView: View {
                     action: onShowMap,
                     accessibilityLabel: "Open location in Maps"
                 )
-                .recordOverlayInteractiveRegion()
             }
 
             Spacer()
@@ -137,7 +134,6 @@ struct DiscoveryHeaderOverlayView: View {
                     action: onShare,
                     accessibilityLabel: "Share discovery"
                 )
-                .recordOverlayInteractiveRegion()
             }
         }
         .frame(maxWidth: contentWidth ?? .infinity)
@@ -191,13 +187,4 @@ struct DiscoveryHeaderOverlayView: View {
     }
 }
 
-private extension View {
-    func recordOverlayInteractiveRegion() -> some View {
-        anchorPreference(
-            key: DiscoveryOverlayInteractiveRegionPreferenceKey.self,
-            value: .bounds
-        ) { anchor in
-            [anchor]
-        }
-    }
-}
+

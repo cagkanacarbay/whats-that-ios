@@ -8,7 +8,7 @@ struct DiscoveryCardView: View {
     let height: CGFloat
     let isHidden: Bool
     let isDeleting: Bool
-    let onSelect: (DiscoverySummary, URL?) -> Void
+    let onSelect: (DiscoverySummary, URL?, CGRect) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private let cardCornerRadius: CGFloat = BrandCornerRadius.large
@@ -19,7 +19,7 @@ struct DiscoveryCardView: View {
         height: CGFloat,
         isHidden: Bool,
         isDeleting: Bool = false,
-        onSelect: @escaping (DiscoverySummary, URL?) -> Void
+        onSelect: @escaping (DiscoverySummary, URL?, CGRect) -> Void
     ) {
         self.discovery = discovery
         self.width = width
@@ -32,7 +32,9 @@ struct DiscoveryCardView: View {
     var body: some View {
         Button {
             guard !isDeleting else { return }
-            onSelect(discovery, imageURL)
+            // Frame is captured via the background reader
+            // If for some reason we don't have it yet (rare), fallback to zero
+            onSelect(discovery, imageURL, self.lastFrame)
         } label: {
             ZStack(alignment: .bottom) {
                 DiscoveryCardImageView(
@@ -57,12 +59,23 @@ struct DiscoveryCardView: View {
                     .strokeBorder(borderColor, lineWidth: 0.3)
             }
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+            .background(
+                GeometryReader { proxy in
+                     Color.clear
+                        .onAppear { self.lastFrame = proxy.frame(in: .global) }
+                        .onChange(of: proxy.frame(in: .global)) { _, newFrame in
+                            self.lastFrame = newFrame
+                        }
+                }
+            )
         }
         .buttonStyle(.plain)
         .opacity(isHidden ? 0 : 1)
         .disabled(isDeleting)
         .animation(.easeInOut(duration: 0.25), value: isDeleting)
     }
+    
+    @State private var lastFrame: CGRect = .zero
 
     private var imageURL: URL? {
         guard let path = discovery.imagePath else { return nil }

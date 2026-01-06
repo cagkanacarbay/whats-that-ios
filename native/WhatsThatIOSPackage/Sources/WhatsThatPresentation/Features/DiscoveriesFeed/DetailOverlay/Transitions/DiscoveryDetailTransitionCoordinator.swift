@@ -37,6 +37,9 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         self.heroAnimator = heroAnimator
     }
 
+    private var lastPresentationTime: Date = .distantPast
+    private let presentationThrottleInterval: TimeInterval = 0.25
+
     func present(
         discovery: DiscoverySummary,
         cardFrame: CGRect,
@@ -45,6 +48,16 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
         animated: Bool = true
     ) {
         guard canBeginPresentation(for: discovery.id) else { return }
+
+        // If replacing an active presentation, force immediate cleanup to prevent animation conflicts
+        if snapshot.phase.isActive && snapshot.context?.discovery.id != discovery.id {
+            var resetSnapshot = DiscoveryDetailOverlaySnapshot()
+            // Preserve voiceover state if needed, but reset layout/phase
+            resetSnapshot.accessibility.isVoiceoverActive = snapshot.accessibility.isVoiceoverActive
+            snapshot = resetSnapshot
+        }
+        
+        lastPresentationTime = Date()
 
         let resolvedFrame = resolvedStartFrame(from: cardFrame)
         let sessionId = UUID()
@@ -82,12 +95,24 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
             self.snapshot.phase = .animatingIn
             self.snapshot.progress = 1
         }
+        
         if animated {
-            withAnimation(heroAnimator.openAnimation()) {
-                openBlock()
+            // Force a new transaction to ensure clean animation state
+            var transaction = Transaction(animation: heroAnimator.openAnimation())
+            transaction.disablesAnimations = true // Disable implicit animations
+            
+            withTransaction(transaction) {
+                 withAnimation(self.heroAnimator.openAnimation()) {
+                     openBlock()
+                 }
             }
         } else {
-            openBlock()
+            // Disabling animation explicitly
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                openBlock()
+            }
         }
 
         scheduleDetailSettled(for: sessionId)
@@ -214,6 +239,12 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     }
 
     private func canBeginPresentation(for discoveryId: Int64) -> Bool {
+        // Throttle rapid presentations
+        guard Date().timeIntervalSince(lastPresentationTime) > presentationThrottleInterval else {
+            // Log this? It might be noisy, but confirms the throttle is working
+            return false
+        }
+
         // If nothing is active, always allow.
         if !snapshot.phase.isActive {
             return true

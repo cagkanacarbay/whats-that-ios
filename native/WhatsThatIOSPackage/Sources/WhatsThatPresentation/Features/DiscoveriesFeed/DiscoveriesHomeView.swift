@@ -31,8 +31,6 @@ struct DiscoveriesHomeView: View {
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @State private var scrollOffset: CGFloat = 0
-    @State private var cardFrames: [Int64: CGRect] = [:]
-    @State private var isCardFramesReactionScheduled: Bool = false
     @State private var safeAreaBottomInset: CGFloat = 0
     @State private var headerHeight: CGFloat = 110
     @State private var safeAreaTopInset: CGFloat = 0
@@ -114,7 +112,6 @@ struct DiscoveriesHomeView: View {
                             availableWidth: contentWidth,
                             availableHeight: contentHeight,
                             cardSpacing: gridSpacing,
-                            cardFrames: $cardFrames,
                             activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
                             deletingDiscoveryId: deletingDiscoveryId,
                             onLoadMore: { discovery in
@@ -146,7 +143,12 @@ struct DiscoveriesHomeView: View {
                 }
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
                     guard let rawValue else { return }
-                    let adjusted = rawValue - metrics.headerSpacerHeight
+                    // headerSpacerHeight is part of the tracked view (refreshHeaderView).
+                    // So rawValue = contentOffset (negative when scrolled down).
+                    // We want scrollOffset to represent "Top of Grid Items (Row 0)".
+                    // The Grid starts after gridTopPadding.
+                    // So we add gridTopPadding to the base offset.
+                    let adjusted = rawValue + metrics.gridTopPadding
                     scrollOffset = adjusted
                 }
                 .onChange(of: storeObserver.discoveries) {
@@ -173,22 +175,6 @@ struct DiscoveriesHomeView: View {
                 }
                 .onChange(of: storeObserver.isRefreshing) { _, newValue in
                     discoveriesHomeLogger.info("isRefreshing changed: \(newValue, privacy: .public)")
-                }
-                .onChange(of: cardFrames) {
-                    // Defer reacting to card frame changes to the next runloop tick.
-                    // Rationale: updating detail overlay presentation state inside the same frame
-                    // can cause a layout → preference write → layout loop, which triggers
-                    // "Bound preference … tried to update multiple times per frame".
-                    // Coalesce multiple rapid updates and run once off-frame.
-                    guard pendingDiscoveryId != nil else { return }
-                    if !isCardFramesReactionScheduled {
-                        isCardFramesReactionScheduled = true
-                        DispatchQueue.main.async {
-                            // Reset the coalescing flag and perform the action.
-                            isCardFramesReactionScheduled = false
-                            presentPendingDiscoveryIfNeeded()
-                        }
-                    }
                 }
                 .onChange(of: storeObserver.errorMessage) { _, newValue in
                     if let message = newValue?.nonEmptyOrNil, !storeObserver.discoveries.isEmpty {
@@ -217,8 +203,29 @@ struct DiscoveriesHomeView: View {
 
                 let detailSnapshot = detailCoordinator.snapshot
                 if detailSnapshot.hasActiveOverlay, let context = detailSnapshot.context {
-                    let targetCloseFrame = cardFrames[context.discovery.id] 
-                        ?? offScreenCloseFrame(for: context.discovery.id)
+                    // Logic to determine where the card should close to.
+                    // 1. If we have a valid startFrame (from a user tap), we prefer that to return to the source.
+                    // 2. If the startFrame was a fallback (e.g. from audio guide nav), we try to calculate the 
+                    //    actual grid position of the card.
+                    // 3. If that grid position is off-screen, we clamp it to the edge to create a "fly away" exit.
+                    
+                    let targetCloseFrame: CGRect = {
+                        // Check if the current startFrame is a "fallback" frame (large centered card)
+                        // Heuristic: Fallback is width * 1.2, usually > 300 width. Grid cards are ~170 width.
+                        let isLargeFallback = context.startFrame.width > (UIScreen.main.bounds.width * 0.6)
+                        
+                        // If it's a real tap frame, just use it. 
+                        // Unless the item has changed (activeId != context.discovery.id is unlikely here given context structure).
+                        if !isLargeFallback {
+                            return context.startFrame
+                        }
+                        
+                        // It's a fallback frame (or we navigated). Let's try to find where it *should* be.
+                        // We need the geometry of the list.
+                        return resolveCloseFrame(for: context.discovery.id) 
+                            ?? context.startFrame // Give up and use center if we can't find it
+                    }()
+                    
                     DiscoveryDetailOverlayView(
                         snapshot: detailSnapshot,
                         destinationFrame: targetCloseFrame,
@@ -329,6 +336,14 @@ struct DiscoveriesHomeView: View {
         animated: Bool = true,
         fromAudioGuides: Bool = false
     ) {
+        // Prevent strictly redundant presentations
+        if detailCoordinator.snapshot.activeDiscoveryId == discovery.id {
+             if detailCoordinator.snapshot.phase.isActive {
+                 discoveriesHomeLogger.info("Ignoring redundant presentation for active discovery id=\(discovery.id)")
+                 return
+             }
+        }
+        
         isDetailFromAudioGuides = fromAudioGuides
         discoveriesHomeLogger.info("Presenting discovery detail id=\(discovery.id, privacy: .public) animated=\(animated, privacy: .public)")
         let resolvedImageURL = imageURL ?? self.imageURL(for: discovery)
@@ -353,7 +368,13 @@ struct DiscoveriesHomeView: View {
         let activeId = detailCoordinator.snapshot.context?.discovery.id
 
         // If already showing the pending discovery, just clear the pending ID
-        if isOverlayActive, let activeId, activeId == pendingId {
+        if let activeId, activeId == pendingId {
+            pendingDiscoveryId = nil
+            return
+        }
+        
+        // Anti-thrash: if the coordinator is already preparing/animating this ID, stop.
+        if detailCoordinator.snapshot.activeDiscoveryId == pendingId {
             pendingDiscoveryId = nil
             return
         }
@@ -374,19 +395,9 @@ struct DiscoveriesHomeView: View {
     }
 
     private func resolveStartFrame(for discoveryId: Int64) -> CGRect? {
-        if let frame = cardFrames[discoveryId], frame.width > 0, frame.height > 0 {
-            return frame
-        }
-
-        guard let firstId = storeObserver.discoveries.first?.id,
-              let frame = cardFrames[firstId],
-              frame.width > 0,
-              frame.height > 0
-        else {
-            return nil
-        }
-
-        return frame
+        // Since we removed cardFrames, we rely on the frame passed during selection.
+        // For programmatic access (deep links, pending), we don't have the frame.
+        return nil
     }
 
     private func fallbackStartFrame() -> CGRect {
@@ -399,54 +410,6 @@ struct DiscoveriesHomeView: View {
         )
         discoveriesHomeLogger.info("Using fallback start frame for discovery detail")
         return CGRect(origin: origin, size: CGSize(width: width, height: height))
-    }
-
-    /// Returns a frame for an imaginary card positioned at the screen edge with just 1 pixel visible.
-    /// - If above: card is positioned so only its bottom pixel is at the top of the screen (y = -cardHeight + 1)
-    /// - If below: card is positioned so only its top pixel is at the bottom of the screen (y = screenHeight - 1)
-    /// This produces the same animation as closing to a card that's 99% off-screen.
-    private func offScreenCloseFrame(for discoveryId: Int64) -> CGRect {
-        let screen = UIScreen.main.bounds
-        
-        // Get card dimensions from an actual visible card, or calculate if none available
-        let cardSize: CGSize
-        if let referenceFrame = cardFrames.values.first {
-            cardSize = referenceFrame.size
-        } else {
-            let cardWidth = max((screen.width - gridHorizontalPadding * 2 - gridSpacing) / 2, 120)
-            cardSize = CGSize(width: cardWidth, height: cardWidth * 1.2)
-        }
-        
-        // Find the discovery's position in the list
-        let discoveryIndex = storeObserver.discoveries.firstIndex { $0.id == discoveryId }
-        
-        // Find visible card indices
-        let visibleIds = Set(cardFrames.keys)
-        let visibleIndices = storeObserver.discoveries.enumerated()
-            .filter { visibleIds.contains($0.element.id) }
-            .map { $0.offset }
-        
-        let isAbove: Bool
-        if let index = discoveryIndex, let minVisible = visibleIndices.min() {
-            isAbove = index < minVisible
-        } else {
-            isAbove = false  // Default to animating down
-        }
-        
-        // Position with just 1 pixel visible at the screen edge
-        let yPosition: CGFloat
-        if isAbove {
-            // Card's bottom pixel at y=0 (top of screen)
-            yPosition = -cardSize.height + 1
-        } else {
-            // Card's top pixel at screen bottom
-            yPosition = screen.height - 1
-        }
-        
-        // Center horizontally like grid cards
-        let xPosition = gridHorizontalPadding
-        
-        return CGRect(origin: CGPoint(x: xPosition, y: yPosition), size: cardSize)
     }
 
     private func resolveOpenFromAudioGuidesIfNeeded() {
@@ -588,6 +551,14 @@ struct DiscoveriesHomeView: View {
                 .frame(height: metrics.gridTopPadding)
         }
         .frame(maxWidth: .infinity)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ScrollOffsetPreferenceKey.self,
+                    value: proxy.frame(in: .named("discoveriesScroll")).minY
+                )
+            }
+        )
         .overlay {
             if shouldShowIndicator {
                 refreshIndicator(opacity: indicatorOpacity)
@@ -632,6 +603,45 @@ struct DiscoveriesHomeView: View {
         let progress = (displacement - start) / max(end - start, 1)
         let clamped = min(max(progress, 0), 1)
         return 1 - Double(clamped)
+    }
+
+    private func resolveCloseFrame(for discoveryId: Int64) -> CGRect? {
+        guard let index = storeObserver.discoveries.firstIndex(where: { $0.id == discoveryId }) else { return nil }
+        
+        // Geometry constants matching Grid
+        let screen = UIScreen.main.bounds
+        let availableWidth = max(screen.width - (gridHorizontalPadding * 2), 0)
+        let cardWidth = max((availableWidth - gridSpacing) / 2, 120) 
+        let cardHeight = cardWidth * 1.2
+        let rowHeight = cardHeight + gridSpacing
+        
+        // Calculate visible range based on scroll offset
+        // -scrollOffset is how far we've scrolled down (positive value)
+        // visibleTopY relative to content start is -scrollOffset
+        
+        let scrolledDistance = headerMetrics.gridTopPadding - scrollOffset
+        let viewportHeight = screen.height
+        
+        let firstVisibleRowIndex = Int(floor(scrolledDistance / rowHeight))
+        let visibleRowsCount = Int(ceil(viewportHeight / rowHeight)) + 1
+        let lastVisibleRowIndex = firstVisibleRowIndex + visibleRowsCount
+        
+        let rowIndex = index / 2
+        
+        let col = CGFloat(index % 2)
+        let xPos = gridHorizontalPadding + col * (cardWidth + gridSpacing)
+        
+        if rowIndex < firstVisibleRowIndex {
+            return CGRect(x: xPos, y: -cardHeight - 10, width: cardWidth, height: cardHeight)
+        } else if rowIndex > lastVisibleRowIndex {
+            return CGRect(x: xPos, y: screen.height + 10, width: cardWidth, height: cardHeight)
+        }
+        
+        // Calculate the estimated on-screen frame for the card.
+        // Screen Y = ScrollView Offset (relative to Safe Area Top) + Header + Safe Area + Grid Item Y
+        let screenY = scrollOffset + headerMetrics.headerSpacerHeight + safeAreaTopInset + CGFloat(rowIndex) * rowHeight
+         
+        return CGRect(x: xPos, y: screenY, width: cardWidth, height: cardHeight)
     }
 }
 

@@ -8,7 +8,7 @@ struct DiscoveriesGridView: View {
     // Used to center empty state vertically
     var availableHeight: CGFloat? = nil
     let cardSpacing: CGFloat
-    @Binding var cardFrames: [Int64: CGRect]
+    // Frame tracking is now handled internally via onSelect callback to avoid layout loops
     let activeDiscoveryId: Int64?
     /// The discovery ID currently being deleted, if any
     var deletingDiscoveryId: Int64? = nil
@@ -80,40 +80,20 @@ struct DiscoveriesGridView: View {
                     // Don't hide if we're deleting - need to show the delete animation
                     isHidden: activeDiscoveryId == discovery.id && deletingDiscoveryId != discovery.id,
                     isDeleting: deletingDiscoveryId == discovery.id,
-                    onSelect: { selectedDiscovery, imageURL in
-                        let frame = cardFrames[selectedDiscovery.id] ?? .zero
+                    onSelect: { selectedDiscovery, imageURL, frame in
                         onSelect(selectedDiscovery, imageURL, frame)
                     }
-                )
-                .background(
-                    GeometryReader { proxy in
-                        let isFirstDiscovery = discovery.id == storeObserver.discoveries.first?.id
-                        let globalFrame = proxy.frame(in: .global)
-                        let localFrame = proxy.frame(in: .named("discoveriesScroll"))
-                        Color.clear
-                            .preference(
-                                key: DiscoveryCardFramePreferenceKey.self,
-                                value: [discovery.id: globalFrame]
-                            )
-                            .applyingIf(isFirstDiscovery) { view in
-                                view.preference(
-                                    key: ScrollOffsetPreferenceKey.self,
-                                    value: localFrame.minY
-                                )
-                            }
-                    }
-                    .transaction { tx in tx.animation = nil }
                 )
                 .onAppear {
                     Task { await onLoadMore(discovery) }
                 }
+                .background(
+                    // Removed ScrollOffsetPreferenceKey from here to avoid lazy-loading issues.
+                    // It is now tracked in DiscoveriesHomeView on the persistent header.
+                    Color.clear
+                )
             }
         }
         .frame(width: availableWidth, alignment: .leading)
-        .onPreferenceChange(DiscoveryCardFramePreferenceKey.self) { value in
-            if cardFrames != value {
-                cardFrames = value
-            }
-        }
     }
 }

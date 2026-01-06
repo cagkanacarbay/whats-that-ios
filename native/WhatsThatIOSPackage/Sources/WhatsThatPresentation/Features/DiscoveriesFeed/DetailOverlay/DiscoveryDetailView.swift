@@ -181,13 +181,7 @@ struct DiscoveryDetailView: View {
     }
 }
 
-struct DiscoveryOverlayInteractiveRegionPreferenceKey: PreferenceKey {
-    static var defaultValue: [Anchor<CGRect>] = []
 
-    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
-        value.append(contentsOf: nextValue())
-    }
-}
 
 private extension DiscoveryDetailView {
     var overlayGeometryId: String {
@@ -335,7 +329,6 @@ private struct DiscoveryDetailContentView: View {
     @State private var baselineOffset: CGFloat?
     @State private var audioControlsScrollOffset: CGFloat = 0
     // Scrolling/dismiss gating has no need for persistent local state
-    @State private var overlayInteractiveAnchors: [Anchor<CGRect>] = []
     // no external measurement needed
 
     init(
@@ -457,17 +450,23 @@ private struct DiscoveryDetailContentView: View {
                     .transaction { $0.animation = nil }
                     .opacity(scrollOverlayOpacity)
                     .allowsHitTesting(isChromeReady)
-                    .onPreferenceChange(DiscoveryOverlayInteractiveRegionPreferenceKey.self) { anchors in
-                        overlayInteractiveAnchors = anchors
-                    }
                     .overlay(alignment: .top) {
                         if onShowImage != nil, isChromeReady, !isClosing {
+                            // Simple full-size tap area that sits *below* the interactive controls
+                            // because we are in an overlay. But wait, this overlay is on top of the header.
+                            // The header controls (back button, etc.) are inside DiscoveryHeaderOverlayView.
+                            // If this tap overlay covers them, they won't work.
+                            // However, SwiftUI's ZStack order matters.
+                            // DiscoveryHeaderOverlayView is strictly visually composed.
+                            // We need to ensure this tap gesture doesn't block the controls.
+                            // Using allowHitTesting(false) on the spacer area for controls is one way.
+                            
                             heroTapOverlay
                         }
                     }
                 }
 
-                if isChromeReady {
+                if isChromeReady && !isClosing {
 
                     VStack(alignment: .leading, spacing: 0) {
                         
@@ -581,13 +580,6 @@ private extension DiscoveryDetailContentView {
             let topPadding = min(topTapExclusionHeight, proxy.size.height)
             let bottomPadding = min(bottomExclusionHeight, max(proxy.size.height - topPadding, 0))
             let interactiveHeight = max(proxy.size.height - topPadding - bottomPadding, 0)
-            let interactiveRects = overlayInteractiveAnchors.map { proxy[$0] }
-            let tapExclusions = resolvedTapExclusions(
-                for: interactiveRects,
-                topPadding: topPadding,
-                interactiveHeight: interactiveHeight,
-                containerWidth: proxy.size.width
-            )
 
             VStack(spacing: 0) {
                 Spacer()
@@ -596,13 +588,12 @@ private extension DiscoveryDetailContentView {
 
                 Color.clear
                     .frame(height: interactiveHeight)
-                    .contentShape(HeroTapHitShape(exclusions: tapExclusions), eoFill: true)
+                    .contentShape(Rectangle())
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0)
                             .onEnded { value in
                                 guard let onShowImage,
-                                      isTap(translation: value.translation),
-                                      !tapExclusions.contains(where: { $0.contains(value.startLocation) }) else { return }
+                                      isTap(translation: value.translation) else { return }
                                 onShowImage()
                             }
                     )

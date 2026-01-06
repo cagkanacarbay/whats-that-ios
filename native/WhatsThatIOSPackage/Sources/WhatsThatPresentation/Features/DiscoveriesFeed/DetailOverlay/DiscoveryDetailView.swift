@@ -4,6 +4,9 @@ import UIKit
 import WhatsThatDomain
 import WhatsThatShared
 import MarkdownUI
+#if canImport(Photos)
+import Photos
+#endif
 
 struct DiscoveryDetailView: View {
     struct LayoutConfiguration {
@@ -46,6 +49,8 @@ struct DiscoveryDetailView: View {
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     @Binding private var scrollOffset: CGFloat
     @State private var isOptionsPresented = false
+    @State private var isSaving = false
+    @State private var showSaveError = false
     @State private var shareSheetPayload: DiscoveryDetailSharePayload?
     @State private var shareSheetDetent: PresentationDetent = .medium
 
@@ -157,6 +162,8 @@ struct DiscoveryDetailView: View {
                 DiscoveryDetailOptionsSheet(
                     isPresented: $isOptionsPresented,
                     isDeleting: isDeleting,
+                    isSaving: isSaving,
+                    onSaveImage: handleSaveImage,
                     onDelete: handleDeleteSelection
                 )
             }
@@ -197,6 +204,77 @@ private extension DiscoveryDetailView {
         guard !isDeleting else { return }
         isOptionsPresented = false
         onDelete?()
+    }
+
+    func handleSaveImage() {
+        guard !isSaving else { return }
+        isSaving = true
+        
+        Task {
+            defer {
+                Task { @MainActor in
+                    isSaving = false
+                }
+            }
+            
+            #if canImport(Photos)
+            // Check/request permission
+            var status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+            if status == .notDetermined {
+                status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            }
+            
+            guard status == .authorized || status == .limited else {
+                await MainActor.run {
+                    showSaveError = true
+                }
+                return
+            }
+            
+            // Get image data from placeholder or download from URL
+            let imageData: Data?
+            if let placeholder = placeholderImage {
+                imageData = placeholder.jpegData(compressionQuality: 0.95)
+            } else if let url = imageURL {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    imageData = data
+                } catch {
+                    await MainActor.run {
+                        showSaveError = true
+                    }
+                    return
+                }
+            } else {
+                imageData = nil
+            }
+            
+            guard let data = imageData, let image = UIImage(data: data) else {
+                await MainActor.run {
+                    showSaveError = true
+                }
+                return
+            }
+            
+            // Save to Photos library
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }
+                await MainActor.run {
+                    isOptionsPresented = false
+                }
+            } catch {
+                await MainActor.run {
+                    showSaveError = true
+                }
+            }
+            #else
+            await MainActor.run {
+                showSaveError = true
+            }
+            #endif
+        }
     }
 
     func presentShareSheet() {

@@ -44,6 +44,8 @@ struct DiscoveryOverlayButton: View {
 struct DiscoveryDetailOptionsSheet: View {
     @Binding var isPresented: Bool
     let isDeleting: Bool
+    let isSaving: Bool
+    let onSaveImage: (() -> Void)?
     let onDelete: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @State private var showDeleteConfirmation = false
@@ -65,6 +67,7 @@ struct DiscoveryDetailOptionsSheet: View {
                     .foregroundStyle(palette.textPrimary)
 
                 VStack(spacing: BrandSpacing.medium) {
+                    saveImageButton
                     destructiveButton
                     cancelButton
                 }
@@ -92,6 +95,44 @@ struct DiscoveryDetailOptionsSheet: View {
         } message: {
             Text("All data related to this discovery will be permanently deleted and cannot be recovered.")
         }
+    }
+
+    private var saveImageButton: some View {
+        let isDisabled = onSaveImage == nil || isSaving || isDeleting
+
+        return Button {
+            guard !isDisabled else { return }
+            onSaveImage?()
+        } label: {
+            ZStack {
+                Text(isSaving ? "Saving…" : "Save to Photos")
+                    .font(.system(size: 16, weight: .semibold))
+
+                HStack(spacing: BrandSpacing.small) {
+                    Image(systemName: "square.and.arrow.down")
+                    Spacer()
+                    if isSaving {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(palette.textPrimary)
+                    }
+                }
+            }
+            .padding(.horizontal, BrandSpacing.medium)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.textPrimary)
+        .background(saveBackground)
+        .cornerRadius(BrandCornerRadius.medium)
+        .overlay {
+            RoundedRectangle(cornerRadius: BrandCornerRadius.medium, style: .continuous)
+                .stroke(saveBorder, lineWidth: 1.5)
+        }
+        .opacity(isDisabled ? 0.5 : 1)
+        .disabled(isDisabled)
     }
 
     private var destructiveButton: some View {
@@ -182,6 +223,14 @@ struct DiscoveryDetailOptionsSheet: View {
 
     private var cancelBorder: Color {
         palette.border.opacity(0.5)
+    }
+
+    private var saveBackground: Color {
+        Color.accentColor.opacity(0.12)
+    }
+
+    private var saveBorder: Color {
+        Color.accentColor.opacity(0.3)
     }
 }
 

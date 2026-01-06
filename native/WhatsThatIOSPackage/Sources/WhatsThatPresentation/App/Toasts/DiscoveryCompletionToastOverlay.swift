@@ -7,6 +7,7 @@ import WhatsThatShared
 struct DiscoveryCompletionToastOverlay: View {
     @ObservedObject var sessionManager = DiscoverySessionManager.shared
     @ObservedObject var audioServices: AudioServicesContainer
+    @ObservedObject var miniPlayerPresence: MiniPlayerPresenceStore
     let onViewDiscovery: (Int64) -> Void
     let onGenerateAudio: (DiscoverySummary) -> Void
     
@@ -19,6 +20,8 @@ struct DiscoveryCompletionToastOverlay: View {
     private let toastMiniPlayerGap: CGFloat = 8
     
     private var isMiniPlayerVisible: Bool {
+        // Check if mini player has been dismissed by user
+        guard !miniPlayerPresence.isDismissed else { return false }
         guard audioServices.playbackController.currentDiscovery != nil else { return false }
         switch audioServices.playbackController.playbackState {
         case .idle, .failed:

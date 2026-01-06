@@ -89,6 +89,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
     private let ipopPreferencesStore: IPoPPreferencesStore?
+    private let photoSavePreferencesStore: PhotoSavePreferencesStore?
+    private let photoLibrarySaveService: (any PhotoLibrarySaveServiceProtocol)?
     private let analysisParser = DiscoveryAnalysisParser()
     #if DEBUG
     private let debugLoggingEnabled = true
@@ -148,7 +150,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         locationService: DiscoveryLocationService,
         voiceoverRepository: (any DiscoveryVoiceoverRepository)? = nil,
         voiceoverPreferencesStore: VoiceoverPreferencesStore? = nil,
-        ipopPreferencesStore: IPoPPreferencesStore? = nil
+        ipopPreferencesStore: IPoPPreferencesStore? = nil,
+        photoSavePreferencesStore: PhotoSavePreferencesStore? = nil,
+        photoLibrarySaveService: (any PhotoLibrarySaveServiceProtocol)? = nil
     ) {
         self.configuration = configuration
         self.captureService = captureService
@@ -163,6 +167,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         self.voiceoverRepository = voiceoverRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
         self.ipopPreferencesStore = ipopPreferencesStore
+        self.photoSavePreferencesStore = photoSavePreferencesStore
+        self.photoLibrarySaveService = photoLibrarySaveService
     }
 
     func startFlow(retake: Bool = false) {
@@ -260,6 +266,14 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
 
         onAnalysisBegan?(configuration.type)
+        
+        // Save photo to library if enabled (camera captures only)
+        if configuration.type == .camera {
+            Task { [weak self] in
+                await self?.savePhotoToLibraryIfEnabled(media: media)
+            }
+        }
+        
         analysisTask?.cancel()
         analysisTask = Task { [weak self] in
             await self?.startAnalysisSession(media: media, confirmation: state)
@@ -664,7 +678,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             confirmationState?.customContext = builder.buildContext(
                 from: discoveries,
                 limit: configuration.recentHistoryLimit,
-                ipopPreferences: ipopPreferences
+                ipopPreferences: ipopPreferences,
+                imageSource: flowType.rawValue
             )
         } catch {
             confirmationState?.customContext = nil
@@ -1325,5 +1340,42 @@ extension DiscoveryCreationFlowViewModel: DiscoverySessionSubscriber {
         
         // Clear the session ID since it's complete
         currentSessionId = nil
+    }
+    
+    // MARK: - Photo Library Saving
+    
+    /// Saves the captured photo to the user's Photos library if auto-save is enabled.
+    /// Requests permission on first use. Non-blocking; failures are logged but don't affect the flow.
+    private func savePhotoToLibraryIfEnabled(media: DiscoveryCapturedMedia) async {
+        guard let preferencesStore = photoSavePreferencesStore,
+              let saveService = photoLibrarySaveService else {
+            debugLog("Photo save services not available")
+            return
+        }
+        
+        // Check if auto-save is enabled
+        let isEnabled = await preferencesStore.isEnabled()
+        guard isEnabled else {
+            debugLog("Photo auto-save is disabled")
+            return
+        }
+        
+        debugLog("Saving photo to library...")
+        
+        // Save photo (service handles permission request if needed)
+        let result = await saveService.save(imageData: media.data)
+        
+        switch result {
+        case .success:
+            debugLog("Photo saved to library successfully")
+        case .permissionDenied:
+            debugLog("Photo save skipped: permission denied")
+            // Permission was denied; the user can enable in Settings
+            // We don't show an error since this is non-blocking
+        case .permissionRestricted:
+            debugLog("Photo save skipped: permission restricted")
+        case .saveFailed(let error):
+            debugLog("Photo save failed: \(error.localizedDescription)")
+        }
     }
 }

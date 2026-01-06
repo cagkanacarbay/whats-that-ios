@@ -176,7 +176,10 @@ struct MainTabView: View {
             .zIndex(activeOverlayPhase == .analyzing ? 2 : 0)
             
             // Audio guide generation complete toast - positioned above mini player
-            AudioGuideCompletionToastOverlay(audioServices: audioServices)
+            AudioGuideCompletionToastOverlay(
+                audioServices: audioServices,
+                miniPlayerPresence: audioServices.miniPlayerPresence
+            )
             
             // Discovery completion toast - for background created discoveries
             discoveryCompletionToast
@@ -452,6 +455,7 @@ struct MainTabView: View {
     private var discoveryCompletionToast: some View {
         DiscoveryCompletionToastOverlay(
             audioServices: audioServices,
+            miniPlayerPresence: audioServices.miniPlayerPresence,
             onViewDiscovery: { discoveryId in
                 // Navigate to discoveries tab and open the discovery
                 self.pendingDiscoveryId = discoveryId

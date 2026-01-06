@@ -20,6 +20,8 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
     private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
     private let ipopPreferencesStore: IPoPPreferencesStore?
+    private let photoSavePreferencesStore: PhotoSavePreferencesStore
+    private let photoLibrarySaveService: any PhotoLibrarySaveServiceProtocol
 
     init(
         maxImageDimension: Int,
@@ -35,7 +37,9 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         locationService: DiscoveryLocationService,
         voiceoverRepository: (any DiscoveryVoiceoverRepository)?,
         voiceoverPreferencesStore: VoiceoverPreferencesStore?,
-        ipopPreferencesStore: IPoPPreferencesStore?
+        ipopPreferencesStore: IPoPPreferencesStore?,
+        photoSavePreferencesStore: PhotoSavePreferencesStore,
+        photoLibrarySaveService: any PhotoLibrarySaveServiceProtocol
     ) {
         self.maxImageDimension = maxImageDimension
         self.recentHistoryLimit = recentHistoryLimit
@@ -51,6 +55,8 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
         self.voiceoverRepository = voiceoverRepository
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
         self.ipopPreferencesStore = ipopPreferencesStore
+        self.photoSavePreferencesStore = photoSavePreferencesStore
+        self.photoLibrarySaveService = photoLibrarySaveService
     }
 
     @MainActor
@@ -72,7 +78,9 @@ struct DiscoveryCreationDependencyProvider: @unchecked Sendable {
             locationService: locationService,
             voiceoverRepository: voiceoverRepository,
             voiceoverPreferencesStore: voiceoverPreferencesStore,
-            ipopPreferencesStore: ipopPreferencesStore
+            ipopPreferencesStore: ipopPreferencesStore,
+            photoSavePreferencesStore: photoSavePreferencesStore,
+            photoLibrarySaveService: photoLibrarySaveService
         )
     }
 }

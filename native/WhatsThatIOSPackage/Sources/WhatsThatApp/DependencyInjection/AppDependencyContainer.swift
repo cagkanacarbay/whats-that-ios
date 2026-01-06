@@ -190,6 +190,8 @@ public extension AppDependencyContainer {
         let voiceInventoryRepository = VoiceInventoryRepository(client: client)
         let voiceoverPreferencesStore = VoiceoverPreferencesStore()
         let ipopPreferencesStore = IPoPPreferencesStore()
+        let photoSavePreferencesStore = PhotoSavePreferencesStore()
+        let photoLibrarySaveService = PhotoLibrarySaveService()
         let discoveryCreationProvider = DiscoveryCreationDependencyProvider(
             maxImageDimension: 2048,
             recentHistoryLimit: 25,
@@ -204,7 +206,9 @@ public extension AppDependencyContainer {
             locationService: locationService,
             voiceoverRepository: voiceoverRepository,
             voiceoverPreferencesStore: voiceoverPreferencesStore,
-            ipopPreferencesStore: ipopPreferencesStore
+            ipopPreferencesStore: ipopPreferencesStore,
+            photoSavePreferencesStore: photoSavePreferencesStore,
+            photoLibrarySaveService: photoLibrarySaveService
         )
         #endif
 

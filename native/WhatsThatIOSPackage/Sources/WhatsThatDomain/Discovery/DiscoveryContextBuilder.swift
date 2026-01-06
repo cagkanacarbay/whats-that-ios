@@ -6,9 +6,10 @@ public struct DiscoveryContextBuilder: Sendable {
     public func buildContext(
         from discoveries: [DiscoverySummary],
         limit: Int = 25,
-        ipopPreferences: IPoPPreferences? = nil
+        ipopPreferences: IPoPPreferences? = nil,
+        imageSource: String? = nil
     ) -> String? {
-        guard !discoveries.isEmpty || ipopPreferences != nil else { return nil }
+        guard !discoveries.isEmpty || ipopPreferences != nil || imageSource != nil else { return nil }
 
         let sorted = discoveries.sorted(by: { $0.capturedAt > $1.capturedAt })
         let truncated = Array(sorted.prefix(limit))
@@ -19,7 +20,8 @@ public struct DiscoveryContextBuilder: Sendable {
         let payload = DiscoveryContextPayload(
             recentFullDiscoveries: recentSection,
             aggregatedHistory: historySection,
-            ipopPreferences: ipopPreferences
+            ipopPreferences: ipopPreferences,
+            imageSource: imageSource
         )
 
         guard let data = try? JSONEncoder().encode(payload) else {
@@ -146,6 +148,7 @@ private struct DiscoveryContextPayload: Codable {
     let recentFullDiscoveries: String
     let aggregatedHistory: String
     let ipopPreferences: IPoPPreferences?
+    let imageSource: String?
 }
 
 private struct HistoryGroupKey: Hashable {

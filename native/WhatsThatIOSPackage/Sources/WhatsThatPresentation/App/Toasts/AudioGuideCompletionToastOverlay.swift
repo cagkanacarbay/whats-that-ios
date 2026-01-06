@@ -5,6 +5,7 @@ import WhatsThatShared
 /// Wrapper that observes AudioServicesContainer to show toast when audio guide generation completes.
 struct AudioGuideCompletionToastOverlay: View {
     @ObservedObject var audioServices: AudioServicesContainer
+    @ObservedObject var miniPlayerPresence: MiniPlayerPresenceStore
     @Environment(\.colorScheme) private var colorScheme
     
     // Mini player constants (from MiniPlayerView)
@@ -16,6 +17,8 @@ struct AudioGuideCompletionToastOverlay: View {
     private let toastMiniPlayerGap: CGFloat = 8
     
     private var isMiniPlayerVisible: Bool {
+        // Check if mini player has been dismissed by user
+        guard !miniPlayerPresence.isDismissed else { return false }
         guard audioServices.playbackController.currentDiscovery != nil else { return false }
         // Check if playback state is active (not idle or failed)
         switch audioServices.playbackController.playbackState {

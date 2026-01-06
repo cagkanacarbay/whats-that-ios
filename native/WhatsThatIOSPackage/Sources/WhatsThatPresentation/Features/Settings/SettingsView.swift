@@ -1,6 +1,9 @@
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
+#if canImport(Photos)
+import Photos
+#endif
 #if DEBUG
 import Security
 #endif
@@ -27,6 +30,11 @@ struct SettingsView: View {
     @State private var isIPoPSheetPresented = false
     @State private var initialVoiceModelId: String?
     @State private var committedVoiceModelId: String?
+    @State private var isPhotoSaveEnabled: Bool = true
+    @State private var photoSavePermissionStatus: PhotoLibraryAuthorizationStatus = .notDetermined
+    @State private var showPhotoSavePermissionGuide = false
+    private let photoSavePreferencesStore = PhotoSavePreferencesStore()
+    @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     @State private var debugCreditInput: String = ""
     #endif
@@ -95,6 +103,7 @@ struct SettingsView: View {
             List {
                 creditsSection
                 themeSection
+                photoSaveSection
                 ipopSection
                 audioGuidesSection
                 accountSection
@@ -108,8 +117,16 @@ struct SettingsView: View {
                 await viewModel.refreshCreditBalance()
                 await voicePickerViewModel.ensureLoadedForDisplay()
                 await ipopPreferencesViewModel.ensureLoaded()
+                await loadPhotoSavePreferences()
                 if committedVoiceModelId == nil {
                     committedVoiceModelId = voicePickerViewModel.selectedVoiceId
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    Task {
+                        await loadPhotoSavePreferences()
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -448,6 +465,96 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 4)
         }
+    }
+
+    private var photoSaveSection: some View {
+        Section(header: Text("Photo saving")) {
+            if photoSavePermissionStatus == .denied || photoSavePermissionStatus == .restricted {
+                // Permission denied - show guidance
+                Button {
+                    showPhotoSavePermissionGuide = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                            .imageScale(.large)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enable photo saving")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(Color.primary)
+                            Text("Permission required")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Image(systemName: "chevron.right")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .accessibilityIdentifier("settings.photoSavePermission")
+            } else {
+                // Normal toggle
+                Toggle(isOn: Binding(
+                    get: { isPhotoSaveEnabled },
+                    set: { newValue in
+                        isPhotoSaveEnabled = newValue
+                        Task {
+                            await photoSavePreferencesStore.setEnabled(newValue)
+                        }
+                    }
+                )) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "photo.badge.checkmark")
+                            .imageScale(.large)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 24)
+
+                        Text("Save captures to Photos")
+                            .font(.body.weight(.medium))
+                    }
+                }
+                .tint(BrandColors.logo)
+                .accessibilityIdentifier("settings.photoSaveToggle")
+            }
+
+            Text("Keep a copy of shots in your iPhone library. Off keeps them only inside the app.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 2)
+        }
+        .alert("Enable Photo Saving", isPresented: $showPhotoSavePermissionGuide) {
+            Button("Open Settings") {
+                openAppSettings()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("To save photos from the camera:\n\n1. Tap 'Open Settings'\n2. Select 'Photos'\n3. Choose 'Add Photos Only' or 'Full Access'")
+        }
+    }
+
+    private func loadPhotoSavePreferences() async {
+        isPhotoSaveEnabled = await photoSavePreferencesStore.isEnabled()
+        #if canImport(Photos)
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        photoSavePermissionStatus = switch status {
+        case .authorized: .authorized
+        case .denied: .denied
+        case .restricted: .restricted
+        case .notDetermined: .notDetermined
+        case .limited: .limited
+        @unknown default: .denied
+        }
+        #endif
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     #if DEBUG

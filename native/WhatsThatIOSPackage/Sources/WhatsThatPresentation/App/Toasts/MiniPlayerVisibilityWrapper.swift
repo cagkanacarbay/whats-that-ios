@@ -26,6 +26,10 @@ struct MiniPlayerVisibilityWrapper<Content: View>: View {
         // This allows other views (like DiscoveryDetailOverlayView) to hide the global player
         guard miniPlayerPresence.isVisible else { return false }
         
+        // Check if user has dismissed the mini player (but playback continues)
+        // This only affects non-Audio Guides tabs; Audio Guides uses its own full player
+        guard !miniPlayerPresence.isDismissed else { return false }
+        
         // Must have something playing
         guard controller.currentDiscovery != nil else { return false }
         

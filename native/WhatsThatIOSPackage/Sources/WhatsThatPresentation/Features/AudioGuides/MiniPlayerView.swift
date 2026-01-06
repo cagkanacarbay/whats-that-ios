@@ -51,6 +51,10 @@ private struct MiniPlayerContentView: View {
     var onExpand: () -> Void
     var onHeightChange: (CGFloat) -> Void
     
+    // Swipe to dismiss state
+    @State private var dragOffset: CGFloat = 0
+    private let dismissThreshold: CGFloat = 50
+    
     // MARK: - Computed Properties
     
     private var discovery: DiscoverySummary? {
@@ -90,6 +94,29 @@ private struct MiniPlayerContentView: View {
             artworkWithProgressRing
         }
         .frame(height: artworkDiameter)
+        // Swipe-to-dismiss gesture and animation
+        .offset(y: dragOffset)
+        .opacity(Double(1 - (dragOffset / (dismissThreshold * 2))))
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    // Only allow downward drag
+                    if value.translation.height > 0 {
+                        dragOffset = value.translation.height
+                    }
+                }
+                .onEnded { value in
+                    if value.translation.height > dismissThreshold {
+                        // Dismiss with animation
+                        pauseAndDismiss()
+                    } else {
+                        // Snap back
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
         .background(
             GeometryReader { proxy in
                 Color.clear.preference(
@@ -346,6 +373,30 @@ private struct MiniPlayerContentView: View {
             }
         } else {
             print("[MiniPlayer.playPrevious] previous() returned nil!")
+        }
+    }
+    
+    private func pauseAndDismiss() {
+        // Haptic feedback for dismissal
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+        
+        log.debug("[MiniPlayer] Swipe-to-dismiss triggered - pausing and hiding")
+        
+        // Animate off-screen first
+        withAnimation(.easeOut(duration: 0.2)) {
+            dragOffset = 200
+        }
+        
+        // Pause playback and dismiss (preserves position and queue)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            controller.pause()
+            audioServices.miniPlayerPresence.dismiss()
+            
+            // Reset drag offset for next appearance
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                dragOffset = 0
+            }
         }
     }
 }

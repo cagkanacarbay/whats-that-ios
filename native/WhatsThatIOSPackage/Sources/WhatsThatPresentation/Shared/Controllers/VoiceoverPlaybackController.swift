@@ -84,6 +84,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var speedStore: VoiceoverPlaybackSpeedStore?
     private var progressStore: VoiceoverProgressStore?
     private var discoveryStore: DiscoveryStore?
+    private var miniPlayerPresence: MiniPlayerPresenceStore?
     
     /// Called when voiceover generation completes successfully (for toast notification)
     public var onGenerationComplete: ((DiscoverySummary) -> Void)?
@@ -455,6 +456,8 @@ public extension VoiceoverPlaybackController {
         }
         player.play()
         playbackState = .playing(discoveryId: id)
+        // Un-dismiss mini player when playback resumes
+        miniPlayerPresence?.undismiss()
         updateNowPlayingPlaybackState()
         refreshNowPlayingInfo()
     }
@@ -526,12 +529,14 @@ public extension VoiceoverPlaybackController {
         queueStore: AudioGuidesQueueStore,
         speedStore: VoiceoverPlaybackSpeedStore,
         progressStore: VoiceoverProgressStore,
-        discoveryStore: DiscoveryStore
+        discoveryStore: DiscoveryStore,
+        miniPlayerPresence: MiniPlayerPresenceStore
     ) {
         self.queueStore = queueStore
         self.speedStore = speedStore
         self.progressStore = progressStore
         self.discoveryStore = discoveryStore
+        self.miniPlayerPresence = miniPlayerPresence
         
         // Initialize rate from persisted value
         self.currentRate = speedStore.speed
@@ -713,6 +718,8 @@ extension VoiceoverPlaybackController {
                 self.errorMessage = nil
                 self.position = 0
                 self.duration = nil
+                // Un-dismiss mini player when new track starts
+                self.miniPlayerPresence?.undismiss()
                 log.debug("[play] currentDiscovery set. id=\(self.currentDiscovery?.id ?? -1), title='\(self.currentDiscovery?.title ?? "nil")'")
             }
 

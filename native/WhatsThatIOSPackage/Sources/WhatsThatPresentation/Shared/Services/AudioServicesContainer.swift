@@ -88,7 +88,8 @@ public final class AudioServicesContainer: ObservableObject {
             queueStore: queueStore,
             speedStore: speedStore,
             progressStore: progressStore,
-            discoveryStore: discoveryStore
+            discoveryStore: discoveryStore,
+            miniPlayerPresence: miniPlayerPresence
         )
         
         // Wire up generation complete callback to show toast

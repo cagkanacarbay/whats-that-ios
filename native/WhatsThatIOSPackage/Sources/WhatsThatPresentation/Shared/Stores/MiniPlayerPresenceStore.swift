@@ -7,12 +7,16 @@ import SwiftUI
 public final class MiniPlayerPresenceStore: ObservableObject {
     @Published public var height: CGFloat = 0
     @Published public var isVisible: Bool = true
+    /// When dismissed, the mini player is hidden but playback state is preserved.
+    /// User can still see the full player in Audio Guides tab.
+    /// Automatically resets when a new track starts playing.
+    @Published public var isDismissed: Bool = false
     
     public init() {}
     
     /// The effective bottom inset that scroll views should apply
     public var effectiveInset: CGFloat {
-        isVisible ? height : 0
+        (isVisible && !isDismissed) ? height : 0
     }
     
     /// Updates the height with debouncing to avoid frequent updates
@@ -38,6 +42,16 @@ public final class MiniPlayerPresenceStore: ObservableObject {
     /// Convenience alias for setVisible(_:)
     public func updateVisibility(_ visible: Bool) {
         setVisible(visible)
+    }
+    
+    /// Dismisses the mini player (hides it without affecting playback)
+    public func dismiss() {
+        isDismissed = true
+    }
+    
+    /// Brings the mini player back (called when new playback starts)
+    public func undismiss() {
+        isDismissed = false
     }
 }
 

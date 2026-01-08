@@ -49,7 +49,6 @@ public final class CreditsViewModel: ObservableObject {
     @Published public private(set) var isFetchingProducts = false
     @Published public private(set) var isRefreshingBalance = false
     @Published public private(set) var isPurchasing = false
-    @Published public private(set) var isRestoring = false
     @Published public private(set) var balance: Int?
     @Published public private(set) var creditPacks: [CreditPackItem] = []
     @Published public private(set) var activePurchaseIdentifier: String?
@@ -113,54 +112,6 @@ public final class CreditsViewModel: ObservableObject {
         }
     }
 
-    public func restorePurchases() async {
-        if isRestoring { return }
-        isRestoring = true
-        defer { isRestoring = false }
-
-        let previousBalance = balance ?? 0
-        
-        do {
-            try await store.restorePurchases()
-            
-            // After restoring, refresh the balance to pick up any restored credits
-            let balanceValue = try await balanceStore.refresh(force: true)
-            updateBalance(balanceValue)
-            
-            if balanceValue > previousBalance {
-                let restoredAmount = balanceValue - previousBalance
-                toastMessage = ToastMessage(
-                    title: "Restore complete",
-                    message: "Restored \(restoredAmount) credits. Your balance has been updated.",
-                    style: .success
-                )
-            } else {
-                toastMessage = ToastMessage(
-                    title: "Sync complete",
-                    message: "Your balance is up to date.",
-                    style: .info
-                )
-            }
-        } catch {
-            // Check if it's a cancellation error to stay silent.
-            if case StoreKitError.userCancelled = error {
-                return
-            }
-            
-            let nsError = error as NSError
-            if nsError.domain == "com.apple.StoreKit.ExternalNotificationService" && nsError.code == 2 {
-                // User cancelled - stay silent
-                return
-            }
-            
-            // Fallback for other StoreKit cancellation patterns or real errors
-            if error.localizedDescription.contains("cancelled") {
-                return
-            }
-
-            present(error: error)
-        }
-    }
 
     public func refreshBalance() async {
         if isRefreshingBalance { return }

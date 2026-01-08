@@ -41,12 +41,6 @@ public struct CreditPurchaseResult: Equatable, Sendable {
 public protocol CreditsStore: Sendable {
     func loadProducts() async throws -> [CreditProduct]
     func purchase(productId: String) async throws -> CreditPurchaseResult
-    /// Manually sync App Store receipts. Triggered by user tapping "Restore Purchases".
-    func restorePurchases() async throws
-}
-
-public extension CreditsStore {
-    func restorePurchases() async throws {}
 }
 
 public struct CreditPackDefinition: Identifiable, Equatable, Sendable {

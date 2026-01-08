@@ -47,12 +47,6 @@ public actor StoreKitCreditsStore: CreditsStore {
         self.urlSession = urlSession
     }
 
-    public func restorePurchases() async throws {
-        // Manually sync App Store receipts. This is triggered by user action
-        // (Restore Purchases button) rather than automatically on screen load.
-        try await AppStore.sync()
-    }
-
     public func loadProducts() async throws -> [CreditProduct] {
         let products = try await Product.products(for: productIdentifiers)
         cachedProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })

@@ -58,9 +58,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>We use your location to personalize discoveries with nearby context.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>We can save the photos you capture to your library for safekeeping.</string>
+	<string>What&apos;s That? needs permission to save the photos you capture to your library. When you identify a new object, we can save the photo to your gallery so you have a permanent record of the discovery.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We access your photo library so you can upload pictures to analyze.</string>
+	<string>We access your photo library so you can upload pictures to create discoveries. For example, you can select a landmark photo from your trip to get it analyzed by our AI, and create an audio guide to listen to.</string>
 	<key>SUPABASE_ANON_KEY</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SUPABASE_PASSWORD_RESET_REDIRECT_URL</key>

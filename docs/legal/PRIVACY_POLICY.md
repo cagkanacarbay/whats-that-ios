@@ -1,6 +1,6 @@
 # Privacy Policy — “What’s That?”
 
-Effective date: 16 December 2025
+Effective date: 8 January 2026
 Version: 1.0
 
 This Privacy Policy explains how we collect, use, disclose, and protect information about you when you use the “What’s That?” mobile application and related services (the “Service”).
@@ -18,12 +18,12 @@ We collect the types of data described below. Exact fields depend on how you use
 - Location data (optional): precise or approximate location when you grant OS permission. We may also fetch nearby points of interest using your coordinates to improve context.
 - Push notifications: APNs device token (iOS); device name and platform to route notifications.
 - Discovery history: a record of your prior "discoveries," including their titles, descriptions, and timestamps. We use this history to personalize future analysis prompts.
-- Device permissions: We request OS permissions for specific features (for example, camera/photos for capture/upload; location for context; notifications for status updates). You can revoke these permissions at any time in OS settings.
+- Device permissions: We request OS permissions for specific features (for example, camera/photos for capture/upload; save to photo library for photos taken while in app; location for context; notifications for status updates). You can revoke these permissions at any time in OS settings.
 - AI outputs: titles, descriptions, and analysis generated for your images; Audio Guide narrations generated for your discoveries.
 - Audio Guides: If you generate Audio Guides, we store the AI‑generated audio files in our systems. Audio files are also cached locally on your device (automatically managed) for offline playback. We store your voice preference selection and playback speed settings.
 - In‑app purchases: productId, transaction identifiers (e.g., original transaction id), and platform. We do not store raw receipt data or your full payment card details.
 - Technical data: device/OS version, app version, IP address, and similar diagnostic information. We do not embed third‑party analytics/crash SDKs at this time.
-
+- Identities for anti-fraud: We process identifiers (such as device IDs and hashed email addresses) to prevent abuse of the Service. This collection is mandatory to ensure fair usage of free tiers/credits.
 Avoid sensitive data: Please avoid uploading images or text that reveal highly sensitive personal information (e.g., medical, financial, government IDs). While our app is designed for places/objects, images may inadvertently capture people or personal data.
 
 3) Sources
@@ -66,6 +66,8 @@ Our primary infrastructure (Supabase) is hosted in the European Union (Germany, 
 
 9) Retention
 - Account data: while your account is active. If you request deletion, we will delete or anonymize within a reasonable period, subject to legal retention obligations.
+
+To prevent abuse of initial free credit offers, we retain non-reversible SHA-256 hashes of account identifiers (such as email and device IDs) even after account deletion. These hashes do not allow us to reconstruct your original personal information.
 - Photos and AI outputs: retained until you delete the associated discovery or delete your account.
 - Audio Guides: retained until you delete the associated discovery or delete your account. Local device cache is automatically managed and cleared when you sign out or delete the app.
 - Push tokens: invalidated or deleted when you log out, uninstall, or after 12 months of inactivity.

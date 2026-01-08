@@ -22,6 +22,7 @@ struct DiscoveryConfirmationView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var bottomOverlayHeight: CGFloat = 0
+    @State private var isImageFullscreenPresented = false
 
     private var palette: DiscoveryCreationPalette {
         DiscoveryCreationPalette.resolve(for: colorScheme)
@@ -205,6 +206,18 @@ struct DiscoveryConfirmationView: View {
             }
         }
         .onPreferenceChange(BottomOverlayHeightPreferenceKey.self) { bottomOverlayHeight = $0 }
+        .sheet(isPresented: $isImageFullscreenPresented) {
+            if let image = previewUIImage {
+                DiscoveryDetailImageFullscreenView(
+                    discoveryId: 0,
+                    imageURL: nil,
+                    placeholderImage: image,
+                    onClose: { isImageFullscreenPresented = false }
+                )
+                .presentationDetents([.fraction(0.995)])
+                .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     @ViewBuilder
@@ -238,6 +251,10 @@ struct DiscoveryConfirmationView: View {
             }
         }
         .frame(width: size.width, height: resolvedHeight, alignment: .center)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isImageFullscreenPresented = true
+        }
         .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 16)
     }
 

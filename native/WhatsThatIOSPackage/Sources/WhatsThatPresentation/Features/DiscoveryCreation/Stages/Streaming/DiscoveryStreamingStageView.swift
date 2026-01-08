@@ -43,6 +43,9 @@ struct DiscoveryStreamingStageView: View {
     @State private var hasLoggedStreamStart = false
     @State private var hasLoggedStreamEnd = false
     @State private var hasLoggedMetadata = false
+    @State private var isImageFullscreenPresented = false
+    @State private var shareSheetPayload: DiscoveryDetailSharePayload?
+    @State private var shareSheetDetent: PresentationDetent = .medium
 
     private enum Layout {
         static let headerHeightFactor: CGFloat = 0.72
@@ -247,6 +250,29 @@ struct DiscoveryStreamingStageView: View {
                     }
                 }
             }
+            .sheet(isPresented: $isImageFullscreenPresented) {
+                if let image = previewImage {
+                    DiscoveryDetailImageFullscreenView(
+                        discoveryId: state.discoverySummary?.id ?? 0,
+                        imageURL: nil,
+                        placeholderImage: UIImage(data: imageData ?? Data()),
+                        onClose: { isImageFullscreenPresented = false }
+                    )
+                    .presentationDetents([.fraction(0.995)])
+                    .presentationDragIndicator(.visible)
+                }
+            }
+            .modifier(
+                ShareSheetModifier(
+                    shareSheetPayload: $shareSheetPayload,
+                    shareSheetDetent: $shareSheetDetent
+                )
+            )
+            .onChange(of: shareSheetPayload?.id) { _, id in
+                if id == nil {
+                    shareSheetDetent = .medium
+                }
+            }
         }
         }
     }
@@ -425,9 +451,15 @@ struct DiscoveryStreamingStageView: View {
             )
             .frame(width: width, height: height + safeTop)
             .allowsHitTesting(false)
+
+
         }
         .frame(width: width, height: height + safeTop)
         .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isImageFullscreenPresented = true
+        }
     }
 
     private func headerOverlayContent(width: CGFloat) -> some View {
@@ -444,6 +476,8 @@ struct DiscoveryStreamingStageView: View {
             capturedAt: capturedAt,
             availableWidth: availableWidth,
             onMessageFinished: { advanceMessage() },
+            onShare: makeShareHandler(),
+            onShowMap: makeMapHandler(),
             debugLog: { _ in }
         )
     }
@@ -551,5 +585,48 @@ struct DiscoveryStreamingStageView: View {
         let shortLen = state.metadataShortDescription?.count ?? 0
         hasLoggedMetadata = true
         print("[DiscoveryStreamingStageView] Metadata received title=\"\(title)\" shortLen=\(shortLen)")
+    }
+    private func makeShareHandler() -> (() -> Void)? {
+        guard let discovery = state.discoverySummary, !state.isStreaming else { return nil }
+        
+        return {
+            Task {
+                let handler = DiscoveryDetailShareHandler()
+                let context = DiscoveryDetailShareContext(
+                    discovery: discovery,
+                    placeholderImage: UIImage(data: imageData ?? Data()),
+                    imageURL: nil // Using local image data for streaming stage usually
+                )
+
+                guard let payload = await handler.makeSharePayload(for: context) else { return }
+                await MainActor.run {
+                    shareSheetDetent = .medium
+                    shareSheetPayload = payload
+                }
+            }
+        }
+    }
+
+    private func makeMapHandler() -> (() -> Void)? {
+        guard let discovery = state.discoverySummary, !state.isStreaming, discovery.location != nil else { return nil }
+        
+        return {
+            DiscoveryDetailShareHandler().openLocationIfAvailable(from: discovery)
+        }
+    }
+}
+
+private struct ShareSheetModifier: ViewModifier {
+    @Binding var shareSheetPayload: DiscoveryDetailSharePayload?
+    @Binding var shareSheetDetent: PresentationDetent
+
+    private var detents: Set<PresentationDetent> { [.medium, .large] }
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $shareSheetPayload) { payload in
+            DiscoveryShareSheet(activityItems: payload.items)
+                .presentationDetents(detents, selection: $shareSheetDetent)
+                .presentationDragIndicator(.visible)
+        }
     }
 }

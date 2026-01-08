@@ -314,7 +314,9 @@ struct DiscoveryDetailOverlayView: View {
             }
         }
         .sheet(isPresented: $isImageSheetPresented, onDismiss: {
-            fullscreenContext = nil
+            if !isImageSheetPresented {
+                fullscreenContext = nil
+            }
         }) {
             Group {
                 if let fullscreenContext {
@@ -335,7 +337,9 @@ struct DiscoveryDetailOverlayView: View {
 
     private func presentFullscreen(for context: DiscoveryDetailContext) {
         fullscreenContext = context
-        guard !isImageSheetPresented else { return }
+        guard !isImageSheetPresented else { 
+            return 
+        }
         isImageSheetPresented = true
     }
 

@@ -432,6 +432,7 @@ private struct DiscoveryDetailContentView: View {
                         maxDescriptionLines: 3,
                         gradientFalloff: 0.55,
                         contentWidth: containerWidth,
+                        onShowImage: (isChromeReady && !isClosing) ? onShowImage : nil,
                         onShare: onShare,
                         onShowMap: onShowMap,
                         isClosing: isClosing,
@@ -450,20 +451,7 @@ private struct DiscoveryDetailContentView: View {
                     .transaction { $0.animation = nil }
                     .opacity(scrollOverlayOpacity)
                     .allowsHitTesting(isChromeReady)
-                    .overlay(alignment: .top) {
-                        if onShowImage != nil, isChromeReady, !isClosing {
-                            // Simple full-size tap area that sits *below* the interactive controls
-                            // because we are in an overlay. But wait, this overlay is on top of the header.
-                            // The header controls (back button, etc.) are inside DiscoveryHeaderOverlayView.
-                            // If this tap overlay covers them, they won't work.
-                            // However, SwiftUI's ZStack order matters.
-                            // DiscoveryHeaderOverlayView is strictly visually composed.
-                            // We need to ensure this tap gesture doesn't block the controls.
-                            // Using allowHitTesting(false) on the spacer area for controls is one way.
-                            
-                            heroTapOverlay
-                        }
-                    }
+
                 }
 
                 if isChromeReady && !isClosing {
@@ -574,129 +562,12 @@ private extension DiscoveryDetailContentView {
         "discovery-detail-overlay-\(discovery.id)"
     }
 
-    @ViewBuilder
-    private var heroTapOverlay: some View {
-        GeometryReader { proxy in
-            let topPadding = min(topTapExclusionHeight, proxy.size.height)
-            let bottomPadding = min(bottomExclusionHeight, max(proxy.size.height - topPadding, 0))
-            let interactiveHeight = max(proxy.size.height - topPadding - bottomPadding, 0)
-
-            VStack(spacing: 0) {
-                Spacer()
-                    .frame(height: topPadding)
-                    .allowsHitTesting(false)
-
-                Color.clear
-                    .frame(height: interactiveHeight)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { value in
-                                guard let onShowImage,
-                                      isTap(translation: value.translation) else { return }
-                                onShowImage()
-                            }
-                    )
-
-                Spacer()
-                    .frame(height: bottomPadding)
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(height: heroVisibleHeight)
-        .allowsHitTesting(true)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("View image full screen")
-    }
-
-    private func isTap(translation: CGSize) -> Bool {
-        abs(translation.width) < 6 && abs(translation.height) < 6
-    }
-
-    private var topTapExclusionHeight: CGFloat {
-        var height = safeAreaTopInset + 12
-        if showTopControls {
-            height += 48 + BrandSpacing.small
-        }
-        if hasActionRow {
-            height += 48 + BrandSpacing.small
-        }
-        height += BrandSpacing.medium
-        return height
-    }
-
-    private var bottomExclusionHeight: CGFloat {
-        BrandSpacing.large
-    }
-
-    private var hasActionRow: Bool {
-        onShare != nil || onShowMap != nil
-    }
-
     func updateGatedDistanceFromTop(distance: CGFloat) {
         onScrollViewContentOffsetChange?(distance)
     }
 
-    func resolvedTapExclusions(
-        for interactiveRects: [CGRect],
-        topPadding: CGFloat,
-        interactiveHeight: CGFloat,
-        containerWidth: CGFloat
-    ) -> [CGRect] {
-        guard interactiveHeight > 0 else { return [] }
-        let expansion: CGFloat = 12
-        let interactiveArea = CGRect(
-            x: 0,
-            y: topPadding,
-            width: containerWidth,
-            height: interactiveHeight
-        )
-
-        return interactiveRects.compactMap { rect in
-            let intersection = rect.intersection(interactiveArea)
-            guard intersection.width > 0, intersection.height > 0 else { return nil }
-
-            let localRect = CGRect(
-                x: intersection.origin.x,
-                y: intersection.origin.y - topPadding,
-                width: intersection.width,
-                height: intersection.height
-            )
-
-            let minX = max(localRect.minX - expansion, 0)
-            let maxX = min(localRect.maxX + expansion, containerWidth)
-            let minY = max(localRect.minY - expansion, 0)
-            let maxY = min(localRect.maxY + expansion, interactiveHeight)
-
-            let width = max(0, maxX - minX)
-            let height = max(0, maxY - minY)
-            guard width > 0, height > 0 else { return nil }
-
-            return CGRect(x: minX, y: minY, width: width, height: height)
-        }
-    }
+    // MARK: - Targeted type boundary for share sheet
 }
-
-private struct HeroTapHitShape: Shape {
-    var exclusions: [CGRect]
-
-    var animatableData: EmptyAnimatableData {
-        get { EmptyAnimatableData() }
-        set {}
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addRect(rect)
-        exclusions.forEach { exclusion in
-            path.addRect(exclusion)
-        }
-        return path
-    }
-}
-
-// MARK: - Targeted type boundary for share sheet
 
 private struct ShareSheetModifier: ViewModifier {
     @Binding var shareSheetPayload: DiscoveryDetailSharePayload?

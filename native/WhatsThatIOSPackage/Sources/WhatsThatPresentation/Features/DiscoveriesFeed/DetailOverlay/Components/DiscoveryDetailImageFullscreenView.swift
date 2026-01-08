@@ -8,6 +8,18 @@ struct DiscoveryDetailImageFullscreenView: View {
     let placeholderImage: UIImage?
     let onClose: () -> Void
 
+    init(
+        discoveryId: Int64,
+        imageURL: URL?,
+        placeholderImage: UIImage?,
+        onClose: @escaping () -> Void
+    ) {
+        self.discoveryId = discoveryId
+        self.imageURL = imageURL
+        self.placeholderImage = placeholderImage
+        self.onClose = onClose
+    }
+
     @State private var safeAreaInsets = EdgeInsets()
 
     var body: some View {
@@ -15,21 +27,20 @@ struct DiscoveryDetailImageFullscreenView: View {
             Color.black
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            ZoomableScrollView {
+                imageContent
+            }
+            .overlay(alignment: .top) {
                 HStack {
                     Spacer()
                     closeButton
-                        .padding(.trailing, BrandSpacing.large)
                 }
+                .padding(.trailing, BrandSpacing.large)
                 .padding(.top, closedTopPadding)
-                .frame(maxWidth: .infinity)
-
-                ZoomableScrollView {
-                    imageContent
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+
         .onPreferenceChange(SafeAreaInsetPreferenceKey.self) { value in
             safeAreaInsets = value
         }
@@ -47,7 +58,13 @@ struct DiscoveryDetailImageFullscreenView: View {
                     .resizable()
                     .scaledToFit()
             case .failure:
-                fallbackContent
+                if let placeholderImage {
+                    Image(platformImage: placeholderImage)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    fallbackContent
+                }
             case .loading, .empty:
                 if let placeholderImage {
                     Image(platformImage: placeholderImage)

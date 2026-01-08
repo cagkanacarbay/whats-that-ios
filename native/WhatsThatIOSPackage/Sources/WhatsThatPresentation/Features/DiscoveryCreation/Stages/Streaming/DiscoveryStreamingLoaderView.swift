@@ -14,6 +14,8 @@ struct DiscoveryStreamingLoaderView: View {
     let capturedAt: Date?
     let availableWidth: CGFloat
     let onMessageFinished: () -> Void
+    let onShare: (() -> Void)?
+    let onShowMap: (() -> Void)?
     let debugLog: (String) -> Void
 
     var body: some View {
@@ -72,32 +74,61 @@ struct DiscoveryStreamingLoaderView: View {
     }
 
     private var metadataView: some View {
-        VStack(spacing: BrandSpacing.small) {
-            if let title = state.metadataTitle, !title.isEmpty {
-                Text(title)
-                    .font(.system(size: 26, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(palette.textPrimary)
-                    .frame(maxWidth: .infinity)
+        VStack(spacing: BrandSpacing.small / 2) {
+            if onShare != nil || onShowMap != nil {
+                actionRow
             }
+            
+            VStack(spacing: BrandSpacing.small) {
+                if let title = state.metadataTitle, !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 26, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(palette.textPrimary)
+                        .frame(maxWidth: .infinity)
+                }
 
-            if let date = capturedAt {
-                Text(date.formatted(.dateTime.month().day().year()))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(palette.textSecondary)
-                    .frame(maxWidth: .infinity)
-            }
+                if let date = capturedAt {
+                    Text(date.formatted(.dateTime.month().day().year()))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.textSecondary)
+                        .frame(maxWidth: .infinity)
+                }
 
-            if let short = state.metadataShortDescription, !short.isEmpty {
-                Text(short)
-                    .font(.system(size: 14))
-                    .foregroundStyle(palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, BrandSpacing.large)
+                if let short = state.metadataShortDescription, !short.isEmpty {
+                    Text(short)
+                        .font(.system(size: 14))
+                        .foregroundStyle(palette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, BrandSpacing.large)
+                }
             }
         }
         .frame(maxWidth: .infinity)
         .opacity(metadataVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.25), value: metadataVisible)
+    }
+
+    @ViewBuilder
+    private var actionRow: some View {
+        HStack {
+            if let onShowMap {
+                DiscoveryOverlayButton(
+                    systemName: "mappin.and.ellipse",
+                    action: onShowMap,
+                    accessibilityLabel: "Show location on map"
+                )
+            }
+
+            Spacer()
+
+            if let onShare {
+                DiscoveryOverlayButton(
+                    systemName: "square.and.arrow.up",
+                    action: onShare,
+                    accessibilityLabel: "Share discovery"
+                )
+            }
+        }
     }
 }

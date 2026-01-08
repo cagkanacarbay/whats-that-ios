@@ -11,6 +11,7 @@ struct DiscoveryHeaderOverlayView: View {
     /// Adjust how far up the gradient tint should carry. Higher values reveal more of the image.
     var gradientFalloff: CGFloat = 0.55
     var contentWidth: CGFloat? = nil
+    var onShowImage: (() -> Void)? = nil
     var onShare: (() -> Void)? = nil
     var onShowMap: (() -> Void)? = nil
     var isClosing: Bool = false
@@ -153,6 +154,10 @@ struct DiscoveryHeaderOverlayView: View {
             startPoint: .bottom,
             endPoint: .top
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onShowImage?()
+        }
     }
 
     private var overlayShortDescription: String? {

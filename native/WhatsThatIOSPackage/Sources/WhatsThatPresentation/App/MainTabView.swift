@@ -32,7 +32,10 @@ struct MainTabView: View {
     @State private var audioGuidesMode: AudioGuidesDisplayMode = .hero
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
-    @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?    
+    @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
+    
+
+    
     // Reference to session manager (singleton, not StateObject since it's shared globally)
     private var sessionManager: DiscoverySessionManager { DiscoverySessionManager.shared }
 
@@ -65,12 +68,17 @@ struct MainTabView: View {
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
         _audioServices = ObservedObject(wrappedValue: audioServices)
+        
+        // Enforce consistent tab bar background to prevent transparency issues during custom transitions
+        Self.configureTabBarAppearance()
     }
 
     // Convenience accessor
     private var voiceoverController: VoiceoverPlaybackController {
         audioServices.playbackController
     }
+    
+
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -174,6 +182,8 @@ struct MainTabView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .zIndex(activeOverlayPhase == .analyzing ? 2 : 0)
+            
+
             
             // Audio guide generation complete toast - positioned above mini player
             AudioGuideCompletionToastOverlay(
@@ -323,6 +333,9 @@ struct MainTabView: View {
         logger.info("Audio pill from Discovery Detail for discovery id=\(discovery.id, privacy: .public); switching to Audio Guides")
         selectedTab = .audioGuides
     }
+
+
+
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {
         // Do not pre-select the discovery from the feed; keep the overlay active during creation.
@@ -478,6 +491,18 @@ struct MainTabView: View {
         case .audioGuides:
             return .audioGuides
         }
+    }
+
+    private static func configureTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        
+        // This effectively disables the 'break-through' transparency when scrolling to the edge,
+        // ensuring the tab bar always has its standard background material.
+        // This is necessary because our custom sheet transitions can confuse the system's
+        // automatic bar visibility logic.
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().standardAppearance = appearance
     }
 }
 

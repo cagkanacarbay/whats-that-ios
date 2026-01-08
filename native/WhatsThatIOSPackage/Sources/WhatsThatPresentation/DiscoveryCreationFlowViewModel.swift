@@ -177,8 +177,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             debugLog("startFlow blocked; currentState=\(flowStateSummary(flowState))")
             return
         }
-        Task {
-            await beginFlow(retake: retake)
+        DispatchQueue.main.async { [weak self] in
+            Task {
+                await self?.beginFlow(retake: retake)
+            }
         }
     }
 

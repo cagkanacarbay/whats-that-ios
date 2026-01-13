@@ -51,45 +51,115 @@ public actor StoreKitCreditsStore: CreditsStore {
         let products = try await Product.products(for: productIdentifiers)
         cachedProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
 
+        // Log diagnostic info for debugging StoreKit issues
+        #if DEBUG
+        print("[StoreKit] Requested \(productIdentifiers.count) products, received \(products.count)")
+        if products.isEmpty {
+            print("[StoreKit] WARNING: No products returned from App Store")
+            print("[StoreKit] Requested IDs: \(productIdentifiers)")
+        } else {
+            print("[StoreKit] Received products: \(products.map { $0.id })")
+        }
+        // Log invalid product identifiers if any
+        let invalidIds = Set(productIdentifiers).subtracting(products.map { $0.id })
+        if !invalidIds.isEmpty {
+            print("[StoreKit] ERROR: Invalid Product IDs: \(invalidIds)")
+        }
+        #endif
+
         // Always use our local titles and descriptions for consistent branding.
         // Only take the price from Apple (localized for the user's region).
+        // Mark products as available only if they were actually returned by StoreKit.
         return CreditPackCatalog.standardPacks.map { definition in
-            let displayPrice = cachedProducts[definition.id]?.displayPrice ?? "Unavailable"
+            let storeKitProduct = cachedProducts[definition.id]
+            let displayPrice = storeKitProduct?.displayPrice ?? "Unavailable"
+            let isAvailable = storeKitProduct != nil
             
             return CreditProduct(
                 id: definition.id,
                 title: definition.fallbackTitle,
                 description: definition.fallbackDescription,
                 displayPrice: displayPrice,
-                creditAmount: definition.creditAmount
+                creditAmount: definition.creditAmount,
+                isAvailable: isAvailable
             )
         }
     }
 
     public func purchase(productId: String) async throws -> CreditPurchaseResult {
+        #if DEBUG
+        print("[StoreKit] Starting purchase for productId: \(productId)")
+        #endif
+        
         let product = try await loadProductIfNeeded(for: productId)
+        
+        #if DEBUG
+        print("[StoreKit] Product loaded, initiating StoreKit purchase...")
+        #endif
+        
         let purchaseResult = try await product.purchase()
+        
+        #if DEBUG
+        print("[StoreKit] StoreKit purchase returned")
+        #endif
         
         switch purchaseResult {
         case let .success(verification):
+            #if DEBUG
+            print("[StoreKit] Purchase result: SUCCESS - extracting transaction")
+            #endif
+            
             // Extract JWS from VerificationResult before unwrapping
             let jwsString = verification.jwsRepresentation
             let transaction = try verify(verification)
             
+            #if DEBUG
+            print("[StoreKit] Transaction verified, calling validate-receipt edge function...")
+            #endif
+            
             // Validate with server using StoreKit 2's signed JWS
             try await validateTransaction(transaction, jwsString: jwsString, for: product)
             
+            #if DEBUG
+            print("[StoreKit] Server validation complete, finishing transaction...")
+            #endif
+            
             await transaction.finish()
-            return CreditPurchaseResult(status: .success)
+            
+            #if DEBUG
+            print("[StoreKit] Transaction finished successfully")
+            #endif
+            
+            return CreditPurchaseResult(
+                status: .success,
+                debugInfo: "Step: SUCCESS. Transaction ID: \(transaction.originalID)"
+            )
+            
         case .pending:
+            #if DEBUG
+            print("[StoreKit] Purchase result: PENDING")
+            #endif
             return CreditPurchaseResult(
                 status: .pending,
-                message: "Your purchase is pending approval from Apple."
+                message: "Your purchase is pending approval from Apple.",
+                debugInfo: "Step: PENDING from StoreKit"
             )
+            
         case .userCancelled:
-            return CreditPurchaseResult(status: .cancelled, message: nil)
+            #if DEBUG
+            print("[StoreKit] Purchase result: USER CANCELLED")
+            #endif
+            return CreditPurchaseResult(
+                status: .cancelled,
+                message: nil,
+                debugInfo: "Step: USER_CANCELLED from StoreKit"
+            )
+            
         @unknown default:
-            throw CreditsStoreError.validationFailed(nil)
+            #if DEBUG
+            print("[StoreKit] Purchase result: UNKNOWN DEFAULT CASE")
+            #endif
+            throw CreditsStoreError.validationFailed("Unknown StoreKit result (DEBUG)")
         }
     }
 }
@@ -123,13 +193,27 @@ private extension StoreKitCreditsStore {
         jwsString: String,
         for product: Product
     ) async throws {
+        #if DEBUG
+        print("[StoreKit] validateTransaction starting...")
+        #endif
+        
         guard let accessToken = client.auth.currentSession?.accessToken else {
+            #if DEBUG
+            print("[StoreKit] ERROR: User not authenticated")
+            #endif
             throw CreditsStoreError.userNotAuthenticated
         }
 
         guard let url = try makeFunctionsURL(for: "validate-receipt") else {
+            #if DEBUG
+            print("[StoreKit] ERROR: Could not construct functions URL")
+            #endif
             throw CreditsStoreError.unsupportedResponse
         }
+        
+        #if DEBUG
+        print("[StoreKit] Calling edge function at: \(url.absoluteString)")
+        #endif
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -145,10 +229,23 @@ private extension StoreKitCreditsStore {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
+        #if DEBUG
+        print("[StoreKit] Sending request to validate-receipt...")
+        #endif
+        
         let (data, response) = try await urlSession.data(for: request)
+        
         guard let httpResponse = response as? HTTPURLResponse else {
+            #if DEBUG
+            print("[StoreKit] ERROR: Invalid response type")
+            #endif
             throw CreditsStoreError.unsupportedResponse
         }
+        
+        #if DEBUG
+        let responseBody = String(data: data, encoding: .utf8) ?? "<unable to decode>"
+        print("[StoreKit] Response received: status=\(httpResponse.statusCode), body=\(responseBody)")
+        #endif
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -156,10 +253,19 @@ private extension StoreKitCreditsStore {
         if (200..<300).contains(httpResponse.statusCode) {
             let outcome = try decoder.decode(ValidateReceiptResponse.self, from: data)
             guard outcome.success else {
+                #if DEBUG
+                print("[StoreKit] ERROR: Server returned success=false, message=\(outcome.message ?? "nil")")
+                #endif
                 throw CreditsStoreError.validationFailed(outcome.message)
             }
+            #if DEBUG
+            print("[StoreKit] Server validation succeeded")
+            #endif
         } else {
             let outcome = try? decoder.decode(ValidateReceiptResponse.self, from: data)
+            #if DEBUG
+            print("[StoreKit] ERROR: Non-2xx status code, message=\(outcome?.message ?? "nil")")
+            #endif
             throw CreditsStoreError.validationFailed(outcome?.message)
         }
     }

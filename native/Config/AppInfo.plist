@@ -22,8 +22,6 @@
 	<array>
 		<string>iPhoneOS</string>
 	</array>
-	<key>DTPlatformName</key>
-	<string>iphoneos</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -45,10 +43,14 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>DTPlatformName</key>
+	<string>iphoneos</string>
 	<key>GOOGLE_CLIENT_ID</key>
 	<string>$(GOOGLE_CLIENT_ID)</string>
 	<key>GOOGLE_REVERSED_CLIENT_ID</key>
 	<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
@@ -58,7 +60,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>We use your location to personalize discoveries with nearby context.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>What&apos;s That? needs permission to save the photos you capture to your library. When you identify a new object, we can save the photo to your gallery so you have a permanent record of the discovery.</string>
+	<string>What's That? needs permission to save the photos you capture to your library. When you identify a new object, we can save the photo to your gallery so you have a permanent record of the discovery.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We access your photo library so you can upload pictures to create discoveries. For example, you can select a landmark photo from your trip to get it analyzed by our AI, and create an audio guide to listen to.</string>
 	<key>SUPABASE_ANON_KEY</key>
@@ -76,6 +78,10 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -87,15 +93,11 @@
 	</dict>
 	<key>UIStatusBarStyle</key>
 	<string></string>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 </dict>
 </plist>

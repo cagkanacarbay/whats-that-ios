@@ -6,19 +6,24 @@ public struct CreditProduct: Identifiable, Equatable, Sendable {
     public let description: String
     public let displayPrice: String
     public let creditAmount: Int
+    /// True if this product was successfully fetched from StoreKit.
+    /// When false, the product should not be purchasable.
+    public let isAvailable: Bool
 
     public init(
         id: String,
         title: String,
         description: String,
         displayPrice: String,
-        creditAmount: Int
+        creditAmount: Int,
+        isAvailable: Bool = true
     ) {
         self.id = id
         self.title = title
         self.description = description
         self.displayPrice = displayPrice
         self.creditAmount = creditAmount
+        self.isAvailable = isAvailable
     }
 }
 
@@ -31,10 +36,13 @@ public struct CreditPurchaseResult: Equatable, Sendable {
 
     public let status: Status
     public let message: String?
+    /// Debug information for diagnosing purchase flow issues
+    public let debugInfo: String?
 
-    public init(status: Status, message: String? = nil) {
+    public init(status: Status, message: String? = nil, debugInfo: String? = nil) {
         self.status = status
         self.message = message
+        self.debugInfo = debugInfo
     }
 }
 

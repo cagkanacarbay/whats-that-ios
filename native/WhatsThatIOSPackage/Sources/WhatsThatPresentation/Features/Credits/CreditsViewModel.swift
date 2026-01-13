@@ -144,12 +144,24 @@ public final class CreditsViewModel: ObservableObject {
         }
 
         do {
+            #if DEBUG
+            print("[CreditsVM] Starting purchase for pack: \(pack.id)")
+            #endif
+            
             let result = try await store.purchase(productId: pack.id)
+            
+            #if DEBUG
+            print("[CreditsVM] Purchase returned with status: \(result.status)")
+            #endif
+            
+            // Build message with debug info for troubleshooting
+            let debugSuffix = result.debugInfo.map { " [\($0)]" } ?? ""
+            
             switch result.status {
             case .success:
                 toastMessage = ToastMessage(
                     title: "Purchase complete",
-                    message: "\(pack.creditAmount) credits added.",
+                    message: "\(pack.creditAmount) credits added.\(debugSuffix)",
                     style: .success
                 )
                 let newValue = try await balanceStore.refresh(force: true)
@@ -157,16 +169,29 @@ public final class CreditsViewModel: ObservableObject {
             case .pending:
                 toastMessage = ToastMessage(
                     title: "Purchase pending",
-                    message: result.message ?? "We’ll update your balance once it clears.",
+                    message: (result.message ?? "We'll update your balance once it clears.") + debugSuffix,
                     style: .info
                 )
             case .cancelled:
-                if let message = result.message, !message.isEmpty {
-                    toastMessage = ToastMessage(title: "Purchase cancelled", message: message, style: .info)
-                }
+                #if DEBUG
+                print("[CreditsVM] Purchase was cancelled. Message: \(result.message ?? "nil")")
+                #endif
+                // Always show feedback for cancelled purchases - include debug info
+                toastMessage = ToastMessage(
+                    title: "Purchase cancelled",
+                    message: (result.message ?? "The purchase was not completed.") + debugSuffix,
+                    style: .info
+                )
             }
         } catch {
-            present(error: error)
+            #if DEBUG
+            print("[CreditsVM] Purchase threw error: \(error)")
+            #endif
+            // Show detailed error info for debugging
+            alertContent = AlertContent(
+                title: "Purchase Error",
+                message: "Error: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -202,7 +227,7 @@ public final class CreditsViewModel: ObservableObject {
                     price: product.displayPrice,
                     creditAmount: definition.creditAmount,
                     iconSystemName: definition.iconSystemName,
-                    isAvailable: true
+                    isAvailable: product.isAvailable  // Use the actual availability from StoreKit
                 )
             } else {
                 return CreditPackItem(

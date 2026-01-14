@@ -9,8 +9,13 @@ struct AudioGuideCompletionToastOverlay: View {
     @Environment(\.colorScheme) private var colorScheme
     
     // Mini player constants (from MiniPlayerView)
-    private let miniPlayerHeight: CGFloat = 110  // artworkDiameter
-    private let miniPlayerBottomPadding: CGFloat = 49 + 2  // tab bar + spacing
+    private var miniPlayerHeight: CGFloat {
+        UIDevice.isIPad ? 154 : 110
+    }
+    
+    private var miniPlayerBottomPadding: CGFloat {
+        UIDevice.isIPad ? 49 + 12 : 49 + 2
+    }
     // Tab bar height + spacing
     private let tabBarOffset: CGFloat = 49 + 8
     // Small gap between toast and mini player
@@ -40,24 +45,26 @@ struct AudioGuideCompletionToastOverlay: View {
         let toastCount = toasts.count
         
         if let frontToast = toasts.first {
-            ZStack(alignment: .topTrailing) {
-                GenerationCompleteToastView(
-                    toast: frontToast,
-                    onPlayNow: { audioServices.handleToastPlayNow() },
-                    onPlayNext: { audioServices.handleToastPlayNext() },
-                    onAddToQueue: { audioServices.handleToastAddToQueue() },
-                    onDismiss: { audioServices.dismissGenerationToast() }
-                )
-                
-                // Badge showing remaining toast count (if more than 1)
+            GenerationCompleteToastView(
+                toast: frontToast,
+                onPlayNow: { audioServices.handleToastPlayNow() },
+                onPlayNext: { audioServices.handleToastPlayNext() },
+                onAddToQueue: { audioServices.handleToastAddToQueue() },
+                onDismiss: { audioServices.dismissGenerationToast() }
+            )
+            // Badge showing remaining toast count (if more than 1)
+            .overlay(alignment: .trailing) {
                 if toastCount > 1 {
                     pendingCountBadge(count: toastCount)
-                        .offset(x: -8, y: -8)
+                        .offset(x: 4)
                 }
             }
             // Force view refresh when toast changes to update image and content
             .id(frontToast.id)
             .padding(.bottom, bottomPadding)
+            // iPad: Constrain width and center
+            .frame(maxWidth: UIDevice.isIPad ? IPadLayout.toastMaxWidth : .infinity)
+            .frame(maxWidth: .infinity, alignment: .center)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.25), value: frontToast.id)
             .zIndex(10)

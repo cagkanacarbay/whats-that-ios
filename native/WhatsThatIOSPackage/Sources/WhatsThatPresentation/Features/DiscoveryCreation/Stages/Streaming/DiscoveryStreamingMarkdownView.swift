@@ -15,7 +15,7 @@ struct DiscoveryStreamingMarkdownView: View {
             if shouldShowLoader {
                 if !isStreaming {
                     Text("Analysis complete.")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.adaptiveSystem(size: 15, weight: .medium))
                         .foregroundStyle(palette.textSecondary)
                 }
             } else if !displayedMarkdown.isEmpty {
@@ -24,7 +24,7 @@ struct DiscoveryStreamingMarkdownView: View {
                     .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette.brandPalette))
                 #else
                 Text(displayedMarkdown)
-                    .font(.system(size: 16))
+                    .font(.adaptiveSystem(size: 16))
                     .foregroundStyle(palette.textSecondary)
                 #endif
             }

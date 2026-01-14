@@ -19,14 +19,14 @@ struct OnboardingVoicePickerSlide: View {
             
             VStack(spacing: BrandSpacing.small) {
                 Text(title)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.adaptiveSystem(size: 28, weight: .bold))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(titleColor)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, BrandSpacing.large)
                 
                 Text(message)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.adaptiveSystem(size: 17, weight: .medium))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(bodyColor)
                     .padding(.horizontal, BrandSpacing.large)

@@ -116,12 +116,11 @@ struct AuthenticationFlowView: View {
                     }
                     // No manual content height tracking; rely on SwiftUI's
                     // automatic scroll view keyboard adjustments.
-                    .frame(maxWidth: 500)
                     .padding(.horizontal, BrandSpacing.large)
                     .padding(.bottom, BrandSpacing.large)
                     // Center vertically when content is shorter than viewport.
                     // Only apply minHeight when we have a valid viewport size.
-                    .frame(minHeight: viewportHeight, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .center)
                 }
             }
             // Keep default scroll behavior and keyboard handling; no custom

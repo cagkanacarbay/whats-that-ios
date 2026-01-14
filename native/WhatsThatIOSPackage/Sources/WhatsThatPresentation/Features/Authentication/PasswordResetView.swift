@@ -40,11 +40,11 @@ struct PasswordResetView: View {
                                     .id("reset-top")
 
                                 Text(isComplete ? "Password Updated" : "Reset Password")
-                                    .font(.system(size: 28, weight: .bold))
+                                    .font(.adaptiveSystem(size: 28, weight: .bold))
                                     .foregroundStyle(titleColor)
 
                                 Text(messageCopy)
-                                    .font(.system(size: 16, weight: .medium))
+                                    .font(.adaptiveSystem(size: 16, weight: .medium))
                                     .foregroundStyle(bodyColor)
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
@@ -85,7 +85,7 @@ struct PasswordResetView: View {
 
                             if let errorMessage {
                                 Text(errorMessage)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.adaptiveSystem(size: 13, weight: .medium))
                                     .foregroundStyle(Color.red.opacity(0.9))
                                     .multilineTextAlignment(.center)
                             }
@@ -108,17 +108,17 @@ struct PasswordResetView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(primaryColor)
-                                .fontWeight(.semibold)
+                                .font(.adaptiveBody().weight(.semibold))
                             }
                         }
                         // No manual content height tracking; rely on SwiftUI's
                         // automatic scroll view keyboard adjustments.
-                        .frame(maxWidth: 520)
+                        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.authContentMaxWidth : 520)
                         .padding(.horizontal, BrandSpacing.large)
                         .padding(.bottom, BrandSpacing.large)
                         // Center vertically when content is shorter than viewport.
                         // Only apply minHeight when we have a valid viewport size.
-                        .frame(minHeight: viewportHeight, alignment: .center)
+                        .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .center)
                     }
                 }
             }

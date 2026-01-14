@@ -28,18 +28,18 @@ struct DiscoveryCompletionToastView: View {
     var body: some View {
         VStack(spacing: 10) {
             // Header row with title and close button
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 // Thumbnail
                 thumbnailView
                 
                 // Title section
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Discovery ready!")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.adaptiveSystem(size: 17, weight: .semibold))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
                     
                     Text(toast.discovery.title)
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.adaptiveSystem(size: 14, weight: .regular))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                         .lineLimit(2)
                 }
@@ -49,7 +49,7 @@ struct DiscoveryCompletionToastView: View {
                 // Close button
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.adaptiveSystem(size: 14, weight: .medium))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                         .padding(8)
                         .background(Circle().fill(Color.gray.opacity(0.15)))
@@ -64,15 +64,15 @@ struct DiscoveryCompletionToastView: View {
                         ZStack {
                             Circle()
                                 .fill(BrandColors.logo)
-                                .frame(width: 36, height: 36)
+                                .frame(width: UIDevice.isIPad ? 44 : 36, height: UIDevice.isIPad ? 44 : 36)
                             
                             Image(systemName: "eye.fill")
-                                .font(.system(size: 16, weight: .bold))
+                                .font(.adaptiveSystem(size: 16, weight: .bold))
                                 .foregroundColor(.white)
                         }
                         
                         Text("View")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.adaptiveSystem(size: 16, weight: .semibold))
                             .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
                     }
                 }
@@ -110,7 +110,7 @@ struct DiscoveryCompletionToastView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
+        .frame(height: UIDevice.isIPad ? 52 : 44)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(BrandTheme.palette(for: colorScheme).surface.opacity(0.95))
@@ -129,7 +129,7 @@ struct DiscoveryCompletionToastView: View {
                 ZStack {
                     Circle()
                         .fill(BrandColors.logo)
-                        .frame(width: 36, height: 36)
+                        .frame(width: UIDevice.isIPad ? 44 : 36, height: UIDevice.isIPad ? 44 : 36)
                     
                     audioPillIcon
                         .foregroundColor(.white)
@@ -137,7 +137,7 @@ struct DiscoveryCompletionToastView: View {
                 
                 // Label text
                 Text(audioPillLabel)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.adaptiveSystem(size: UIDevice.isIPad ? 18 : 16, weight: .semibold))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
                     .lineLimit(1)
             }
@@ -155,11 +155,11 @@ struct DiscoveryCompletionToastView: View {
                 .scaleEffect(0.7)
         case .ready:
             Image(systemName: "play.fill")
-                .font(.system(size: 16, weight: .bold))
+                .font(.adaptiveSystem(size: UIDevice.isIPad ? 20 : 16, weight: .bold))
                 .offset(x: 1)
         case .notGenerated:
             Image(systemName: "sparkles")
-                .font(.system(size: 16, weight: .bold))
+                .font(.adaptiveSystem(size: UIDevice.isIPad ? 20 : 16, weight: .bold))
         }
     }
     
@@ -190,11 +190,11 @@ struct DiscoveryCompletionToastView: View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: iconName)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.adaptiveSystem(size: 14, weight: .semibold))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.adaptiveSystem(size: 9, weight: .medium))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
             .frame(width: 40, height: 36)
@@ -216,7 +216,7 @@ struct DiscoveryCompletionToastView: View {
                     Image(uiImage: platformImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 60, height: 60)
+                        .frame(width: UIDevice.isIPad ? 80 : 60, height: UIDevice.isIPad ? 80 : 60)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 case .loading, .empty, .failure:
                     placeholderThumbnail
@@ -230,7 +230,7 @@ struct DiscoveryCompletionToastView: View {
     private var placeholderThumbnail: some View {
         RoundedRectangle(cornerRadius: 10)
             .fill(Color.gray.opacity(0.3))
-            .frame(width: 60, height: 60)
+            .frame(width: UIDevice.isIPad ? 80 : 60, height: UIDevice.isIPad ? 80 : 60)
             .overlay(
                 Image(systemName: "photo")
                     .foregroundColor(.gray)

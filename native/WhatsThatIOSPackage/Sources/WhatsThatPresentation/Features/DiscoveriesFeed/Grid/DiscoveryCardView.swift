@@ -93,7 +93,7 @@ private struct DiscoveryCardChrome: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(discovery.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.adaptiveSystem(size: 13, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)

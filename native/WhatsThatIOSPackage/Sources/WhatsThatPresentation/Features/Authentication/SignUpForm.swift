@@ -44,7 +44,7 @@ struct SignUpForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
             Text("Create your account")
-                .font(.system(size: 28, weight: .bold))
+                .font(.adaptiveSystem(size: 28, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .center)
                 .foregroundStyle(titleColor)
 
@@ -90,7 +90,7 @@ struct SignUpForm: View {
                 }
                 Toggle(isOn: $agreedToTerms) {
                     Text(termsAgreementAttributedString)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.adaptiveSystem(size: 14, weight: .medium))
                         .foregroundStyle(bodyColor)
                         .tint(primaryColor)
                         .lineLimit(nil)
@@ -99,7 +99,7 @@ struct SignUpForm: View {
                 .toggleStyle(SwitchToggleStyle(tint: primaryColor))
                 if shouldShowTermsError {
                     Text("You must agree before continuing.")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.adaptiveSystem(size: 12, weight: .medium))
                         .foregroundStyle(Color.red.opacity(0.85))
                         .animation(nil, value: shouldShowTermsError)
                 }
@@ -120,7 +120,7 @@ struct SignUpForm: View {
 
                 VStack(spacing: BrandSpacing.small) {
                     Text(socialAuthAgreementAttributedString)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.adaptiveSystem(size: 12, weight: .medium))
                         .foregroundStyle(bodyColor.opacity(0.8))
                         .tint(primaryColor)
                         .multilineTextAlignment(.center)
@@ -137,18 +137,21 @@ struct SignUpForm: View {
                 // Slightly smaller gap to the account switch row
                 HStack(spacing: 4) {
                     Text("Already have an account?")
+                        .font(.adaptiveBody())
                         .foregroundStyle(bodyColor)
                     Button("Log in") {
                         onSwitchToSignIn()
                     }
                     .buttonStyle(.plain)
+                    .font(.adaptiveBody().weight(.semibold))
                     .foregroundStyle(primaryColor)
-                    .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }
 
         }
+        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.authContentMaxWidth : .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var titleColor: Color {

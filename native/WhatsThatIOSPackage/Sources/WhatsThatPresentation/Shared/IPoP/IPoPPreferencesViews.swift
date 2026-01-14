@@ -60,7 +60,7 @@ struct IPoPPreferencesListView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             Text(IPoPStrings.title(for: dimension))
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.adaptiveSystem(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                             if index == 0 {
                                 Text("Most important")
@@ -76,7 +76,7 @@ struct IPoPPreferencesListView: View {
                             }
                         }
                         Text(viewModel.subtitle(for: dimension))
-                            .font(.footnote)
+                            .font(.adaptiveFootnote())
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -84,7 +84,7 @@ struct IPoPPreferencesListView: View {
                     Spacer()
 
                     Text("\(index + 1)")
-                        .font(.footnote)
+                        .font(.adaptiveSystem(size: 15, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.top, 12)
                 }
@@ -138,7 +138,7 @@ struct IPoPPreferencesSheet: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
                         Text("Settings")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.adaptiveSystem(size: 16, weight: .semibold))
                     }
                     .foregroundStyle(Color.accentColor)
                 }
@@ -149,19 +149,19 @@ struct IPoPPreferencesSheet: View {
 
             VStack(alignment: .leading, spacing: BrandSpacing.small) {
                 Text("Content Preferences")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.adaptiveSystem(size: 24, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
 
                 Text("Put these in the order that matters to you. We’ll shape our answers based on your preferences.")
-                    .font(.footnote)
+                    .font(.adaptiveFootnote())
                     .foregroundStyle(.secondary)
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .padding(.horizontal, BrandSpacing.large)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("I care about…")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.adaptiveSystem(size: 16, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .padding(.horizontal, BrandSpacing.large)
@@ -174,14 +174,14 @@ struct IPoPPreferencesSheet: View {
             }
 
             Text(IPoPStrings.usageNote)
-                .font(.footnote)
+                .font(.adaptiveFootnote())
                 .foregroundStyle(.secondary)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .padding(.horizontal, BrandSpacing.large)
 
             if let error = viewModel.errorMessage {
                 Text(error)
-                    .font(.footnote)
+                    .font(.adaptiveFootnote())
                     .foregroundStyle(Color.red)
                     .padding(.horizontal, BrandSpacing.large)
             }

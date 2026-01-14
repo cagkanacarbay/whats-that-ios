@@ -13,8 +13,14 @@ struct MiniPlayerView: View {
     var onExpand: () -> Void = {}
     
     // Layout Constants
-    private let artworkDiameter: CGFloat = 110
-    private let backgroundHeight: CGFloat = 84
+    private var artworkDiameter: CGFloat {
+        UIDevice.isIPad ? 168 : 110
+    }
+    
+    private var backgroundHeight: CGFloat {
+        UIDevice.isIPad ? 136 : 84
+    }
+    
     private let progressLineWidth: CGFloat = 3
     
     // MARK: - Body
@@ -93,7 +99,11 @@ private struct MiniPlayerContentView: View {
             // 3. Hero Artwork & Progress Ring (Top Layer)
             artworkWithProgressRing
         }
+
         .frame(height: artworkDiameter)
+        // iPad: Constrain width and center
+        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.miniPlayerMaxWidth : .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
         // Swipe-to-dismiss gesture and animation
         .offset(y: dragOffset)
         .opacity(Double(1 - (dragOffset / (dismissThreshold * 2))))
@@ -166,18 +176,21 @@ private struct MiniPlayerContentView: View {
         HStack(spacing: 0) {
             // Spacer to push content right of artwork
             Spacer()
-                .frame(width: 108)
+                .frame(width: UIDevice.isIPad ? 170 : 108)
             
-            VStack(alignment: .leading, spacing: 6) {
+            if UIDevice.isIPad {
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
                 // Title (Marquee)
                 HStack {
                     MarqueeText(
                         text: discovery?.title ?? "Select a guide",
-                        font: .system(size: 16, weight: .bold)
+                        font: .adaptiveSystem(size: 16, weight: .bold)
                     )
-                    .frame(height: 22)
+                    .frame(height: 26)
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
-                    .clipped()
                     Spacer(minLength: 0)
                 }
                 
@@ -185,7 +198,11 @@ private struct MiniPlayerContentView: View {
                 controlsRow
             }
             .padding(.trailing, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
+            
+            if UIDevice.isIPad {
+                Spacer()
+            }
         }
         .frame(height: backgroundHeight)
         .padding(.leading, 20)
@@ -196,14 +213,14 @@ private struct MiniPlayerContentView: View {
             // Back 5s
             Button(action: { controller.seek(by: -5) }) {
                 Image(systemName: "gobackward.5")
-                    .font(.system(size: 18))
+                    .font(.adaptiveSystem(size: 18))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
             
             // Prev Track
             Button(action: playPrevious) {
                 Image(systemName: "backward.end.fill")
-                    .font(.system(size: 20))
+                    .font(.adaptiveSystem(size: 20))
                     .foregroundColor(canPlayPrevious
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
@@ -215,11 +232,11 @@ private struct MiniPlayerContentView: View {
                 ZStack {
                     Circle()
                         .fill(BrandColors.logo)
-                        .frame(width: 40, height: 40)
+                        .frame(width: UIDevice.isIPad ? 56 : 40, height: UIDevice.isIPad ? 56 : 40)
                         .shadow(color: BrandColors.logo.opacity(0.4), radius: 4, y: 2)
                     
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.adaptiveSystem(size: 20, weight: .bold))
                         .foregroundColor(.white)
                 }
             }
@@ -227,7 +244,7 @@ private struct MiniPlayerContentView: View {
             // Next Track
             Button(action: playNext) {
                 Image(systemName: "forward.end.fill")
-                    .font(.system(size: 20))
+                    .font(.adaptiveSystem(size: 20))
                     .foregroundColor(canPlayNext
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
@@ -237,7 +254,7 @@ private struct MiniPlayerContentView: View {
             // Fwd 5s
             Button(action: { controller.seek(by: 5) }) {
                 Image(systemName: "goforward.5")
-                    .font(.system(size: 18))
+                    .font(.adaptiveSystem(size: 18))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
         }

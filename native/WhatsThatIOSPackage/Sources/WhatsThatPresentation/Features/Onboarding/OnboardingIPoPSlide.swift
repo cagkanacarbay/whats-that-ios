@@ -18,20 +18,20 @@ struct OnboardingIPoPSlide: View {
             Spacer().frame(height: topInset + BrandSpacing.large)
 
             Text(title)
-                .font(.system(size: 28, weight: .bold))
+                .font(.adaptiveSystem(size: 28, weight: .bold))
                 .foregroundColor(titleColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, BrandSpacing.large)
 
             Text(message)
-                .font(.system(size: 17, weight: .regular))
+                .font(.adaptiveSystem(size: 17, weight: .regular))
                 .foregroundColor(bodyColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, BrandSpacing.large)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("I care about…")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.adaptiveSystem(size: 16, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     .padding(.horizontal, BrandSpacing.large)
                     .padding(.top, BrandSpacing.large)
@@ -41,7 +41,7 @@ struct OnboardingIPoPSlide: View {
             }
 
             Text(IPoPStrings.usageNote)
-                .font(.footnote)
+                .font(.adaptiveFootnote())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, BrandSpacing.large)
                 .padding(.bottom, BrandSpacing.large)

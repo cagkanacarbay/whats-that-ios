@@ -250,16 +250,30 @@ struct DiscoveryStreamingStageView: View {
                     }
                 }
             }
-            .sheet(isPresented: $isImageFullscreenPresented) {
-                if let image = previewImage {
-                    DiscoveryDetailImageFullscreenView(
-                        discoveryId: state.discoverySummary?.id ?? 0,
-                        imageURL: nil,
-                        placeholderImage: UIImage(data: imageData ?? Data()),
-                        onClose: { isImageFullscreenPresented = false }
-                    )
-                    .presentationDetents([.fraction(0.995)])
-                    .presentationDragIndicator(.visible)
+            .applyingIf(UIDevice.isIPad) { view in
+                view.fullScreenCover(isPresented: $isImageFullscreenPresented) {
+                    if let image = previewImage {
+                        DiscoveryDetailImageFullscreenView(
+                            discoveryId: state.discoverySummary?.id ?? 0,
+                            imageURL: nil,
+                            placeholderImage: UIImage(data: imageData ?? Data()),
+                            onClose: { isImageFullscreenPresented = false }
+                        )
+                    }
+                }
+            }
+            .applyingIf(!UIDevice.isIPad) { view in
+                view.sheet(isPresented: $isImageFullscreenPresented) {
+                    if let image = previewImage {
+                        DiscoveryDetailImageFullscreenView(
+                            discoveryId: state.discoverySummary?.id ?? 0,
+                            imageURL: nil,
+                            placeholderImage: UIImage(data: imageData ?? Data()),
+                            onClose: { isImageFullscreenPresented = false }
+                        )
+                        .presentationDetents([.fraction(0.995)])
+                        .presentationDragIndicator(.visible)
+                    }
                 }
             }
             .modifier(

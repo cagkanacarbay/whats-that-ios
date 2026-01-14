@@ -62,19 +62,19 @@ public struct VoicePickerView: View {
                         set: { newValue in viewModel.setAutoEnabled(newValue) }
                     )) {
                         Text("Auto-generate audio guides after analysis")
-                            .font(.system(size: 17, weight: .medium))
+                            .font(.adaptiveSystem(size: 17, weight: .medium))
                             .foregroundStyle(palette.textPrimary)
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: palette.primaryAction))
+                    .toggleStyle(SwitchToggleStyle(tint: .orange))
                     .disabled(viewModel.isAutoToggleLocked)
                     
                     if viewModel.isAutoToggleLocked {
                         Text("Enabled for your free intro voiceovers. You can disable this after your introduction credits are exhausted.")
-                            .font(.system(size: 13, weight: .regular))
+                            .font(.adaptiveSystem(size: 13, weight: .regular))
                             .foregroundStyle(palette.textSecondary)
                     } else if showCreditNote {
                         Text("Each audio guide uses one credit to generate. Oh, but it's so worth it.")
-                            .font(.system(size: 13, weight: .regular))
+                            .font(.adaptiveSystem(size: 13, weight: .regular))
                             .foregroundStyle(palette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -131,7 +131,7 @@ struct VoiceRow: View {
                 }
                 
                 Text(voiceName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.adaptiveSystem(size: 17, weight: .semibold))
                     .foregroundStyle(palette.textPrimary)
                 
                 Spacer()

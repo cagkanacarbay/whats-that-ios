@@ -44,7 +44,7 @@ struct LoginForm: View {
         VStack(alignment: .leading, spacing: BrandSpacing.large) {
             VStack(spacing: BrandSpacing.small) {
                 Text("Welcome back!")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.adaptiveSystem(size: 28, weight: .bold))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .foregroundStyle(titleColor)
             }
@@ -90,7 +90,7 @@ struct LoginForm: View {
                 onForgotPassword()
             }
             .buttonStyle(.plain)
-            .font(.system(size: 15, weight: .semibold))
+            .font(.adaptiveSystem(size: 15, weight: .semibold))
             .foregroundStyle(primaryColor)
             .frame(maxWidth: .infinity, alignment: .center)
 
@@ -107,16 +107,19 @@ struct LoginForm: View {
 
             HStack(spacing: 4) {
                 Text("Don't have an account?")
+                    .font(.adaptiveBody())
                     .foregroundStyle(bodyColor)
                 Button("Sign up") {
                     onSwitchToSignUp()
                 }
                 .buttonStyle(.plain)
+                .font(.adaptiveBody().weight(.semibold))
                 .foregroundStyle(primaryColor)
-                .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
+        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.authContentMaxWidth : .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var errorForEmail: String? {

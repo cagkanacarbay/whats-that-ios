@@ -45,19 +45,19 @@ struct DiscoveryHeaderOverlayView: View {
 
                 VStack(spacing: BrandSpacing.small) {
                     Text(discovery.title)
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.adaptiveSystem(size: 26, weight: .bold))
                         .foregroundStyle(palette.textPrimary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
 
                     Text(discovery.capturedAt.formatted(.dateTime.month().day().year()))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.adaptiveSystem(size: 14, weight: .semibold))
                         .foregroundStyle(palette.textSecondary)
                         .frame(maxWidth: .infinity)
 
                     if let shortDescription = overlayShortDescription {
                         Text(shortDescription)
-                            .font(.system(size: 13))
+                            .font(.adaptiveSystem(size: 13))
                             .foregroundStyle(palette.textSecondary)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)

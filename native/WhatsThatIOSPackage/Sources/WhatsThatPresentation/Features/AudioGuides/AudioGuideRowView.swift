@@ -55,7 +55,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
     // MARK: - Body
     
     var body: some View {
-        let thumbnailSize: CGFloat = 56
+        let thumbnailSize: CGFloat = UIDevice.isIPad ? 80 : 56
         
         HStack(spacing: 12) {
             // Thumbnail with overlay for status
@@ -64,8 +64,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
             // Text Info
             VStack(alignment: .leading, spacing: 4) {
                 Text(discovery.title)
-                    .font(.body)
-                    .fontWeight(.medium)
+                    .font(.adaptiveSystem(size: 16, weight: .medium))
                     .foregroundColor(state.isPlaying ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textPrimary)
                     .lineLimit(2)
                 
@@ -144,7 +143,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
         if state.isPlaying {
             Color.black.opacity(0.3)
             Image(systemName: "waveform")
-                .font(.title3)
+                .font(UIDevice.isIPad ? .title : .title3)
                 .foregroundColor(.white)
         } else {
             switch state.voiceoverStatus {
@@ -183,14 +182,14 @@ struct AudioGuideRowView<MenuContent: View>: View {
             case .ready:
                 if let duration = durationString {
                     Text(duration)
-                        .font(.caption)
+                        .font(.adaptiveSystem(size: 14))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 }
                 
                 // Show "Queued" chip if in queue but not playing
                 if state.isQueued && !state.isPlaying {
                     Text("Queued")
-                        .font(.caption)
+                        .font(.adaptiveSystem(size: 14))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(BrandColors.logo.opacity(0.15))
@@ -200,12 +199,12 @@ struct AudioGuideRowView<MenuContent: View>: View {
                 
             case .generating:
                 Text("Generating...")
-                    .font(.caption)
+                    .font(.adaptiveSystem(size: 14))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     
             case .generationQueued:
                 Text("Generation queued")
-                    .font(.caption)
+                    .font(.adaptiveSystem(size: 14))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     
             case .checking:
@@ -214,18 +213,18 @@ struct AudioGuideRowView<MenuContent: View>: View {
                         .tint(BrandColors.spinner)
                         .controlSize(.mini)
                     Text("Checking...")
-                        .font(.caption)
+                        .font(.adaptiveSystem(size: 14))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 }
                     
             case .empty:
                 Text("No audio guide")
-                    .font(.caption)
+                    .font(.adaptiveSystem(size: 14))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     
             case .failed:
                 Text("Failed to generate")
-                    .font(.caption)
+                    .font(.adaptiveSystem(size: 14))
                     .foregroundColor(.red.opacity(0.8))
             }
         }
@@ -254,7 +253,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
     private var trailingAction: some View {
         if isRecentlyQueued {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 22))
+                .font(UIDevice.isIPad ? .adaptiveSystem(size: 28) : .system(size: 22))
                 .foregroundColor(BrandColors.logo)
                 .padding(8)
                 .transition(.scale.combined(with: .opacity))
@@ -263,6 +262,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
                 menuContent()
             } label: {
                 Image(systemName: "ellipsis")
+                    .font(.adaptiveSystem(size: 20))
                     .rotationEffect(Angle(degrees: 90))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     .padding(8)

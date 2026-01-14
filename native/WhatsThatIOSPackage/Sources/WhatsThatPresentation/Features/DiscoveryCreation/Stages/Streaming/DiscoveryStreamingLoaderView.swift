@@ -38,7 +38,7 @@ struct DiscoveryStreamingLoaderView: View {
                 .scaleEffect(1.2)
             
             Text(state.statusMessage ?? "Checking for your discovery...")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.adaptiveSystem(size: 18, weight: .semibold))
                 .foregroundStyle(palette.textPrimary)
                 .multilineTextAlignment(.center)
         }
@@ -82,7 +82,7 @@ struct DiscoveryStreamingLoaderView: View {
             VStack(spacing: BrandSpacing.small) {
                 if let title = state.metadataTitle, !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.adaptiveSystem(size: 26, weight: .bold))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(palette.textPrimary)
                         .frame(maxWidth: .infinity)
@@ -90,14 +90,14 @@ struct DiscoveryStreamingLoaderView: View {
 
                 if let date = capturedAt {
                     Text(date.formatted(.dateTime.month().day().year()))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.adaptiveSystem(size: 14, weight: .semibold))
                         .foregroundStyle(palette.textSecondary)
                         .frame(maxWidth: .infinity)
                 }
 
                 if let short = state.metadataShortDescription, !short.isEmpty {
                     Text(short)
-                        .font(.system(size: 14))
+                        .font(.adaptiveSystem(size: 14))
                         .foregroundStyle(palette.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, BrandSpacing.large)

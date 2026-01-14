@@ -178,21 +178,26 @@ struct MainTabView: View {
                     .padding(.horizontal, 16)
                 }
                 // Position above tab bar: standard tab bar height (49) + spacing
-                .padding(.bottom, 49 + 4)
+                // On iPad: reduce clearance as requested (safely above home indicator)
+                .padding(.bottom, UIDevice.isIPad ? 20 : 49 + 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .zIndex(activeOverlayPhase == .analyzing ? 2 : 0)
             
 
             
-            // Audio guide generation complete toast - positioned above mini player
-            AudioGuideCompletionToastOverlay(
+            // Unified toast overlay for all toast types (discovery + audio guide)
+            UnifiedToastOverlay(
                 audioServices: audioServices,
-                miniPlayerPresence: audioServices.miniPlayerPresence
+                miniPlayerPresence: audioServices.miniPlayerPresence,
+                onViewDiscovery: { discoveryId in
+                    self.pendingDiscoveryId = discoveryId
+                    self.selectedTab = .discoveries
+                },
+                onGenerateAudio: { summary in
+                    self.audioServices.playbackController.requestVoiceover(for: summary)
+                }
             )
-            
-            // Discovery completion toast - for background created discoveries
-            discoveryCompletionToast
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
         .audioServices(audioServices)
@@ -462,23 +467,7 @@ struct MainTabView: View {
         }
         return URL(string: path)
     }
-    
-    /// Toast overlay for background discovery completion - extracted to reduce body complexity
-    @ViewBuilder
-    private var discoveryCompletionToast: some View {
-        DiscoveryCompletionToastOverlay(
-            audioServices: audioServices,
-            miniPlayerPresence: audioServices.miniPlayerPresence,
-            onViewDiscovery: { discoveryId in
-                // Navigate to discoveries tab and open the discovery
-                self.pendingDiscoveryId = discoveryId
-                self.selectedTab = .discoveries
-            },
-            onGenerateAudio: { summary in
-                self.audioServices.playbackController.requestVoiceover(for: summary)
-            }
-        )
-    }
+
 
     private static func tab(for destination: MainTabDestination) -> Tab {
         switch destination {

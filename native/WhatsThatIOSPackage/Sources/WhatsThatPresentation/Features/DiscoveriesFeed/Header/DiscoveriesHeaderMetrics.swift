@@ -1,4 +1,5 @@
 import CoreGraphics
+import UIKit
 import WhatsThatShared
 
 struct DiscoveriesHeaderMetrics {
@@ -9,7 +10,12 @@ struct DiscoveriesHeaderMetrics {
     let collapseDistance: CGFloat
 
     init(headerHeight: CGFloat, safeAreaTopInset: CGFloat) {
-        let headerContentHeight = max(headerHeight - safeAreaTopInset, 0)
+        // Calculate content height subtracting safe area (standard behavior)
+        // On iPad, we add a buffer (20pt) to prevent the grid from being hidden behind the header
+        // while avoiding the large gap seen when ignoring safe area completely.
+        let adjustment: CGFloat = UIDevice.isIPad ? 20 : 0
+        let headerContentHeight = max(headerHeight - safeAreaTopInset + adjustment, 0)
+        
         // Slightly tighter header spacing overall
         headerSpacerHeight = max(headerContentHeight - BrandSpacing.small, 0)
         headerTopPadding = BrandSpacing.small * 0.5

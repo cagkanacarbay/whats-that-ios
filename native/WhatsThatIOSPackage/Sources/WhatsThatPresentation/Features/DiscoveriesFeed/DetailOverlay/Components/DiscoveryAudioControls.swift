@@ -138,7 +138,7 @@ struct DiscoveryAudioControls: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .frame(height: 50)
+                .frame(height: UIDevice.isIPad ? 66 : 50)
                 .background(
                     RoundedRectangle(cornerRadius: 20)
                         .fill(palette.surface.opacity(0.95))
@@ -269,21 +269,21 @@ struct DiscoveryAudioControls: View {
             VStack(spacing: 2) {
                 if isConfirmed {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: UIDevice.isIPad ? 18 : 14, weight: .bold))
                         .foregroundColor(BrandColors.logo)
                         .transition(.scale.combined(with: .opacity))
                 } else {
                     Image(systemName: iconName)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: UIDevice.isIPad ? 18 : 14, weight: .semibold))
                         .foregroundColor(palette.textSecondary)
                         .transition(.scale.combined(with: .opacity))
                 }
                 
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: UIDevice.isIPad ? 12 : 9, weight: .medium))
                     .foregroundColor(isConfirmed ? BrandColors.logo : palette.textSecondary)
             }
-            .frame(width: 44, height: 40)
+            .frame(width: UIDevice.isIPad ? 60 : 44, height: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
@@ -294,18 +294,18 @@ struct DiscoveryAudioControls: View {
         ZStack {
             Circle()
                 .fill(BrandColors.logo)
-                .frame(width: 36, height: 36)
+                .frame(width: UIDevice.isIPad ? 48 : 36, height: UIDevice.isIPad ? 48 : 36)
             
             Group {
                 if isPlaying {
                     Image(systemName: "pause.fill")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .bold))
                         .transition(.scale.combined(with: .opacity))
                 } else {
                     switch voiceoverStatus {
                     case .ready:
                         Image(systemName: "play.fill")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .bold))
                             .offset(x: 2) // Optical center adjustment
                             .transition(.scale.combined(with: .opacity))
                     case .generating, .generationQueued, .checking:
@@ -315,7 +315,7 @@ struct DiscoveryAudioControls: View {
                             .transition(.opacity)
                     case .empty, .failed:
                         Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .bold))
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
@@ -343,7 +343,7 @@ struct DiscoveryAudioControls: View {
                 }
             }
         }
-        .font(.system(size: 16, weight: .semibold))
+        .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .semibold))
         .foregroundColor(palette.textPrimary)
     }
     

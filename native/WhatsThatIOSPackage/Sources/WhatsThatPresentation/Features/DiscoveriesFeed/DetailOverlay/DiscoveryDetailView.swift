@@ -486,6 +486,16 @@ private struct DiscoveryDetailContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(backgroundColor.opacity(backgroundOpacity))
                     .opacity(contentOpacity)
+                    
+                    // Mini player filler: extends the background color downward when mini player is visible
+                    // This prevents the hero image from showing through the bottom when scrolling
+                    if let audioServices, audioServices.miniPlayerPresence.isVisible && !audioServices.miniPlayerPresence.isDismissed {
+                        Color(backgroundColor)
+                            .opacity(backgroundOpacity)
+                            .frame(height: audioServices.miniPlayerPresence.effectiveInset + BrandSpacing.xLarge)
+                            .frame(maxWidth: .infinity)
+                            .opacity(contentOpacity)
+                    }
                 }
             }
             // Attach UIKit offset observer inside the scroll content so the
@@ -503,7 +513,6 @@ private struct DiscoveryDetailContentView: View {
         }
         .id(discovery.id)
         .coordinateSpace(name: "hero-scroll")
-        .miniPlayerScrollInset()
         .frame(width: containerWidth)
         .contentMargins(.all, 0, for: .scrollContent)
         .conditionalScrollDisabled(isScrollDisabled)
@@ -546,13 +555,13 @@ private struct DiscoveryDetailContentView: View {
                     .markdownTheme(BrandMarkdownThemeFactory.discoveryDetailTheme(for: palette))
                 #else
                 Text(description)
-                    .font(.system(size: 16))
+                    .font(.adaptiveSystem(size: 16))
                     .foregroundStyle(palette.textSecondary)
                 #endif
             }
         } else {
             Text(discovery.highlight)
-                .font(.system(size: 16))
+                .font(.adaptiveSystem(size: 16))
                 .foregroundStyle(palette.textSecondary)
         }
     }

@@ -30,6 +30,7 @@ struct DiscoveriesHomeView: View {
 
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.audioServices) private var audioServices
     @State private var scrollOffset: CGFloat = 0
     @State private var safeAreaBottomInset: CGFloat = 0
     @State private var headerHeight: CGFloat = 110
@@ -86,247 +87,261 @@ struct DiscoveriesHomeView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let safeBottom = proxy.safeAreaInsets.bottom
-            let safeTop = proxy.safeAreaInsets.top
-
-            let _ = proxy.size // retain to keep dependency updates
-            let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
-            let contentWidth = max(gridAvailableWidth - (gridHorizontalPadding * 2), 0)
-            let metrics = headerMetrics
-            // Height available for grid content below the header & its padding
-            let contentHeight = max(
-                proxy.size.height - metrics.headerSpacerHeight - metrics.gridTopPadding - gridBottomPadding,
-                0
-            )
-
-            ZStack(alignment: .top) {
-                backgroundColor
-                    .ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 0) {
-                        refreshHeaderView(metrics: metrics)
-
-                        DiscoveriesGridView(
-                            storeObserver: storeObserver,
-                            availableWidth: contentWidth,
-                            availableHeight: contentHeight,
-                            cardSpacing: gridSpacing,
-                            activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
-                            deletingDiscoveryId: deletingDiscoveryId,
-                            onLoadMore: { discovery in
-                                await storeObserver.loadMoreIfNeeded(currentItem: discovery)
-                            },
-                            onSelect: { discovery, imageURL, frame in
-                                handleDiscoverySelection(
-                                    discovery: discovery,
-                                    imageURL: imageURL,
-                                    startFrame: frame
-                                )
-                            },
-                            onTapCamera: onQuickCamera,
-                            onTapUpload: onQuickUpload
-                        )
-                        .padding(.horizontal, gridHorizontalPadding)
-                        .padding(.bottom, gridBottomPadding)
-                    }
-                }
-                .coordinateSpace(name: "discoveriesScroll")
-                .miniPlayerScrollInset()
-                .refreshable {
-                    await storeObserver.refresh()
-                }
-                .task {
-                    await storeObserver.loadInitialIfNeeded()
-                    presentPendingDiscoveryIfNeeded()
-                    resolveOpenFromAudioGuidesIfNeeded()
-                }
-                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
-                    guard let rawValue else { return }
-                    // headerSpacerHeight is part of the tracked view (refreshHeaderView).
-                    // So rawValue = contentOffset (negative when scrolled down).
-                    // We want scrollOffset to represent "Top of Grid Items (Row 0)".
-                    // The Grid starts after gridTopPadding.
-                    // So we add gridTopPadding to the base offset.
-                    let adjusted = rawValue + metrics.gridTopPadding
-                    scrollOffset = adjusted
-                }
-                .onChange(of: storeObserver.discoveries) {
-                    // Defer to next runloop to prevent "update multiple times per frame" error
-                    DispatchQueue.main.async {
-                        presentPendingDiscoveryIfNeeded()
-                        resolveOpenFromAudioGuidesIfNeeded()
-                    }
-                }
-                .onChange(of: pendingDiscoveryId) {
-                    // Defer to next runloop to prevent "update multiple times per frame" error
-                    DispatchQueue.main.async {
-                        presentPendingDiscoveryIfNeeded()
-                    }
-                }
-                .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
-                    // Defer to next runloop to prevent "update multiple times per frame" error
-                    DispatchQueue.main.async {
-                        if newValue {
-                            discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
-                            resolveOpenFromAudioGuidesIfNeeded()
-                        }
-                    }
-                }
-                .onChange(of: storeObserver.isRefreshing) { _, newValue in
-                    discoveriesHomeLogger.info("isRefreshing changed: \(newValue, privacy: .public)")
-                }
-                .onChange(of: storeObserver.errorMessage) { _, newValue in
-                    if let message = newValue?.nonEmptyOrNil, !storeObserver.discoveries.isEmpty {
-                        refreshErrorMessage = message
-                    } else if newValue == nil {
-                        refreshErrorMessage = nil
-                    }
-                }
-
-                let headerOpacityStretched = headerOpacityFollowingFirstRow(availableWidth: contentWidth)
-
-                DiscoveriesHeaderView(
-                    opacity: headerOpacityStretched,
-                    metrics: metrics,
-                    backgroundColor: backgroundColor,
-                    onSignOut: onSignOut,
-                    onSettings: onSettings,
-                    isSettingsSelected: isSettingsSelected
-                )
-                    .onPreferenceChange(HeaderHeightPreferenceKey.self) { value in
-                        guard value > 0 else { return }
-                        if abs(value - headerHeight) > 0.5 {
-                            headerHeight = value
-                        }
-                    }
-
-                let detailSnapshot = detailCoordinator.snapshot
-                if detailSnapshot.hasActiveOverlay, let context = detailSnapshot.context {
-                    // Logic to determine where the card should close to.
-                    // 1. If we have a valid startFrame (from a user tap), we prefer that to return to the source.
-                    // 2. If the startFrame was a fallback (e.g. from audio guide nav), we try to calculate the 
-                    //    actual grid position of the card.
-                    // 3. If that grid position is off-screen, we clamp it to the edge to create a "fly away" exit.
-                    
-                    let targetCloseFrame: CGRect = {
-                        // Check if the current startFrame is a "fallback" frame (large centered card)
-                        // Heuristic: Fallback is width * 1.2, usually > 300 width. Grid cards are ~170 width.
-                        let isLargeFallback = context.startFrame.width > (UIScreen.main.bounds.width * 0.6)
-                        
-                        // If it's a real tap frame, just use it. 
-                        // Unless the item has changed (activeId != context.discovery.id is unlikely here given context structure).
-                        if !isLargeFallback {
-                            return context.startFrame
-                        }
-                        
-                        // It's a fallback frame (or we navigated). Let's try to find where it *should* be.
-                        // We need the geometry of the list.
-                        return resolveCloseFrame(for: context.discovery.id) 
-                            ?? context.startFrame // Give up and use center if we can't find it
-                    }()
-                    
-                    DiscoveryDetailOverlayView(
-                        snapshot: detailSnapshot,
-                        destinationFrame: targetCloseFrame,
-                        backgroundColor: backgroundColor,
-                        colorScheme: colorScheme,
-                        voiceoverController: voiceoverController,
-                        onClose: { detailCoordinator.dismiss(reason: .backButton) },
-                        deletingDiscoveryId: deletingDiscoveryId,
-                        isDeletingDiscovery: isDeletionInProgress,
-                        onDelete: { handleDeleteRequest(for: $0) },
-                        onShowOptions: nil,
-                        onOpenAudioGuide: onOpenAudioGuide,
-                        onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
-                    )
-                    .ignoresSafeArea(edges: .top)
-                    .transition(.identity)
-                    .simultaneousGesture(detailEdgeDragGesture, including: .gesture)
-                    .zIndex(5)
-                }
-            }
-            .onAppear {
-                updateSafeAreaBottomInsetIfNeeded(safeBottom)
-                updateSafeAreaTopInsetIfNeeded(safeTop)
-                voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
-            }
-            .onChange(of: safeBottom) { _, newValue in
-                updateSafeAreaBottomInsetIfNeeded(newValue)
-            }
-            .onChange(of: safeTop) { _, newValue in
-                updateSafeAreaTopInsetIfNeeded(newValue)
-            }
-            .onChange(of: storeObserver.discoveries) { _, _ in
-                voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
-            }
+            mainContent(proxy: proxy)
         }
         .overlay(alignment: .bottom) {
-            Group {
-                if storeObserver.isPaginating {
-                    HStack(spacing: BrandSpacing.small) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
-                            .progressViewStyle(.circular)
-                        Text("Loading more")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        backgroundColor.opacity(0.9)
-                            .blur(radius: 20)
-                    )
-                    .clipShape(Capsule())
-                    .padding(.horizontal, BrandSpacing.large)
-                    .padding(.bottom, BrandSpacing.medium)
-                }
-            }
+            paginatingOverlay
         }
         .animation(.easeInOut, value: storeObserver.loadState)
         .alert(
             "An error occurred",
-            isPresented: Binding(
-                get: { refreshErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        refreshErrorMessage = nil
-                        storeObserver.clearError()
-                    }
+            isPresented: refreshErrorBinding,
+            actions: { refreshErrorActions },
+            message: { refreshErrorMessage_view }
+        )
+        .overlay {
+            deletionErrorOverlay
+        }
+    }
+    
+    // MARK: - Body Sub-expressions
+    
+    private func mainContent(proxy: GeometryProxy) -> some View {
+        let safeBottom = proxy.safeAreaInsets.bottom
+        let safeTop = proxy.safeAreaInsets.top
+        let _ = proxy.size // retain to keep dependency updates
+        let gridAvailableWidth = proxy.size.width == 0 ? UIScreen.main.bounds.width : proxy.size.width
+        let contentWidth = max(gridAvailableWidth - (gridHorizontalPadding * 2), 0)
+        let metrics = headerMetrics
+        let contentHeight = max(
+            proxy.size.height - metrics.headerSpacerHeight - metrics.gridTopPadding - gridBottomPadding,
+            0
+        )
+        
+        return ZStack(alignment: .top) {
+            backgroundColor
+                .ignoresSafeArea()
+            
+            scrollContent(contentWidth: contentWidth, contentHeight: contentHeight, metrics: metrics)
+            
+            headerContent(contentWidth: contentWidth, metrics: metrics)
+            
+            detailOverlayContent
+        }
+        .onAppear {
+            updateSafeAreaBottomInsetIfNeeded(safeBottom)
+            updateSafeAreaTopInsetIfNeeded(safeTop)
+            voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
+        }
+        .onChange(of: safeBottom) { _, newValue in
+            updateSafeAreaBottomInsetIfNeeded(newValue)
+        }
+        .onChange(of: safeTop) { _, newValue in
+            updateSafeAreaTopInsetIfNeeded(newValue)
+        }
+        .onChange(of: storeObserver.discoveries) { _, _ in
+            voiceoverController.setDiscoveryQueueProvider { storeObserver.discoveries }
+        }
+    }
+    
+    private func scrollContent(contentWidth: CGFloat, contentHeight: CGFloat, metrics: DiscoveriesHeaderMetrics) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                refreshHeaderView(metrics: metrics)
+                
+                DiscoveriesGridView(
+                    storeObserver: storeObserver,
+                    availableWidth: contentWidth,
+                    availableHeight: contentHeight,
+                    cardSpacing: gridSpacing,
+                    activeDiscoveryId: detailCoordinator.snapshot.activeDiscoveryId,
+                    deletingDiscoveryId: deletingDiscoveryId,
+                    onLoadMore: { discovery in
+                        await storeObserver.loadMoreIfNeeded(currentItem: discovery)
+                    },
+                    onSelect: { discovery, imageURL, frame in
+                        handleDiscoverySelection(
+                            discovery: discovery,
+                            imageURL: imageURL,
+                            startFrame: frame
+                        )
+                    },
+                    onTapCamera: onQuickCamera,
+                    onTapUpload: onQuickUpload
+                )
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.bottom, gridBottomPadding)
+            }
+        }
+        .coordinateSpace(name: "discoveriesScroll")
+        .miniPlayerScrollInset()
+        .refreshable {
+            await storeObserver.refresh()
+        }
+        .task {
+            await storeObserver.loadInitialIfNeeded()
+            presentPendingDiscoveryIfNeeded()
+            resolveOpenFromAudioGuidesIfNeeded()
+        }
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { rawValue in
+            guard let rawValue else { return }
+            let adjusted = rawValue + metrics.gridTopPadding
+            scrollOffset = adjusted
+        }
+        .onChange(of: storeObserver.discoveries) {
+            DispatchQueue.main.async {
+                presentPendingDiscoveryIfNeeded()
+                resolveOpenFromAudioGuidesIfNeeded()
+            }
+        }
+        .onChange(of: pendingDiscoveryId) {
+            DispatchQueue.main.async {
+                presentPendingDiscoveryIfNeeded()
+            }
+        }
+        .onChange(of: openFirstDetailFromAudioGuides) { _, newValue in
+            DispatchQueue.main.async {
+                if newValue {
+                    discoveriesHomeLogger.info("openFirstDetailFromAudioGuides flag set; attempting to resolve")
+                    resolveOpenFromAudioGuidesIfNeeded()
                 }
-            ),
-            actions: {
-                Button("OK", role: .cancel) {
+            }
+        }
+        .onChange(of: storeObserver.isRefreshing) { _, newValue in
+            discoveriesHomeLogger.info("isRefreshing changed: \(newValue, privacy: .public)")
+        }
+        .onChange(of: storeObserver.errorMessage) { _, newValue in
+            if let message = newValue?.nonEmptyOrNil, !storeObserver.discoveries.isEmpty {
+                refreshErrorMessage = message
+            } else if newValue == nil {
+                refreshErrorMessage = nil
+            }
+        }
+    }
+    
+    private func headerContent(contentWidth: CGFloat, metrics: DiscoveriesHeaderMetrics) -> some View {
+        let headerOpacityStretched = headerOpacityFollowingFirstRow(availableWidth: contentWidth)
+        
+        return DiscoveriesHeaderView(
+            opacity: headerOpacityStretched,
+            metrics: metrics,
+            backgroundColor: backgroundColor,
+            onSignOut: onSignOut,
+            onSettings: onSettings,
+            isSettingsSelected: isSettingsSelected
+        )
+        .onPreferenceChange(HeaderHeightPreferenceKey.self) { value in
+            guard value > 0 else { return }
+            if abs(value - headerHeight) > 0.5 {
+                headerHeight = value
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var detailOverlayContent: some View {
+        let detailSnapshot = detailCoordinator.snapshot
+        if detailSnapshot.hasActiveOverlay, let context = detailSnapshot.context {
+            let targetCloseFrame = computeTargetCloseFrame(context: context)
+            
+            DiscoveryDetailOverlayView(
+                snapshot: detailSnapshot,
+                destinationFrame: targetCloseFrame,
+                backgroundColor: backgroundColor,
+                colorScheme: colorScheme,
+                voiceoverController: voiceoverController,
+                onClose: { detailCoordinator.dismiss(reason: .backButton) },
+                deletingDiscoveryId: deletingDiscoveryId,
+                isDeletingDiscovery: isDeletionInProgress,
+                onDelete: { handleDeleteRequest(for: $0) },
+                onShowOptions: nil,
+                onOpenAudioGuide: onOpenAudioGuide,
+                onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
+            )
+            .ignoresSafeArea(edges: .top)
+            .transition(.identity)
+            .simultaneousGesture(detailEdgeDragGesture, including: .gesture)
+            .zIndex(5)
+        }
+    }
+    
+    private func computeTargetCloseFrame(context: DiscoveryDetailContext) -> CGRect {
+        let isLargeFallback = context.startFrame.width > (UIScreen.main.bounds.width * 0.6)
+        
+        if !isLargeFallback {
+            return context.startFrame
+        }
+        
+        return resolveCloseFrame(for: context.discovery.id) ?? context.startFrame
+    }
+    
+    @ViewBuilder
+    private var paginatingOverlay: some View {
+        if storeObserver.isPaginating {
+            HStack(spacing: BrandSpacing.small) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
+                    .progressViewStyle(.circular)
+                Text("Loading more")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                backgroundColor.opacity(0.9)
+                    .blur(radius: 20)
+            )
+            .clipShape(Capsule())
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.medium)
+        }
+    }
+    
+    private var refreshErrorBinding: Binding<Bool> {
+        Binding(
+            get: { refreshErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
                     refreshErrorMessage = nil
                     storeObserver.clearError()
                 }
-            },
-            message: {
-                Text(refreshErrorMessage ?? "Please try again later.")
             }
         )
-        .overlay {
-            Color.clear
-                .alert(
-                    "Delete failed",
-                    isPresented: Binding(
-                        get: { deletionErrorMessage != nil },
-                        set: { isPresented in
-                            if !isPresented {
-                                deletionErrorMessage = nil
-                            }
-                        }
-                    ),
-                    actions: {
-                        Button("OK", role: .cancel) {
+    }
+    
+    @ViewBuilder
+    private var refreshErrorActions: some View {
+        Button("OK", role: .cancel) {
+            refreshErrorMessage = nil
+            storeObserver.clearError()
+        }
+    }
+    
+    private var refreshErrorMessage_view: some View {
+        Text(refreshErrorMessage ?? "Please try again later.")
+    }
+    
+    private var deletionErrorOverlay: some View {
+        Color.clear
+            .alert(
+                "Delete failed",
+                isPresented: Binding(
+                    get: { deletionErrorMessage != nil },
+                    set: { isPresented in
+                        if !isPresented {
                             deletionErrorMessage = nil
                         }
-                    },
-                    message: {
-                        Text(deletionErrorMessage ?? "Please try again later.")
                     }
-                )
-        }
+                ),
+                actions: {
+                    Button("OK", role: .cancel) {
+                        deletionErrorMessage = nil
+                    }
+                },
+                message: {
+                    Text(deletionErrorMessage ?? "Please try again later.")
+                }
+            )
     }
 
     private func handleDiscoverySelection(

@@ -21,7 +21,7 @@ struct DiscoveryConfirmationActionsView: View {
             HStack(alignment: .center) {
                 Button(action: { onCreditsTap?() }) {
                     Text(creditDisplayText)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.adaptiveSystem(size: 16, weight: .semibold))
                         .foregroundStyle(creditTint)
                         .padding(.horizontal, BrandSpacing.small)
                         .padding(.top, BrandSpacing.small / 2)
@@ -42,9 +42,10 @@ struct DiscoveryConfirmationActionsView: View {
                 Button(action: onRetake) {
                     Label(retakeTitle, systemImage: retakeIconName)
                         .labelStyle(.titleAndIcon)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.adaptiveSystem(size: 17, weight: .semibold, scaleFactor: 1.3))
                         .frame(maxWidth: .infinity)
                         .frame(height: DiscoveryCreationViewConstants.controlHeight)
+                        .contentShape(Rectangle())
                         .foregroundStyle(palette.overlayButtonForeground)
                 }
                 .buttonStyle(.plain)
@@ -66,9 +67,10 @@ struct DiscoveryConfirmationActionsView: View {
                 } label: {
                     Label(continueTitle, systemImage: continueIconName)
                         .labelStyle(.titleAndIcon)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.adaptiveSystem(size: 17, weight: .semibold, scaleFactor: 1.3))
                         .frame(maxWidth: .infinity)
                         .frame(height: DiscoveryCreationViewConstants.controlHeight)
+                        .contentShape(Rectangle())
                         .foregroundStyle(Color.white)
                 }
                 .buttonStyle(.plain)

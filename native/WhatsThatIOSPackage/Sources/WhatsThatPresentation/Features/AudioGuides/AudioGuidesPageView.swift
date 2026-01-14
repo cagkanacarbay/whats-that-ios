@@ -200,6 +200,11 @@ private extension AudioGuidesPageView {
             // Detect compact screens (iPad compatibility mode simulates ~568pt 4\" iPhone)
             let isCompactScreen = screenHeight < 600
             
+            // Calculate top padding for iPad to position content below the pill overlay
+            // Pill is at safeTop + pillTopOffset, and is about 50pt tall; add breathing room
+            let pillHeight: CGFloat = UIDevice.isIPad ? 50 : 40
+            let heroTopPadding: CGFloat = UIDevice.isIPad ? (Self.pillTopOffset + pillHeight + 16) : 0
+            
             // Drag gesture to detect scroll-down intent (swipe up to reveal Up Next)
             let heroSwipeGesture = DragGesture(minimumDistance: 20)
                 .onChanged { value in
@@ -217,7 +222,7 @@ private extension AudioGuidesPageView {
                 // Main content area (flex)
                 VStack(spacing: isCompactScreen ? 12 : 20) {
                     Spacer(minLength: isCompactScreen ? 8 : 12)
-                    HeroPlayerView(isCompact: isCompactScreen, isCheckingVoiceoverStatus: viewModel.isLoadingVoiceoverStatus, hasAnyDiscoveries: !viewModel.localIds.isEmpty, onTextSelected: onTextSelected)
+                    HeroPlayerView(isCompact: isCompactScreen, isCheckingVoiceoverStatus: viewModel.isLoadingVoiceoverStatus, hasAnyDiscoveries: !viewModel.localIds.isEmpty, topPadding: heroTopPadding, onTextSelected: onTextSelected)
                         .padding(.horizontal, 16)
                     Spacer(minLength: isCompactScreen ? 8 : 12)
                 }
@@ -269,17 +274,15 @@ private extension AudioGuidesPageView {
                 }
             }) {
                 Text("Text")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
+                    .font(.adaptiveSystem(size: 15, weight: .medium))
+                    .frame(width: UIDevice.isIPad ? 100 : 80, height: UIDevice.isIPad ? 44 : 32)
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
             
             Button(action: {}) {
                 Text("Audio")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
+                    .font(.adaptiveSystem(size: 15, weight: .medium))
+                    .frame(width: UIDevice.isIPad ? 100 : 80, height: UIDevice.isIPad ? 44 : 32)
                     .foregroundColor(BrandColors.logo)
                     .background(
                         Capsule()
@@ -314,7 +317,7 @@ private extension AudioGuidesPageView {
                     HStack {
                         Button(action: { exitListMode(reason: "down arrow") }) {
                             Image(systemName: "chevron.down")
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(.adaptiveSystem(size: 18, weight: .semibold))
                                 .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
                                 .padding(8)
                                 .background(BrandTheme.palette(for: colorScheme).surface.opacity(0.9))
@@ -374,8 +377,7 @@ private extension AudioGuidesPageView {
         if viewModel.selectedList == .upNext {
             HStack(spacing: 8) {
                 Text("Autoplay")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.adaptiveSystem(size: 15, weight: .medium))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 Toggle("", isOn: Binding(
                     get: { viewModel.autoplayEnabled },
@@ -388,8 +390,7 @@ private extension AudioGuidesPageView {
         } else {
             HStack(spacing: 8) {
                 Text("Show discoveries without audio")
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.adaptiveSystem(size: 14, weight: .medium))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     .lineLimit(1)
                 Toggle("", isOn: $viewModel.showWithoutAudioGuide)
@@ -499,7 +500,7 @@ struct ToggleBarView: View {
         }) {
             VStack(spacing: 4) {
                 Text(title)
-                    .fontWeight(isActive ? .bold : .medium)
+                    .font(.adaptiveSystem(size: 16, weight: isActive ? .bold : .medium))
                     .foregroundColor(isActive ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textSecondary)
                 
                 if isActive {
@@ -537,7 +538,7 @@ struct UpNextListView: View {
             
             // 1. Now Playing Section
             if let nowPlaying = viewModel.nowPlayingDiscovery {
-                Section(header: Text("Now Playing").font(.caption).fontWeight(.bold)) {
+                Section(header: Text("Now Playing").font(.adaptiveSystem(size: 13, weight: .bold))) {
                     nowPlayingRow(discovery: nowPlaying)
                 }
             }
@@ -634,16 +635,14 @@ struct UpNextListView: View {
         
         HStack {
             Text("Up Next")
-                .font(.caption)
-                .fontWeight(.bold)
+                .font(.adaptiveSystem(size: 13, weight: .bold))
             
             Spacer()
             
             // Clear Queue button - always visible, disabled when queue is empty
             Button(action: { showClearQueueConfirmation = true }) {
                 Text("Clear Queue")
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.adaptiveSystem(size: 12, weight: .medium))
                     .foregroundColor(hasQueuedItems ? .red.opacity(0.8) : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
             }
             .disabled(!hasQueuedItems)
@@ -684,7 +683,7 @@ struct UpNextListView: View {
     @ViewBuilder
     private var historySection: some View {
         if !viewModel.historyItems.isEmpty {
-            Section(header: Text("Just Played").font(.caption).fontWeight(.bold)) {
+            Section(header: Text("Just Played").font(.adaptiveSystem(size: 13, weight: .bold))) {
                 ForEach(viewModel.historyItems, id: \.self) { discoveryId in
                     HistoryRowContainer(
                         discoveryId: discoveryId,
@@ -704,8 +703,7 @@ struct UpNextListView: View {
                         }
                     }) {
                         Text(viewModel.historyLimit == 3 ? "View History" : "View More")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                            .font(.adaptiveSystem(size: 15, weight: .medium))
                             .foregroundColor(.blue)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 8)
@@ -829,7 +827,7 @@ struct DiscoverListView: View {
     var body: some View {
         List {
             ForEach(groupedDiscoveries, id: \.0) { sectionTitle, sectionDiscoveries in
-                Section(header: Text(sectionTitle).font(.caption).fontWeight(.bold)) {
+                Section(header: Text(sectionTitle).font(.adaptiveSystem(size: 16, weight: .bold))) {
                     ForEach(sectionDiscoveries, id: \.id) { discovery in
                         DiscoverRowContainer(
                             discovery: discovery,

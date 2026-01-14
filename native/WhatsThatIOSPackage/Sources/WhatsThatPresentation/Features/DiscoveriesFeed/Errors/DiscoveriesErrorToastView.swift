@@ -17,11 +17,11 @@ struct DiscoveriesErrorToastView: View {
 
             HStack(spacing: BrandSpacing.small) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.adaptiveSystem(size: 16, weight: .semibold))
                     .foregroundStyle(Color.orange)
 
                 Text(message)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.adaptiveSystem(size: 14, weight: .medium))
                     .lineLimit(2)
                     .foregroundStyle(toastTextColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -29,7 +29,7 @@ struct DiscoveriesErrorToastView: View {
                 Button("Retry") {
                     retryAction()
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.adaptiveSystem(size: 14, weight: .semibold))
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.white)
                 .padding(.vertical, 6)
@@ -40,7 +40,8 @@ struct DiscoveriesErrorToastView: View {
             .padding(.horizontal, BrandSpacing.medium)
             .padding(.vertical, 12)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.toastMaxWidth : .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var backgroundGradient: LinearGradient {

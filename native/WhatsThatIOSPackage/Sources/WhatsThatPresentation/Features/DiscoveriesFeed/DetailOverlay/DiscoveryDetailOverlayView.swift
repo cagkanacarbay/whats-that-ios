@@ -78,7 +78,7 @@ struct DiscoveryDetailOverlayView: View {
             let containerFrame = containerFrameRaw.offsetBy(dx: 0, dy: -safeAreaInsets.top)
             let screenBounds = UIScreen.main.bounds
             let rawWidth = proxy.size.width == 0 ? screenBounds.width : proxy.size.width
-            let containerWidth = min(rawWidth, screenBounds.width)
+            let containerWidth = UIDevice.isIPad ? screenBounds.width : min(rawWidth, screenBounds.width)
             let rawHeight = proxy.size.height == 0 ? screenBounds.height : proxy.size.height
             let containerSize = CGSize(width: containerWidth, height: rawHeight + safeAreaInsets.top)
             let containerOrigin = CGPoint(x: 0, y: containerFrame.origin.y)
@@ -313,12 +313,12 @@ struct DiscoveryDetailOverlayView: View {
                 dismissFullscreen()
             }
         }
-        .sheet(isPresented: $isImageSheetPresented, onDismiss: {
-            if !isImageSheetPresented {
-                fullscreenContext = nil
-            }
-        }) {
-            Group {
+        .applyingIf(UIDevice.isIPad) { view in
+            view.fullScreenCover(isPresented: $isImageSheetPresented, onDismiss: {
+                if !isImageSheetPresented {
+                    fullscreenContext = nil
+                }
+            }) {
                 if let fullscreenContext {
                     DiscoveryDetailImageFullscreenView(
                         discoveryId: fullscreenContext.discovery.id,
@@ -330,8 +330,28 @@ struct DiscoveryDetailOverlayView: View {
                     Color.clear
                 }
             }
-            .presentationDetents([.fraction(0.995)])
-            .presentationDragIndicator(.visible)
+        }
+        .applyingIf(!UIDevice.isIPad) { view in
+            view.sheet(isPresented: $isImageSheetPresented, onDismiss: {
+                if !isImageSheetPresented {
+                    fullscreenContext = nil
+                }
+            }) {
+                Group {
+                    if let fullscreenContext {
+                        DiscoveryDetailImageFullscreenView(
+                            discoveryId: fullscreenContext.discovery.id,
+                            imageURL: fullscreenContext.imageURL,
+                            placeholderImage: fullscreenContext.placeholderImage,
+                            onClose: dismissFullscreen
+                        )
+                    } else {
+                        Color.clear
+                    }
+                }
+                .presentationDetents([.fraction(0.995)])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
 

@@ -9,8 +9,190 @@ This document outlines the work required to properly support iPad for the What's
 | Build Configuration | ✅ Complete |
 | App Icons | ✅ Complete |
 | Info.plist | ✅ Complete |
-| UI Adaptation | ⬜ Not Started |
+| Design Decisions | ✅ Complete |
+| UI Adaptation | ⬜ Not Started — See [ipad-ui-requirements.md](./ipad-ui-requirements.md) |
 | Testing | ⬜ Not Started |
+
+---
+
+## Critical Requirements
+
+### Requirement 1: Device Detection — Zero iPhone Impact
+
+**All iPad UI adaptations MUST have zero effect on iPhone.** This is a non-negotiable requirement.
+
+#### Detection Pattern
+
+Use `UIDevice.current.userInterfaceIdiom` for explicit device checks:
+
+```swift
+import UIKit
+
+extension UIDevice {
+    static var isIPad: Bool {
+        current.userInterfaceIdiom == .pad
+    }
+}
+```
+
+Usage in SwiftUI:
+```swift
+if UIDevice.isIPad {
+    // iPad-specific layout
+} else {
+    // iPhone layout (unchanged)
+}
+```
+
+#### Why This Is Safe
+
+| Factor | Guarantee |
+|--------|-----------|
+| Portrait-only | No orientation ambiguity |
+| Full-screen only | No Split View size class changes |
+| `userInterfaceIdiom` | Hardware-based, never changes at runtime |
+| Conditional branching | iPhone code path completely isolated |
+
+#### Alternative: Size Class (Also Safe)
+
+```swift
+@Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+// horizontalSizeClass == .regular → iPad
+// horizontalSizeClass == .compact → iPhone
+```
+
+Both methods are reliable given our portrait-only, full-screen configuration. Choose based on context:
+- Use `UIDevice.isIPad` for device-specific logic (e.g., different detent heights)
+- Use `horizontalSizeClass` for layout-dependent logic (e.g., column counts)
+
+> [!IMPORTANT]
+> Any PR modifying UI for iPad support MUST be tested on both iPhone and iPad simulators to verify zero regression on iPhone.
+
+---
+
+## Design Decisions (Finalized)
+
+The following decisions establish our **minimal-change approach** to iPad support. The goal is to have the iPad version work acceptably without maintaining separate code paths.
+
+### Decision 1: Sheet Presentation — Accept iPad Default ✅
+
+**Decision:** Accept iPad's default centered popover/sheet presentation.
+
+- iPad presents sheets as centered modal popovers by default
+- We will NOT force iPhone-style bottom sheets
+- Reason: Looks acceptable, reduces complexity
+
+**No code changes required.**
+
+---
+
+### Decision 2: Layout/Grid Columns — Keep Current Behavior ✅
+
+**Decision:** Keep `UIScreen.main.bounds` calculations as-is. No column count adjustments.
+
+- Discovery grid will display with 2 columns (cards will be larger on iPad)
+- Discovery detail overlay will be larger but looks nice
+- We are NOT adding column count logic based on device type
+
+**No code changes required.**
+
+---
+
+### Decision 3: Content Width Constraints — None ✅
+
+**Decision:** No max-width constraints on content.
+
+- Content will expand to fill available width on iPad
+- This is acceptable for our use case
+
+**No code changes required.**
+
+---
+
+### Decision 4: Navigation Paradigm — Keep NavigationStack ✅
+
+**Decision:** Keep `NavigationStack` everywhere. Do NOT use `NavigationSplitView`.
+
+- Consistent with iPhone experience
+- Minimal change set
+- No sidebar navigation on iPad
+
+**No code changes required.**
+
+---
+
+### Decision 5: Popover Behavior — Accept Current Implementation ✅
+
+**Decision:** Existing popover implementations are acceptable.
+
+- `AudioToggleView.swift` popover: Works correctly
+- `DiscoveryDetailShareHelpers.swift`: Already handles iPad source rect
+
+**Testing only — no code changes.**
+
+---
+
+### Decision 6: Safe Area Handling — Monitor During Testing ✅
+
+**Decision:** Current `GeometryReader`-based safe area handling should work.
+
+- iPad has different safe areas (smaller top inset, etc.)
+- One hardcoded fallback (`59pt` for iPhone notch) may need monitoring
+- Address issues if they arise during testing
+
+**No proactive changes — test and fix if needed.**
+
+---
+
+### Decision 7: Hardware Keyboard — Automatic ✅
+
+**Decision:** SwiftUI handles hardware keyboard support automatically.
+
+- `@FocusState` works correctly with external keyboards
+- On-screen keyboard may not appear when hardware keyboard connected (expected behavior)
+
+**No code changes required.**
+
+---
+
+### Decision 8: Pointer/Hover Support — Automatic ✅
+
+**Decision:** SwiftUI provides automatic hover states.
+
+- All existing buttons will work with mouse/trackpad
+- No additional work needed
+
+**No code changes required.**
+
+---
+
+### Decision 9: Camera Position — No Changes ✅
+
+**Decision:** AVFoundation handles iPad camera positioning.
+
+- iPad cameras are positioned differently in portrait
+- Camera preview and capture will work without changes
+
+**Testing only — no code changes.**
+
+---
+
+### Summary: Minimal Change Approach
+
+| Area | Decision | Action |
+|------|----------|--------|
+| Sheets | Accept iPad default | None |
+| Grid columns | Keep 2-column | None |
+| Content width | No constraints | None |
+| Navigation | Keep NavigationStack | None |
+| Popovers | Accept current | Test only |
+| Safe areas | Monitor | Fix if needed |
+| Hardware keyboard | Automatic | None |
+| Pointer support | Automatic | None |
+| Camera | Automatic | Test only |
+
+**Result:** The primary work is **testing**, not UI redesign. The existing UI scales to iPad in an acceptable way.
 
 ---
 
@@ -98,173 +280,41 @@ Added `UIRequiresFullScreen = true` to Info.plist:
 
 **Status: Not Started**
 
-The app currently has no adaptive layout code. All UI is designed for iPhone dimensions. The following areas need work to provide a polished iPad experience.
+> [!NOTE]
+> Detailed screen-by-screen UI requirements are documented in **[ipad-ui-requirements.md](./ipad-ui-requirements.md)**.
 
-### 4.1 Discovery Feed Grid (Medium Effort)
+### Summary of Required Work
 
-**Current State:**
-- Fixed 2-column grid calculated as `(availableWidth - spacing) / 2`
-- Uses `UIScreen.main.bounds` for layout calculations
-- Cards become excessively large on iPad (500+ pts wide)
+The UI work follows our **minimal-change approach** — no layout restructuring, only targeted adjustments:
 
-**Required Changes:**
-- Add `@Environment(\.horizontalSizeClass)` to detect iPad
-- Implement dynamic column count: 2 columns (compact) → 3-4 columns (regular)
-- Cap maximum card width at ~200pt
-- Refactor `resolveCloseFrame()` and related geometry
+| Category | Screens | Effort |
+|----------|---------|--------|
+| **Text Scaling** | All screens | Low per screen |
+| **Mini Player Redesign** | My Discoveries | Medium |
+| **Onboarding Layout** | Onboarding pages | Medium |
+| **Auth Centering** | Login, Sign Up, Forgot Password | Low |
 
-**Files to Modify:**
-- `WhatsThatPresentation/Features/DiscoveriesFeed/Grid/DiscoveriesGridView.swift`
-- `WhatsThatPresentation/Features/DiscoveriesFeed/DiscoveriesHomeView.swift`
+### Priority Order
 
-**Example Implementation:**
-```swift
-@Environment(\.horizontalSizeClass) private var horizontalSizeClass
+**P1 (High):**
+1. Mini Player — Limit width, redesign for iPad
+2. Onboarding — Constrain images, ensure text visibility
+3. Discovery Detail View — Force full screen, scale text and buttons
+4. Audio Guides — Scale player and all text
 
-private var columnCount: Int {
-    horizontalSizeClass == .regular ? 4 : 2
-}
+**P2 (Medium):**
+3. Discovery Detail View — Force full screen, scale text and buttons
+2. Gallery Titles — Increase font size
+3. Authentication — Center content, scale text
+4. Streaming Result View — Match Discovery Detail scaling
 
-private var cardWidth: CGFloat {
-    let columns = CGFloat(columnCount)
-    let totalSpacing = cardSpacing * (columns - 1)
-    return min((availableWidth - totalSpacing) / columns, 200)
-}
-```
+**P3 (Lower):**
+1. Creation/Camera Flow — Scale labels
+2. Settings Sheet — Increase height and text
 
 ---
 
-### 4.2 Discovery Detail Overlay (Medium Effort)
-
-**Current State:**
-- Full-screen overlay using `UIScreen.main.bounds`
-- Animations assume phone-sized viewport
-
-**Required Changes:**
-- Constrain detail view to max ~600pt width on iPad (centered)
-- Update transition animation calculations
-- Adjust edge drag gesture handling for wider screens
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/DiscoveriesFeed/DetailOverlay/` (17 files)
-
----
-
-### 4.3 Camera/Photo Capture Flow (Low-Medium Effort)
-
-**Current State:**
-- Designed for portrait phone
-
-**Required Changes:**
-- Test camera preview on iPad (AVFoundation usually handles this)
-- Add max-width constraints to confirmation views
-- Verify streaming/progress views adapt
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/DiscoveryCreation/` (18 files)
-
----
-
-### 4.4 Onboarding Flow (Low-Medium Effort)
-
-**Current State:**
-- Carousel-style slides with page indicators
-
-**Required Changes:**
-- Add max-width constraints (~500pt) to slide content
-- Verify image/illustration aspect ratios
-- Test page indicator positioning
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/Onboarding/` (8 files)
-
----
-
-### 4.5 Settings View (Low Effort)
-
-**Current State:**
-- Uses `NavigationStack` with `List` — SwiftUI handles most adaptation
-
-**Required Changes:**
-- Adjust sheet `.presentationDetents()` for iPad
-- Optional: Consider `NavigationSplitView` for sidebar navigation
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/Settings/SettingsView.swift`
-
----
-
-### 4.6 Credits/Purchase View (Low Effort)
-
-**Current State:**
-- Purchase UI presented as a sheet
-
-**Required Changes:**
-- Add appropriate `.presentationDetents()` for iPad
-- Add max-width constraints if needed
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/Credits/CreditsView.swift`
-
----
-
-### 4.7 Audio Guides (Low Effort)
-
-**Current State:**
-- Mini-player and audio controls
-
-**Required Changes:**
-- Verify mini-player positioning with different safe areas
-- Add max-width constraints to full player view if needed
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/AudioGuides/` (10 files)
-
----
-
-### 4.8 Authentication (Low Effort)
-
-**Current State:**
-- Sign-in screens
-
-**Required Changes:**
-- Add max-width constraints (~400pt) to form layouts
-- Sign in with Apple should work without changes
-
-**Files to Modify:**
-- `WhatsThatPresentation/Features/Authentication/` (7 files)
-
----
-
-## Phase 5: Global Patterns to Address
-
-### Pattern 1: `UIScreen.main.bounds` Usage
-
-**Problem:** Used extensively for layout calculations, particularly in:
-- `DiscoveriesHomeView.swift` — grid calculations, fallback frames
-- Animation/transition code
-
-**Solution:** Replace with `GeometryReader` values or SwiftUI's layout system.
-
----
-
-### Pattern 2: No Size Class Awareness
-
-**Problem:** Zero usage of `horizontalSizeClass` or `UIDevice.current.userInterfaceIdiom`
-
-**Solution:** Add environment variable hooks throughout navigation and layout code.
-
----
-
-### Pattern 3: Hardcoded Dimensions
-
-**Problem:** Various fixed values like `cardWidth * 1.2`, `360`, `min(screen.width * 0.9, 360)`
-
-**Solution:** Replace with adaptive calculations using size classes.
-
----
-
-## Phase 6: Multitasking Support ❌
+## Phase 5: Multitasking Support ❌
 
 **Status: Not Applicable**
 
@@ -284,15 +334,27 @@ This decision simplifies development and ensures UI consistency with iPhone. If 
 
 ---
 
-## Phase 7: Testing Checklist
+## Phase 6: Testing Checklist
+
+### Device Matrix
+
+Test on the following devices to cover the range of iPad screen sizes:
+
+| Device | Size | Purpose |
+|--------|------|--------|
+| iPad Pro 12.9" | Largest | Verify content doesn't look too sparse |
+| iPad mini | Smallest (8.3") | Verify constrained layouts aren't too tight |
+| iPhone 16 Pro | Reference | Ensure zero iPhone regression |
 
 ### Build Validation
 - [ ] App Store validation passes
-- [ ] Build runs on iPad Simulator
-- [ ] Build runs on physical iPad
+- [ ] Build runs on iPad Pro 12.9" Simulator
+- [ ] Build runs on iPad mini Simulator
+- [ ] Build runs on iPhone 16 Pro Simulator (regression check)
+- [ ] Build runs on physical iPad (if available)
 
 ### Core Functionality
-- [ ] In-app purchases work on iPad
+- [ ] In-app purchases work on iPad (previously broken in compatibility mode, now fixed)
 - [ ] Camera capture works
 - [ ] Photo upload works
 - [ ] Discoveries display correctly
@@ -305,10 +367,11 @@ This decision simplifies development and ensures UI consistency with iPhone. If 
 - [ ] Settings accessible and usable
 - [ ] All sheets and modals sized appropriately
 
-### Multitasking
-- [ ] App handles Split View entry/exit
-- [ ] App handles Slide Over
-- [ ] Layout updates on size class changes
+### Keyboard & Accessibility
+- [ ] On-screen keyboard avoidance works on Auth forms (iPad keyboard is larger)
+- [ ] Keyboard avoidance works on any text input fields
+- [ ] Dynamic Type: Test with accessibility large text enabled
+- [ ] Dynamic Type: Verify adaptive fonts don't compound excessively
 
 ---
 

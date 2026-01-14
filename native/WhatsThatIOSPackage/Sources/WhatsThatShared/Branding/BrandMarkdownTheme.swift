@@ -1,12 +1,21 @@
 #if canImport(MarkdownUI)
 import MarkdownUI
 import SwiftUI
+import UIKit
 
 public enum BrandMarkdownThemeFactory {
+    /// Scale factor for iPad fonts (1.4x the iPhone size)
+    private static var scaleFactor: CGFloat { UIDevice.isIPad ? 1.4 : 1.0 }
+    
+    /// Computes adaptive font size: original on iPhone, scaled on iPad
+    private static func adaptiveSize(_ baseSize: CGFloat) -> CGFloat {
+        baseSize * scaleFactor
+    }
+    
     public static func discoveryDetailTheme(for palette: BrandTheme.Palette) -> Theme {
         Theme()
             .text {
-                FontSize(16)
+                FontSize(adaptiveSize(16))
                 ForegroundColor(palette.textSecondary)
             }
             .strong {
@@ -19,7 +28,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.bold)
-                        FontSize(24)
+                        FontSize(adaptiveSize(24))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(1.4), bottom: .em(0.6))
@@ -28,7 +37,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.semibold)
-                        FontSize(20)
+                        FontSize(adaptiveSize(20))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(1.2), bottom: .em(0.5))
@@ -37,7 +46,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.semibold)
-                        FontSize(18)
+                        FontSize(adaptiveSize(18))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(1.1), bottom: .em(0.45))
@@ -46,7 +55,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.semibold)
-                        FontSize(17)
+                        FontSize(adaptiveSize(17))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(1), bottom: .em(0.4))
@@ -55,7 +64,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.semibold)
-                        FontSize(16)
+                        FontSize(adaptiveSize(16))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(0.9), bottom: .em(0.35))
@@ -64,7 +73,7 @@ public enum BrandMarkdownThemeFactory {
                 configuration.label
                     .markdownTextStyle {
                         FontWeight(.semibold)
-                        FontSize(15)
+                        FontSize(adaptiveSize(15))
                         ForegroundColor(palette.textPrimary)
                     }
                     .markdownMargin(top: .em(0.8), bottom: .em(0.3))
@@ -101,7 +110,7 @@ public enum BrandMarkdownThemeFactory {
             }
             .code {
                 FontFamilyVariant(.monospaced)
-                FontSize(14)
+                FontSize(adaptiveSize(14))
             }
             .codeBlock { configuration in
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -110,7 +119,7 @@ public enum BrandMarkdownThemeFactory {
                         .relativeLineSpacing(.em(0.2))
                         .markdownTextStyle {
                             FontFamilyVariant(.monospaced)
-                            FontSize(14)
+                            FontSize(adaptiveSize(14))
                             ForegroundColor(palette.textSecondary)
                         }
                         .padding(.horizontal, BrandSpacing.medium)

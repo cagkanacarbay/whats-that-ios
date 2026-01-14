@@ -152,34 +152,46 @@ public final class CreditsViewModel: ObservableObject {
             
             #if DEBUG
             print("[CreditsVM] Purchase returned with status: \(result.status)")
+            if let debugInfo = result.debugInfo {
+                print("[CreditsVM] Debug info: \(debugInfo)")
+            }
             #endif
-            
-            // Build message with debug info for troubleshooting
-            let debugSuffix = result.debugInfo.map { " [\($0)]" } ?? ""
             
             switch result.status {
             case .success:
                 toastMessage = ToastMessage(
                     title: "Purchase complete",
-                    message: "\(pack.creditAmount) credits added.\(debugSuffix)",
+                    message: "\(pack.creditAmount) credits added.",
                     style: .success
                 )
-                let newValue = try await balanceStore.refresh(force: true)
-                updateBalance(newValue)
+                // Refresh balance after successful purchase
+                do {
+                    let newValue = try await balanceStore.refresh(force: true)
+                    updateBalance(newValue)
+                } catch {
+                    #if DEBUG
+                    print("[CreditsVM] Failed to refresh balance after purchase: \(error)")
+                    #endif
+                    // Purchase was successful but balance refresh failed - let user know
+                    toastMessage = ToastMessage(
+                        title: "Purchase complete",
+                        message: "Your credits were added. If your balance doesn't update, try pulling down to refresh.",
+                        style: .success
+                    )
+                }
             case .pending:
                 toastMessage = ToastMessage(
                     title: "Purchase pending",
-                    message: (result.message ?? "We'll update your balance once it clears.") + debugSuffix,
+                    message: result.message ?? "We'll update your balance once it clears.",
                     style: .info
                 )
             case .cancelled:
                 #if DEBUG
                 print("[CreditsVM] Purchase was cancelled. Message: \(result.message ?? "nil")")
                 #endif
-                // Always show feedback for cancelled purchases - include debug info
                 toastMessage = ToastMessage(
                     title: "Purchase cancelled",
-                    message: (result.message ?? "The purchase was not completed.") + debugSuffix,
+                    message: result.message ?? "The purchase was not completed.",
                     style: .info
                 )
             }
@@ -187,10 +199,9 @@ public final class CreditsViewModel: ObservableObject {
             #if DEBUG
             print("[CreditsVM] Purchase threw error: \(error)")
             #endif
-            // Show detailed error info for debugging
             alertContent = AlertContent(
-                title: "Purchase Error",
-                message: "Error: \(error.localizedDescription)"
+                title: "Purchase failed",
+                message: "Something went wrong with your purchase. Please try again. If the issue persists, check your payment method in Settings."
             )
         }
     }

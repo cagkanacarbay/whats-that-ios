@@ -25,14 +25,16 @@ struct ForgotPasswordForm: View {
     @State private var didAttemptSubmit = false
     @FocusState private var emailFocused: Bool
 
+
+
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
             VStack(spacing: BrandSpacing.small) {
                 Text(infoMessage == nil ? "Forgot Password" : "Check Your Email")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.adaptiveSystem(size: 28, weight: .bold))
                     .foregroundStyle(titleColor)
                 Text(infoMessage == nil ? "Enter your email to receive a password reset link." : infoMessage ?? "")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.adaptiveSystem(size: 16, weight: .medium))
                     .foregroundStyle(bodyColor)
                     .multilineTextAlignment(.center)
             }
@@ -77,16 +79,19 @@ struct ForgotPasswordForm: View {
                 onDismiss()
             }
             .buttonStyle(.plain)
+            .font(.adaptiveBody().weight(.semibold))
             .foregroundStyle(primaryColor)
-            .fontWeight(.semibold)
 
             if let error {
                 Text(error)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.adaptiveSystem(size: 13, weight: .medium))
                     .foregroundStyle(Color.red.opacity(0.9))
                     .multilineTextAlignment(.center)
             }
+
         }
+        .frame(maxWidth: UIDevice.isIPad ? IPadLayout.authContentMaxWidth : .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var emailError: String? {

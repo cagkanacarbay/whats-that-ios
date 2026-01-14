@@ -16,6 +16,9 @@ struct HeroPlayerView: View {
     /// Whether the user has any discoveries at all
     var hasAnyDiscoveries: Bool = false
     
+    /// Top padding for iPad to position content below the pill overlay
+    var topPadding: CGFloat = 0
+    
     /// Callback when user taps "Text" to open discovery detail
     var onTextSelected: (DiscoverySummary?) -> Void = { _ in }
     
@@ -29,6 +32,7 @@ struct HeroPlayerView: View {
                 isCompact: isCompact,
                 hasAnyDiscoveries: hasAnyDiscoveries,
                 isCheckingVoiceoverStatus: isCheckingVoiceoverStatus,
+                topPadding: topPadding,
                 onTextSelected: onTextSelected
             )
         }
@@ -44,16 +48,28 @@ private struct HeroPlayerContentView: View {
     let isCompact: Bool
     let hasAnyDiscoveries: Bool
     let isCheckingVoiceoverStatus: Bool
+    let topPadding: CGFloat
     var onTextSelected: (DiscoverySummary?) -> Void
     
     @State private var selectedMode = "Audio"
     @State private var didAttemptAutoLoad = false
     @State private var generatingDiscovery: DiscoverySummary? = nil
     
-    // Responsive sizing for compact screens
-    private var ringSize: CGFloat { isCompact ? 200 : 300 }
-    private var artworkSize: CGFloat { isCompact ? 176 : 264 }
-    private var timeLabelsWidth: CGFloat { isCompact ? 160 : 240 }
+    // Responsive sizing for compact screens and iPad
+    private var ringSize: CGFloat {
+        if UIDevice.isIPad { return 460 }
+        return isCompact ? 200 : 300
+    }
+    
+    private var artworkSize: CGFloat {
+        if UIDevice.isIPad { return 400 }
+        return isCompact ? 176 : 264
+    }
+    
+    private var timeLabelsWidth: CGFloat {
+        if UIDevice.isIPad { return 360 }
+        return isCompact ? 160 : 240
+    }
     
     // Accelerated seek state
     @State private var seekTimer: Timer?
@@ -158,7 +174,8 @@ private struct HeroPlayerContentView: View {
     var body: some View {
         VStack(spacing: isCompact ? 12 : 24) {
             // Space reserved for pill (positioned by parent as fixed overlay)
-            Spacer().frame(height: isCompact ? 24 : 36)
+            // On iPad, use topPadding from parent to position below pill; on iPhone, use existing compact logic
+            Spacer().frame(height: UIDevice.isIPad ? topPadding : (isCompact ? 24 : 36))
             
             // Main Circular Player
             circularPlayer
@@ -168,7 +185,7 @@ private struct HeroPlayerContentView: View {
                 if discovery != nil {
                     // Show discovery title when loaded
                     Text(discovery!.title)
-                        .font(isCompact ? .headline : .title2)
+                        .font(UIDevice.isIPad ? .adaptiveSystem(size: 28, weight: .bold) : (isCompact ? .headline : .title2))
                         .fontWeight(.bold)
                         .multilineTextAlignment(.center)
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
@@ -261,9 +278,8 @@ private struct HeroPlayerContentView: View {
                 onTextSelected(discovery)
             }) {
                 Text("Text")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
+                    .font(.adaptiveSystem(size: 15, weight: .medium))
+                    .frame(width: UIDevice.isIPad ? 100 : 80, height: UIDevice.isIPad ? 44 : 32)
                     .foregroundColor(selectedMode == "Text" ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textSecondary)
                     .background(
                         ZStack {
@@ -278,9 +294,8 @@ private struct HeroPlayerContentView: View {
             
             Button(action: { selectedMode = "Audio" }) {
                 Text("Audio")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(width: 80, height: 32)
+                    .font(.adaptiveSystem(size: 15, weight: .medium))
+                    .frame(width: UIDevice.isIPad ? 100 : 80, height: UIDevice.isIPad ? 44 : 32)
                     .foregroundColor(selectedMode == "Audio" ? BrandColors.logo : BrandTheme.palette(for: colorScheme).textSecondary)
                     .background(
                         ZStack {
@@ -301,7 +316,7 @@ private struct HeroPlayerContentView: View {
     // MARK: - Circular Player
     
     private var circularPlayer: some View {
-        let strokeWidth: CGFloat = isCompact ? 10 : 14
+        let strokeWidth: CGFloat = UIDevice.isIPad ? 24 : (isCompact ? 10 : 14)
         
         return ZStack {
             // Background Circle
@@ -329,7 +344,7 @@ private struct HeroPlayerContentView: View {
             // Time labels
             HStack {
                 Text(currentTimeString)
-                    .font(isCompact ? .caption2 : .caption)
+                    .font(UIDevice.isIPad ? .adaptiveSystem(size: 18, weight: .medium) : (isCompact ? .caption2 : .caption))
                     .fontWeight(.medium)
                     .monospacedDigit()
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
@@ -337,7 +352,7 @@ private struct HeroPlayerContentView: View {
                 Spacer()
                 
                 Text(durationString)
-                    .font(isCompact ? .caption2 : .caption)
+                    .font(UIDevice.isIPad ? .adaptiveSystem(size: 18, weight: .medium) : (isCompact ? .caption2 : .caption))
                     .fontWeight(.medium)
                     .monospacedDigit()
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
@@ -430,7 +445,7 @@ private struct HeroPlayerContentView: View {
             // Prev
             Button(action: playPrevious) {
                 Image(systemName: "backward.end.fill")
-                    .font(.system(size: isCompact ? 20 : 24))
+                    .font(.system(size: UIDevice.isIPad ? 32 : (isCompact ? 20 : 24)))
                     .foregroundColor(canPlayPrevious
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
@@ -443,7 +458,7 @@ private struct HeroPlayerContentView: View {
             // Play/Pause
             Button(action: togglePlayPause) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: isCompact ? 48 : 64))
+                    .font(.system(size: UIDevice.isIPad ? 88 : (isCompact ? 48 : 64)))
                     .foregroundColor(BrandColors.logo)
                     .shadow(color: BrandColors.logo.opacity(0.3), radius: isCompact ? 6 : 10, x: 0, y: isCompact ? 2 : 4)
             }
@@ -454,7 +469,7 @@ private struct HeroPlayerContentView: View {
             // Next
             Button(action: playNext) {
                 Image(systemName: "forward.end.fill")
-                    .font(.system(size: isCompact ? 20 : 24))
+                    .font(.system(size: UIDevice.isIPad ? 32 : (isCompact ? 20 : 24)))
                     .foregroundColor(canPlayNext
                         ? BrandTheme.palette(for: colorScheme).textPrimary
                         : BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.4))
@@ -471,7 +486,7 @@ private struct HeroPlayerContentView: View {
         
         Button(action: { controller.seek(by: seconds) }) {
             Image(systemName: imageName)
-                .font(.system(size: isCompact ? 20 : 24))
+                .font(.system(size: UIDevice.isIPad ? 32 : (isCompact ? 20 : 24)))
                 .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
         }
         .simultaneousGesture(
@@ -487,6 +502,9 @@ private struct HeroPlayerContentView: View {
     
     private var bottomControlsRow: some View {
         HStack {
+            
+            if UIDevice.isIPad { Spacer() }
+            
             // Speed Control (Left)
             VStack(spacing: 2) {
                 Menu {
@@ -504,11 +522,10 @@ private struct HeroPlayerContentView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(formatSpeed(speedStore.speed))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                            .font(.adaptiveSystem(size: 15, weight: .medium))
                             .monospacedDigit()
                         Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption)
+                            .font(.adaptiveSystem(size: 12))
                     }
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                     .padding(.horizontal, 12)
@@ -518,16 +535,20 @@ private struct HeroPlayerContentView: View {
                 }
                 
                 Text("Speed")
-                    .font(.caption2)
+                    .font(.adaptiveSystem(size: 12))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
             
-            Spacer()
+            if !UIDevice.isIPad { Spacer() }
+            
+            if UIDevice.isIPad {
+                Spacer().frame(width: 48) // Fixed gap when centered on iPad
+            }
             
             // Autoplay Toggle (Right)
-            HStack(spacing: 8) {
+            HStack(spacing: UIDevice.isIPad ? 20 : 8) {
                 Text("Autoplay")
-                    .font(.subheadline)
+                    .font(.adaptiveSystem(size: 15))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 
                 Toggle("", isOn: Binding(
@@ -536,7 +557,10 @@ private struct HeroPlayerContentView: View {
                 ))
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
+                .scaleEffect(UIDevice.isIPad ? 1.5 : 1.0)
             }
+            
+            if UIDevice.isIPad { Spacer() }
         }
         .padding(.horizontal, 16)
     }

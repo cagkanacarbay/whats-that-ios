@@ -249,7 +249,7 @@ struct SettingsView: View {
             
             if voicePickerViewModel.isAutoToggleLocked {
                 Text("Enabled for your free intro voiceovers. You can disable this after your introduction credits are exhausted.")
-                    .font(.footnote)
+                    .font(.adaptiveFootnote())
                     .foregroundStyle(.secondary)
             }
 
@@ -268,12 +268,12 @@ struct SettingsView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Voice model")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                             .foregroundStyle(Color.primary)
 
                         if let selectedVoiceName {
                             Text(selectedVoiceName)
-                                .font(.footnote)
+                                .font(.adaptiveFootnote())
                                 .foregroundStyle(.secondary)
                         } else if voicePickerViewModel.voices.isEmpty {
                             HStack(spacing: 8) {
@@ -281,12 +281,12 @@ struct SettingsView: View {
                                     .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
                                     .progressViewStyle(.circular)
                                 Text("Loading voices")
-                                    .font(.footnote)
+                                    .font(.adaptiveFootnote())
                                     .foregroundStyle(.secondary)
                             }
                         } else {
                             Text("Choose a voice")
-                                .font(.footnote)
+                                .font(.adaptiveFootnote())
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -294,10 +294,10 @@ struct SettingsView: View {
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.callout.weight(.semibold))
+                        .font(.adaptiveCallout().weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, UIDevice.isIPad ? 10 : 4) // Added padding
             }
             .disabled(voicePickerViewModel.voices.isEmpty)
             .accessibilityIdentifier("settings.audioGuides.voicePicker")
@@ -318,14 +318,14 @@ struct SettingsView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Content preferences")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                             .foregroundStyle(Color.primary)
 
                         if let summary = ipopPreferencesViewModel.summaryOrder {
                             ipopSummaryChips(summary)
                         } else {
                             Text("Not set yet")
-                                .font(.footnote)
+                                .font(.adaptiveFootnote())
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -334,15 +334,15 @@ struct SettingsView: View {
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.callout.weight(.semibold))
+                        .font(.adaptiveCallout().weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, UIDevice.isIPad ? 10 : 4) // Added padding
             }
             .accessibilityIdentifier("settings.ipop")
 
             Text("We use your preferences to craft responses that interest you.")
-                .font(.footnote)
+                .font(.adaptiveBody()) // Upgraded from footnote
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 2)
         }
@@ -363,13 +363,17 @@ struct SettingsView: View {
                         Text("Email me a reset link")
                         Spacer()
                     }
+                    .padding(.vertical, UIDevice.isIPad ? 6 : 0) // Added padding
                 }
+                .buttonStyle(.plain)
+                .font(.adaptiveBody().weight(.medium)) // Added generic font
+                .foregroundStyle(Color.accentColor) // Restored blue color
                 .disabled(viewModel.isRequestingPasswordReset)
                 .accessibilityIdentifier("settings.resetPassword")
 
                 if let email = viewModel.userEmail {
                     Text("We'll send instructions to \(email).")
-                        .font(.footnote)
+                        .font(.adaptiveBody()) // Upgraded from footnote
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 2)
                 }
@@ -386,7 +390,11 @@ struct SettingsView: View {
                     }
                     Text("Sign out")
                 }
+                .padding(.vertical, UIDevice.isIPad ? 6 : 0) // Added padding
             }
+            .buttonStyle(.plain)
+            .font(.adaptiveBody().weight(.medium)) // Added font
+            .foregroundStyle(.red) // Restored red color
             .disabled(viewModel.isSigningOut)
             .accessibilityIdentifier("settings.signOut")
 
@@ -394,6 +402,8 @@ struct SettingsView: View {
                 viewModel.presentDeleteAccountConfirmation()
             } label: {
                 Text("Delete account")
+                    .font(.adaptiveBody().weight(.medium)) // Added font
+                    .foregroundStyle(.red)
             }
             .accessibilityIdentifier("settings.deleteAccount")
         }
@@ -411,7 +421,7 @@ struct SettingsView: View {
                         .frame(width: 24)
 
                     Text("Credits")
-                        .font(.body.weight(.medium))
+                        .font(.adaptiveBody().weight(.medium))
                         .foregroundStyle(Color.primary)
 
                     Spacer()
@@ -422,19 +432,19 @@ struct SettingsView: View {
                             .progressViewStyle(.circular)
                     } else if let balance = viewModel.creditBalance {
                         Text("\(balance)")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                             .foregroundStyle(Color.secondary)
                     } else {
                         Text("—")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                             .foregroundStyle(Color.secondary)
                     }
 
                     Image(systemName: "chevron.right")
-                        .font(.callout.weight(.semibold))
+                        .font(.adaptiveCallout().weight(.semibold))
                         .foregroundStyle(Color.secondary)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, UIDevice.isIPad ? 10 : 4) // Added padding
             }
         }
     }
@@ -461,9 +471,9 @@ struct SettingsView: View {
             .accessibilityLabel("Theme")
 
             Text(appearance.description)
-                .font(.footnote)
+                .font(.adaptiveBody()) // Upgraded from footnote
                 .foregroundStyle(.secondary)
-                .padding(.vertical, 4)
+                .padding(.vertical, UIDevice.isIPad ? 6 : 4)
         }
     }
 
@@ -482,20 +492,20 @@ struct SettingsView: View {
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Enable photo saving")
-                                .font(.body.weight(.medium))
+                                .font(.adaptiveBody().weight(.medium))
                                 .foregroundStyle(Color.primary)
                             Text("Permission required")
-                                .font(.footnote)
+                                .font(.adaptiveFootnote())
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                         Image(systemName: "chevron.right")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                             .foregroundStyle(Color.secondary)
                     }
-                    .padding(.vertical, 4)
                 }
+                .padding(.vertical, UIDevice.isIPad ? 10 : 4) // Added padding
                 .accessibilityIdentifier("settings.photoSavePermission")
             } else {
                 // Normal toggle
@@ -515,15 +525,16 @@ struct SettingsView: View {
                             .frame(width: 24)
 
                         Text("Save captures to Photos")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                     }
+                    .padding(.vertical, UIDevice.isIPad ? 6 : 0) // Added padding
                 }
                 .tint(BrandColors.logo)
                 .accessibilityIdentifier("settings.photoSaveToggle")
             }
 
             Text("Keep a copy of shots in your iPhone library. Off keeps them only inside the app.")
-                .font(.footnote)
+                .font(.adaptiveBody()) // Upgraded from footnote
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 2)
         }
@@ -576,7 +587,7 @@ struct SettingsView: View {
             .accessibilityIdentifier("settings.clearAppStoreAccount")
 
             Text("Removes the local App Store receipt and cached purchase info used by this app. Useful to see when iOS prompts for Apple ID during purchases. Does not sign you out of the App Store.")
-                .font(.footnote)
+                .font(.adaptiveFootnote())
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 2)
 
@@ -596,7 +607,7 @@ struct SettingsView: View {
             .accessibilityIdentifier("settings.resetOnboarding")
 
             Text("Clears saved onboarding state so you can replay the intro slides and permission prompts. Your account stays signed in.")
-                .font(.footnote)
+                .font(.adaptiveFootnote())
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 4)
         }
@@ -616,10 +627,10 @@ struct SettingsView: View {
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Override Local Credits")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("Sets cached balance (does not sync to server)")
-                            .font(.caption)
+                            .font(.adaptiveCaption())
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -662,10 +673,10 @@ struct SettingsView: View {
                         .foregroundStyle(Color.orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Reset Free Credits Alert")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("Re-show 'credits exhausted' alert next time balance hits 0")
-                            .font(.caption)
+                            .font(.adaptiveCaption())
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -682,7 +693,7 @@ struct SettingsView: View {
                         .frame(width: 28, height: 28)
                         .foregroundStyle(Color.accentColor)
                     Text("Nearby places cache (dev)")
-                        .font(.body.weight(.medium))
+                        .font(.adaptiveBody().weight(.medium))
                         .foregroundStyle(Color.primary)
                     Spacer()
                 }
@@ -713,10 +724,10 @@ struct SettingsView: View {
                         .foregroundStyle(Color.orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Clear Device ID")
-                            .font(.body.weight(.medium))
+                            .font(.adaptiveBody().weight(.medium))
                             .foregroundStyle(Color.primary)
                         Text("For testing free credit abuse prevention")
-                            .font(.caption)
+                            .font(.adaptiveCaption())
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -815,10 +826,10 @@ struct SettingsView: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .font(.adaptiveBody().weight(.medium))
                     .foregroundStyle(Color.primary)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.adaptiveCaption())
                     .foregroundStyle(.secondary)
             }
             
@@ -899,7 +910,7 @@ struct SettingsView: View {
         HStack(spacing: 6) {
             ForEach(items, id: \.self) { item in
                 Text(item)
-                    .font(.caption)
+                    .font(.adaptiveCaption())
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 8)
@@ -953,9 +964,9 @@ private struct AudioGuidePickerSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                         Text("Settings")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                     }
                     .foregroundStyle(Color.accentColor)
                 }
@@ -965,7 +976,7 @@ private struct AudioGuidePickerSheet: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Select an audio guide narrator")
-                .font(.title2.weight(.semibold))
+                .font(.adaptiveTitle().weight(.semibold))
                 .foregroundStyle(Color.primary)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
@@ -1013,9 +1024,9 @@ private struct DeleteAccountConfirmationSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                         Text("Cancel")
-                            .font(.callout.weight(.semibold))
+                            .font(.adaptiveCallout().weight(.semibold))
                     }
                     .foregroundStyle(Color.accentColor)
                 }
@@ -1025,18 +1036,18 @@ private struct DeleteAccountConfirmationSheet: View {
             .padding(.top, BrandSpacing.large)
 
             Text("Delete your account?")
-                .font(.title2.weight(.bold))
+                .font(.adaptiveTitle().weight(.bold))
                 .foregroundStyle(Color.primary)
                 .padding(.horizontal, BrandSpacing.large)
 
             Text("This action is permanent. All your discoveries, credits, and data will be deleted and cannot be recovered.")
-                .font(.body)
+                .font(.adaptiveBody())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, BrandSpacing.large)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Type **delete my account** to confirm:")
-                    .font(.subheadline)
+                    .font(.adaptiveCallout())
                     .foregroundStyle(.secondary)
 
                 TextField("delete my account", text: $confirmationText)
@@ -1053,7 +1064,7 @@ private struct DeleteAccountConfirmationSheet: View {
                 onConfirm()
             } label: {
                 Text("Delete my account")
-                    .font(.headline)
+                    .font(.adaptiveBody().weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(canConfirm ? Color.red : Color.gray.opacity(0.3))
@@ -1089,7 +1100,7 @@ private struct DeletingAccountOverlay: View {
                     .foregroundStyle(.white)
 
                 Text("Deleting your account and data")
-                    .font(.body)
+                    .font(.adaptiveBody())
                     .foregroundStyle(.white.opacity(0.7))
             }
             .padding()

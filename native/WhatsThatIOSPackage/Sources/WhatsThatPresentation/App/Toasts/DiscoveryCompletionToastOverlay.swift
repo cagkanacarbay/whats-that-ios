@@ -14,9 +14,18 @@ struct DiscoveryCompletionToastOverlay: View {
     @Environment(\.colorScheme) private var colorScheme
     
     // Mini player constants (from MiniPlayerView)
-    private let miniPlayerHeight: CGFloat = 110
-    private let miniPlayerBottomPadding: CGFloat = 49 + 2
-    private let tabBarOffset: CGFloat = 49 + 8
+    // On iPad: artworkDiameter is 154, backgroundHeight is 118
+    private var miniPlayerHeight: CGFloat {
+        UIDevice.isIPad ? 154 : 110
+    }
+    
+    private var miniPlayerBottomPadding: CGFloat {
+        // Matches Mini Player bottom padding + gap
+        UIDevice.isIPad ? 20 + 8 : 49 + 2
+    }
+    private var tabBarOffset: CGFloat {
+        UIDevice.isIPad ? 24 : 49 + 8
+    }
     private let toastMiniPlayerGap: CGFloat = 8
     
     private var isMiniPlayerVisible: Bool {
@@ -66,46 +75,48 @@ struct DiscoveryCompletionToastOverlay: View {
                 wasGenerating: frontToast.generateAudioGuide
             )
             
-            ZStack(alignment: .topTrailing) {
-                DiscoveryCompletionToastView(
-                    toast: frontToast,
-                    onViewDiscovery: {
-                        onViewDiscovery(frontToast.discovery.id)
-                        sessionManager.dismissCompletionToast()
-                    },
-                    onPlayNow: {
-                        // Start playback and dismiss toast
-                        audioServices.playbackController.togglePlayback(for: frontToast.discovery)
-                        sessionManager.dismissCompletionToast()
-                    },
-                    onPlayNext: {
-                        // Add to queue as next and dismiss toast
-                        audioServices.queueStore.playNext(frontToast.discovery.id)
-                        sessionManager.dismissCompletionToast()
-                    },
-                    onAddToQueue: {
-                        // Add to end of queue and dismiss toast
-                        audioServices.queueStore.addToEnd(frontToast.discovery.id)
-                        sessionManager.dismissCompletionToast()
-                    },
-                    onGenerateAudio: {
-                        onGenerateAudio(frontToast.discovery)
-                        // Don't dismiss - let user see generating state
-                    },
-                    onDismiss: {
-                        sessionManager.dismissCompletionToast()
-                    },
-                    audioState: currentAudioState
-                )
-                
-                // Badge showing remaining toast count (if more than 1)
+            DiscoveryCompletionToastView(
+                toast: frontToast,
+                onViewDiscovery: {
+                    onViewDiscovery(frontToast.discovery.id)
+                    sessionManager.dismissCompletionToast()
+                },
+                onPlayNow: {
+                    // Start playback and dismiss toast
+                    audioServices.playbackController.togglePlayback(for: frontToast.discovery)
+                    sessionManager.dismissCompletionToast()
+                },
+                onPlayNext: {
+                    // Add to queue as next and dismiss toast
+                    audioServices.queueStore.playNext(frontToast.discovery.id)
+                    sessionManager.dismissCompletionToast()
+                },
+                onAddToQueue: {
+                    // Add to end of queue and dismiss toast
+                    audioServices.queueStore.addToEnd(frontToast.discovery.id)
+                    sessionManager.dismissCompletionToast()
+                },
+                onGenerateAudio: {
+                    onGenerateAudio(frontToast.discovery)
+                    // Don't dismiss - let user see generating state
+                },
+                onDismiss: {
+                    sessionManager.dismissCompletionToast()
+                },
+                audioState: currentAudioState
+            )
+            // Badge showing remaining toast count (if more than 1)
+            .overlay(alignment: .trailing) {
                 if toastCount > 1 {
                     pendingCountBadge(count: toastCount)
-                        .offset(x: -8, y: -8)
+                        .offset(x: 4)
                 }
             }
             .id(frontToast.id)
             .padding(.bottom, bottomPadding)
+            // iPad: Constrain width and center, slightly narrower than mini player
+            .frame(maxWidth: UIDevice.isIPad ? IPadLayout.toastMaxWidth : .infinity)
+            .frame(maxWidth: .infinity, alignment: .center)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.25), value: frontToast.id)
             // Also animate when audio state changes

@@ -12,9 +12,9 @@ struct BrandPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .fontWeight(.semibold)
+                .font(.adaptiveSystem(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+                .padding(.vertical, UIDevice.isIPad ? 18 : 14)
                 .contentShape(Rectangle())
                 .overlay(alignment: .trailing) {
                     if isLoading {
@@ -84,9 +84,9 @@ struct BrandSecondaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .fontWeight(.semibold)
+                .font(.adaptiveSystem(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+                .padding(.vertical, UIDevice.isIPad ? 18 : 14)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -149,13 +149,13 @@ struct BrandSocialButton: View {
                 kind.image
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 20, height: 20)
+                    .frame(width: UIDevice.isIPad ? 24 : 20, height: UIDevice.isIPad ? 24 : 20)
                 Text(kind.title)
-                    .fontWeight(.medium)
+                    .font(.adaptiveSystem(size: 17, weight: .medium))
                 Spacer()
             }
             .frame(maxWidth: .infinity) // Ensure full-width tappable content
-            .padding(.vertical, 12)
+            .padding(.vertical, UIDevice.isIPad ? 16 : 12)
             .padding(.horizontal, 16)
             .contentShape(Rectangle()) // Make the entire visual area clickable
         }
@@ -212,25 +212,25 @@ struct BrandFloatingField: View {
                 RoundedRectangle(cornerRadius: BrandCornerRadius.medium)
                     .stroke(borderColor, lineWidth: 1)
                     .background((colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background).cornerRadius(BrandCornerRadius.medium))
-                    .frame(height: 52)
+                    .frame(height: UIDevice.isIPad ? 64 : 52)
 
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.adaptiveSystem(size: 14, weight: .medium)) // Increased from 12 for better readability
                     .foregroundStyle(labelColor)
                     .padding(.horizontal, 10)
                     .background(colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background)
-                    .offset(y: -26)
+                    .offset(y: UIDevice.isIPad ? -32 : -26)
 
                 HStack {
                     inputField
                         .padding(.horizontal, 16)
-                        .frame(height: 52)
+                        .frame(height: UIDevice.isIPad ? 64 : 52)
                 }
             }
 
             if let errorText, !errorText.isEmpty {
                 Text(errorText)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.adaptiveSystem(size: 12, weight: .medium))
                     .foregroundStyle(Color.red.opacity(0.85))
                     .accessibilityIdentifier("field.error.\(title)")
             }
@@ -257,9 +257,11 @@ struct BrandFloatingField: View {
             HStack {
                 if isSecure {
                     SecureField(placeholder, text: $text)
+                        .font(.adaptiveSystem(size: 17)) // Explicit adaptive font for input
                         .applyFocus(focus)
                 } else {
                     TextField(placeholder, text: $text)
+                        .font(.adaptiveSystem(size: 17)) // Explicit adaptive font for input
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
                         .applyFocus(focus)
@@ -270,7 +272,7 @@ struct BrandFloatingField: View {
                         isSecure.toggle()
                     } label: {
                         Image(systemName: isSecure ? "eye.slash" : "eye")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.adaptiveSystem(size: 16, weight: .medium))
                             .foregroundStyle(labelColor)
                     }
                     .buttonStyle(.plain)
@@ -278,12 +280,14 @@ struct BrandFloatingField: View {
             }
         case .email:
             TextField(placeholder, text: $text)
+                .font(.adaptiveSystem(size: 17)) // Explicit adaptive font for input
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .keyboardType(.emailAddress)
                 .applyFocus(focus)
         case .plain:
             TextField(placeholder, text: $text)
+                .font(.adaptiveSystem(size: 17)) // Explicit adaptive font for input
                 .applyFocus(focus)
         }
     }

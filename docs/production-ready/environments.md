@@ -104,6 +104,40 @@ supabase functions secrets set DENO_ENV=production LOG_LEVEL=info
 supabase functions secrets set DENO_ENV=development LOG_LEVEL=debug
 ```
 
+## API Keys: Shared vs Separate
+
+As of January 2026, here's the configuration for dev (`cywshvmspnvimucwqarc`) vs production (`vipghlhvnrdheoydynty`):
+
+### ✅ Shared Between Dev & Production (Same Keys)
+
+| Secret | Reason |
+|--------|--------|
+| `APNS_TEAM_ID` | Apple Team ID - same for all apps |
+| `APNS_KEY_ID` | APNs auth key - works for both sandbox and production |
+| `APNS_PRIVATE_KEY` | The .p8 key content - same key works for both environments |
+| `APNS_BUNDLE_ID` | App bundle ID: `app.whatsthat.ios` |
+| `IOS_BUNDLE_ID` | Same as above: `app.whatsthat.ios` |
+| `FISH_AUDIO_API_KEY` | TTS service - usage tracked under same account |
+| `GOOGLE_MAPS_API_KEY` | Places API - usage tracked under same account |
+
+### ⚠️ Separate Per Environment (Different Keys)
+
+| Secret | Production | Development | Reason |
+|--------|------------|-------------|--------|
+| `DENO_ENV` | `production` | `development` | Controls CORS, logging behavior |
+| `LOG_LEVEL` | `info` | `debug` | Verbose logs in dev only |
+| `APNS_ENVIRONMENT` | `production` | `sandbox` | APNs server endpoint differs |
+| `OPENAI_API_KEY` | Prod key | Dev key (separate) | Separate billing/tracking |
+| `GEMINI_API_KEY` | Prod key | Dev key (separate) | Separate billing/tracking |
+| `ANTHROPIC_API_KEY` | Prod key | Dev key (separate) | Separate billing/tracking |
+
+### Auto-Injected by Supabase (No manual config needed)
+
+- `SUPABASE_URL` - Project URL
+- `SUPABASE_ANON_KEY` - Anon/public key
+- `SUPABASE_SERVICE_ROLE_KEY` - Service role key
+- `SUPABASE_DB_URL` - Database connection string
+
 ## Website (`../whats-that-web`)
 
 - The SPA calls the edge function at:

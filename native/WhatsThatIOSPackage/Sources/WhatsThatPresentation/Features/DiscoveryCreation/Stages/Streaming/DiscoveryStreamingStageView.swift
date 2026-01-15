@@ -252,7 +252,7 @@ struct DiscoveryStreamingStageView: View {
             }
             .applyingIf(UIDevice.isIPad) { view in
                 view.fullScreenCover(isPresented: $isImageFullscreenPresented) {
-                    if let image = previewImage {
+                    if previewImage != nil {
                         DiscoveryDetailImageFullscreenView(
                             discoveryId: state.discoverySummary?.id ?? 0,
                             imageURL: nil,
@@ -264,7 +264,7 @@ struct DiscoveryStreamingStageView: View {
             }
             .applyingIf(!UIDevice.isIPad) { view in
                 view.sheet(isPresented: $isImageFullscreenPresented) {
-                    if let image = previewImage {
+                    if previewImage != nil {
                         DiscoveryDetailImageFullscreenView(
                             discoveryId: state.discoverySummary?.id ?? 0,
                             imageURL: nil,

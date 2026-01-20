@@ -26,37 +26,44 @@ This feature implements two core systems:
 
 ### Client-Side Caching
 
-- Config cached in UserDefaults for **24 hours**
-- Reduces unnecessary network calls
-- Falls back to expired cache if network fails
+- Config cached in memory with **1-hour staleness check**
+- Fresh fetch on every app launch
+- On foreground resume: refresh if config > 1 hour old
+- Maintenance mode cached for 3 hours to survive fetch failures
+- No repeated network calls during active use
 
 ### App Flow
 
 ```
 App Launch
     ↓
-Check for pending acceptance → Submit if exists
-    ↓
 Load app content normally (non-blocking)
     ↓
-Background: Check cache (24h) or fetch config
+Background: Fetch config (fresh on every launch)
+    ↓
+Check blocking conditions (maintenance, min_supported_version)
+    ↓
+If blocking → Show blocking screen immediately
     ↓
 Check user_status.needs_tos/privacy_acceptance
     ↓
 ┌─────────────────────────────────────────┐
 │ If ToS/Privacy updated:                  │
+│   → Wait for safe screen (Home/Settings)│
+│   → Wait for onboarding to complete     │
 │   → Show modal with checkbox             │
 │   → User MUST tick + accept              │
-│   → Store pending immediately            │
-│   → Dismiss modal immediately            │
-│   → Background: Retry 5x over 15 min     │
-├─────────────────────────────────────────┤
+│   → Retry up to 3x automatically        │
+│   → On failure: Show error, user retries│
+│   → Modal stays open until confirmed    │
+└─────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────┐
 │ If App version updated:                  │
 │   → Soft: Remind at 1/3/7 days (local)  │
 │   → Force: 7-day grace from first seen   │
+│   → Force (Expired/Min Supported): Block │
 └─────────────────────────────────────────┘
-    ↓
-Continue to main app
 ```
 
 ## Status

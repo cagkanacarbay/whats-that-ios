@@ -36,7 +36,7 @@ The `message` field is **optional but recommended** — it will be shown to user
 ### 4. Verify
 
 - Launch app as a test user who has accepted ToS 1.0
-- Should see Legal Acceptance modal with checkbox
+- Should see Legal Acceptance modal with checkbox (immediately on next launch)
 - Accept → verify new row in `user_agreements` table
 - Modal dismisses, app continues
 
@@ -105,8 +105,27 @@ VALUES (
 );
 ```
 
+> [!NOTE]
+> **How force updates work:** The server returns `last_force_version` (the most recent force update version) in the config response. The client compares: if `user_version < last_force_version` → force update required with 7-day grace period.
+>
+> This means even if you later release v1.4.0 (soft), users on v1.0.0 will still see a force update because `1.0.0 < 1.3.0` (the last_force_version).
+
+**Grace Period Behavior:**
+- Users on version < `last_force_version`: 7-day grace period, then blocking
+- Users on version < `min_supported_version`: Blocked immediately (no grace period)
+
 > [!IMPORTANT]
-> For force updates, users have 7 days from when they **first see** the update to update before the app blocks them.
+> **Grace period does NOT reset with new force versions.** Once a user sees their first force update, the 7-day countdown begins and continues regardless of subsequent force releases. This prevents users from indefinitely delaying updates.
+
+### 4. Set Min Supported Version (Optional - Immediate Block)
+
+If you need to immediately block old versions (e.g., deprecated API), update `app_config`:
+
+```sql
+UPDATE public.app_config 
+SET min_supported_version = '1.2.0';
+```
+**Effect:** Any user on version < 1.2.0 will be blocked IMMEDIATELY on next launch (no grace period).
 
 ---
 
@@ -143,26 +162,26 @@ VALUES (
 
 ---
 
-## Rollback Procedure
+## Corrections (No Rollback)
 
-If you released a version by mistake:
+> [!NOTE]
+> **Rollbacks are not supported.** The version log is append-only for audit trail integrity.
 
-**Option 1: Delete the entry**
+If you made a mistake (e.g., wrong version number, typo in message):
+
+**Publish a corrected version:**
 ```sql
-DELETE FROM public.version_log 
-WHERE type = 'app' AND version = '1.3.0';
-```
-
-**Option 2: Insert corrected version**
-```sql
-INSERT INTO public.version_log (type, version, message, app_update_type)
+-- Example: You accidentally published ToS 1.2 but meant 1.1
+-- Simply publish the correct version as 1.1
+INSERT INTO public.version_log (type, version, message)
 VALUES (
-  'app',
-  '1.2.0',  -- Previous version users have
-  'Reverted update requirement.',
-  'soft'
+  'tos',
+  '1.1',  -- Correct version
+  'Corrected terms update.'
 );
 ```
+
+The system always uses `ORDER BY released_at DESC LIMIT 1`, so the newest entry wins.
 
 ---
 

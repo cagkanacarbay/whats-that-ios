@@ -45,6 +45,7 @@ struct MainTabView: View {
     /// Binding indicating whether the settings sheet is currently presented
     @Binding private var isSettingsPresented: Bool
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
+    private let onScreenSafetyChanged: ((Bool) -> Void)?
 
     init(
         storeObserver: DiscoveryStoreObserver,
@@ -56,7 +57,8 @@ struct MainTabView: View {
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
         isSettingsPresented: Binding<Bool> = .constant(false),
-        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
+        onScreenSafetyChanged: ((Bool) -> Void)? = nil
     ) {
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
@@ -64,6 +66,7 @@ struct MainTabView: View {
         self.onSettings = onSettings
         self._isSettingsPresented = isSettingsPresented
         self.makeCreditsViewModel = makeCreditsViewModel
+        self.onScreenSafetyChanged = onScreenSafetyChanged
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
         _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
         _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
@@ -261,6 +264,12 @@ struct MainTabView: View {
     }
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
+        // Track screen safety for compliance overlay deferral
+        // Discoveries and Audio Guides are "safe" screens (not mid-action)
+        // Camera and Upload are "unsafe" (user may be capturing/selecting)
+        let isSafeScreen = (tab == .discoveries || tab == .audioGuides) && activeOverlayTab == nil
+        onScreenSafetyChanged?(isSafeScreen)
+
         switch tab {
         case .camera:
             // Check if upload is analyzing - unsubscribe to allow background completion
@@ -434,6 +443,13 @@ struct MainTabView: View {
         guard activeOverlayTab == tab else { return }
         if !shouldShowOverlay(for: phase) {
             activeOverlayTab = nil
+            // Screen becomes safe when overlay dismissed on discoveries/audioGuides
+            if selectedTab == .discoveries || selectedTab == .audioGuides {
+                onScreenSafetyChanged?(true)
+            }
+        } else {
+            // Screen is unsafe when overlay is active
+            onScreenSafetyChanged?(false)
         }
     }
 

@@ -8,11 +8,19 @@ public final class AppRootViewModel: ObservableObject {
     @Published public private(set) var isPerformingAuthAction = false
     @Published public private(set) var passwordResetUser: AuthenticatedUser?
 
+    // Compliance state
+    @Published public private(set) var complianceBlockingState: ComplianceBlockingState?
+    @Published public private(set) var complianceNonBlockingState: ComplianceNonBlockingState?
+    @Published public private(set) var pendingLegalAcceptance: Bool = false
+
     private let authUseCase: AuthUseCase
     private let onboardingUseCase: OnboardingUseCase
     private let flowResolver: AppFlowResolver
     private let clearAllUserData: () async -> Void
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
+    private let complianceUseCase: ComplianceUseCase
+    private let userAppVersion: String
+    private let resolveIntroState: () async -> Void
 
     private var currentFlags = OnboardingFlags()
     private var latestSession: AuthSession = .signedOut
@@ -23,13 +31,19 @@ public final class AppRootViewModel: ObservableObject {
         onboardingUseCase: OnboardingUseCase,
         flowResolver: AppFlowResolver,
         clearAllUserData: @escaping () async -> Void,
-        voiceoverPreferencesStore: VoiceoverPreferencesStore
+        voiceoverPreferencesStore: VoiceoverPreferencesStore,
+        complianceUseCase: ComplianceUseCase,
+        userAppVersion: String = Bundle.main.appVersion,
+        resolveIntroState: @escaping () async -> Void = {}
     ) {
         self.authUseCase = authUseCase
         self.onboardingUseCase = onboardingUseCase
         self.flowResolver = flowResolver
         self.clearAllUserData = clearAllUserData
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
+        self.complianceUseCase = complianceUseCase
+        self.userAppVersion = userAppVersion
+        self.resolveIntroState = resolveIntroState
 
         Task(priority: .utility) {
             await DiscoveryAssetCache.shared.purgeExpiredEntries()
@@ -272,19 +286,115 @@ public final class AppRootViewModel: ObservableObject {
                 
                 // 2. Bind the free credits alert tracker
                 await FreeCreditsAlertTracker.shared.bind(to: userId)
-                
-                // 3. Now load flags with correct user binding
+
+                // 3. Resolve intro state for returning users (reinstall/new device)
+                await self.resolveIntroState()
+
+                // 4. Now load flags with correct user binding
                 let flags = await onboardingUseCase.flags()
-                
-                // 4. Resolve flow state with correct user flags
+
+                // 5. Resolve flow state with correct user flags
                 await MainActor.run {
                     self.currentFlags = flags
                     self.flowState = self.flowResolver.resolve(session: session, flags: flags)
                 }
+
+                // 6. Check compliance after user is authenticated
+                await self.checkCompliance()
             }
         } else {
             // Not signed in - resolve immediately with current flags
             flowState = flowResolver.resolve(session: session, flags: currentFlags)
+
+            // Clear compliance state when signed out
+            complianceBlockingState = nil
+            complianceNonBlockingState = nil
+            pendingLegalAcceptance = false
+        }
+    }
+
+    // MARK: - Compliance
+
+    /// Checks compliance status (maintenance, version updates, legal acceptance)
+    public func checkCompliance() async {
+        do {
+            let config = try await complianceUseCase.fetchConfig(forceFresh: true)
+            await updateComplianceState(config: config)
+        } catch {
+            // Check for cached maintenance state on failure
+            if let maintenanceState = await complianceUseCase.getMaintenanceStateForOffline() {
+                await MainActor.run {
+                    self.complianceBlockingState = .maintenance(message: maintenanceState.message)
+                }
+            }
+            // If no cached maintenance state, proceed normally (fail-open)
+        }
+    }
+
+    /// Refreshes compliance if the cached config is stale
+    public func refreshComplianceIfStale() async {
+        guard await complianceUseCase.isConfigStale() else { return }
+        await checkCompliance()
+    }
+
+    /// Accepts terms and/or privacy policy
+    /// - Parameters:
+    ///   - tosVersion: The ToS version to accept (nil if not accepting)
+    ///   - privacyVersion: The Privacy version to accept (nil if not accepting)
+    public func acceptTerms(tosVersion: String?, privacyVersion: String?) async throws {
+        print("[ViewModel] acceptTerms called - tos=\(tosVersion ?? "nil"), privacy=\(privacyVersion ?? "nil")")
+        do {
+            let response = try await complianceUseCase.acceptTerms(tosVersion: tosVersion, privacyVersion: privacyVersion)
+            print("[ViewModel] acceptTerms success: \(response)")
+        } catch {
+            print("[ViewModel] acceptTerms ERROR: \(error)")
+            throw error
+        }
+
+        // Refresh compliance state
+        if let config = await complianceUseCase.getCachedConfig() {
+            await updateComplianceState(config: config)
+        }
+
+        await MainActor.run {
+            self.pendingLegalAcceptance = false
+        }
+    }
+
+    /// Dismisses the soft update reminder
+    public func dismissSoftUpdateReminder() async {
+        await complianceUseCase.markSoftReminderShown()
+        await MainActor.run {
+            self.complianceNonBlockingState = nil
+        }
+    }
+
+    private func updateComplianceState(config: AppConfigResponse) async {
+        let blockingState = await complianceUseCase.determineBlockingState(
+            config: config,
+            userAppVersion: userAppVersion
+        )
+
+        let nonBlockingState: ComplianceNonBlockingState?
+        if blockingState == nil {
+            nonBlockingState = await complianceUseCase.determineNonBlockingState(
+                config: config,
+                userAppVersion: userAppVersion
+            )
+        } else {
+            nonBlockingState = nil
+        }
+
+        await MainActor.run {
+            self.complianceBlockingState = blockingState
+            self.complianceNonBlockingState = nonBlockingState
+
+            // Set pending flag for legal acceptance (used for safe-screen deferral)
+            if case .legalAcceptance = blockingState {
+                self.pendingLegalAcceptance = true
+            } else {
+                self.pendingLegalAcceptance = false
+            }
         }
     }
 }

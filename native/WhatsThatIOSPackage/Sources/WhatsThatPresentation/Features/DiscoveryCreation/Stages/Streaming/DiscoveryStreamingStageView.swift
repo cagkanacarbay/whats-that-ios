@@ -220,14 +220,19 @@ struct DiscoveryStreamingStageView: View {
                     }
                 }
                 .onChange(of: state.isStreaming) {
+                    // Capture values NOW before async dispatch to avoid race condition.
+                    // The `state` computed property reads from viewModel.analysisState, which
+                    // could become nil (returning default with isStreaming=true) if the view
+                    // hierarchy changes before the async block executes.
+                    let isStreamingEnded = !state.isStreaming
+                    let finalMarkdown = currentMarkdown
                     // Defer to next runloop to prevent "update multiple times per frame" error
                     DispatchQueue.main.async {
-                        if !state.isStreaming {
+                        if isStreamingEnded {
                             // Streaming ended: snap to final text (no animation) to avoid cut-offs
                             markdownAnimationTask?.cancel()
-                            let final = currentMarkdown
-                            displayedMarkdown = final
-                            evaluateLoaderCleared(with: final)
+                            displayedMarkdown = finalMarkdown
+                            evaluateLoaderCleared(with: finalMarkdown)
                             loaderCleared = true
                             logStreamEnded()
                         }

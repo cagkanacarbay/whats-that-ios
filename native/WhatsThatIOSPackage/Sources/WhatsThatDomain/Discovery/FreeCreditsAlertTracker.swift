@@ -70,4 +70,50 @@ public actor FreeCreditsAlertTracker {
         defaults.set(false, forKey: key("hasShownCreditsExhausted"))
         print("[FreeCreditsAlertTracker] Reset for testing - alert will show again")
     }
+
+    // MARK: - Intro State Resolution (for reinstalls / multi-device)
+
+    /// Performs a one-time sanity check for returning users on fresh install/new device.
+    /// Call this once after user binding with server-fetched data.
+    ///
+    /// If user has:
+    /// - > 5 credits: They bought credits, silently complete intro
+    /// - >= 3 discoveries: They've completed the intro flow
+    /// - 0 credits: Let normal alert flow handle it (will show alert)
+    /// - Otherwise: Stay in intro mode
+    ///
+    /// - Parameters:
+    ///   - balance: Current credit balance from server
+    ///   - discoveryCount: Number of discoveries the user has made
+    /// - Returns: `true` if intro is complete (was already complete or resolved now), `false` if still in intro
+    public func resolveIntroStateIfNeeded(balance: Int, discoveryCount: Int) -> Bool {
+        // Already complete locally - nothing to check
+        guard !hasShownCreditsExhaustedAlert else {
+            print("[FreeCreditsAlertTracker] Intro already complete, skipping sanity check")
+            return true
+        }
+
+        // User bought credits (more than initial 5)
+        if balance > 5 {
+            markIntroCompletedSilently(reason: "balance > 5 (purchased credits)")
+            return true
+        }
+
+        // User has made 3+ discoveries - they've completed the intro flow
+        if discoveryCount >= 3 {
+            markIntroCompletedSilently(reason: "discoveryCount >= 3")
+            return true
+        }
+
+        print("[FreeCreditsAlertTracker] Sanity check: still in intro (balance=\(balance), discoveries=\(discoveryCount))")
+        return false
+    }
+
+    /// Silently marks intro as complete without showing the exhausted alert.
+    /// Used when sanity check determines user has already completed intro on another device.
+    private func markIntroCompletedSilently(reason: String) {
+        guard currentUserId != nil else { return }
+        defaults.set(true, forKey: key("hasShownCreditsExhausted"))
+        print("[FreeCreditsAlertTracker] Intro completed via sanity check: \(reason)")
+    }
 }

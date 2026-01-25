@@ -29,6 +29,8 @@ public struct AppDependencyContainer: Sendable {
     private let creditsStore: any CreditsStore
     private let creditBalanceStore: CreditBalanceStore
     private let locationService: DiscoveryLocationService
+    public let complianceUseCase: ComplianceUseCase
+    public let complianceLocalStore: ComplianceLocalStore
 #endif
 
 #if os(iOS)
@@ -45,7 +47,9 @@ public struct AppDependencyContainer: Sendable {
         creditsRepository: DiscoveryCreditsRepository,
         creditsStore: any CreditsStore,
         creditBalanceStore: CreditBalanceStore,
-        locationService: DiscoveryLocationService
+        locationService: DiscoveryLocationService,
+        complianceUseCase: ComplianceUseCase,
+        complianceLocalStore: ComplianceLocalStore
     ) {
         self.configuration = configuration
         self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
@@ -63,6 +67,8 @@ public struct AppDependencyContainer: Sendable {
         self.creditsStore = creditsStore
         self.creditBalanceStore = creditBalanceStore
         self.locationService = locationService
+        self.complianceUseCase = complianceUseCase
+        self.complianceLocalStore = complianceLocalStore
     }
 #else
     init(
@@ -210,6 +216,14 @@ public extension AppDependencyContainer {
             photoSavePreferencesStore: photoSavePreferencesStore,
             photoLibrarySaveService: photoLibrarySaveService
         )
+
+        // Compliance/Version Control
+        let appConfigRepository = SupabaseAppConfigRepository(client: client)
+        let complianceLocalStore = UserDefaultsComplianceLocalStore()
+        let complianceUseCase = ComplianceUseCase(
+            repository: appConfigRepository,
+            localStore: complianceLocalStore
+        )
         #endif
 
         #if os(iOS)
@@ -226,7 +240,9 @@ public extension AppDependencyContainer {
             creditsRepository: creditsRepository,
             creditsStore: creditsStore,
             creditBalanceStore: creditBalanceStore,
-            locationService: locationService
+            locationService: locationService,
+            complianceUseCase: complianceUseCase,
+            complianceLocalStore: complianceLocalStore
         )
 #else
         return AppDependencyContainer(
@@ -343,6 +359,42 @@ public extension AppDependencyContainer {
         }
     }
 
+    /// Resolves intro state for returning users on fresh install/new device.
+    /// Fetches balance and discovery count from server, then runs sanity check.
+    /// Should be called once after user binding during app startup.
+    func resolveIntroStateIfNeeded() async {
+        // Only run if intro is not already complete locally
+        guard await !FreeCreditsAlertTracker.shared.hasShownCreditsExhaustedAlert else {
+            return
+        }
+
+        // Fetch balance from server
+        let balance: Int
+        do {
+            balance = try await creditBalanceStore.refresh(force: true)
+        } catch {
+            print("[IntroState] Failed to fetch balance, skipping sanity check: \(error)")
+            return
+        }
+
+        // Fetch discoveries to check count (we need >= 3 to unlock)
+        // Fetching 3 is enough - if we get 3, user has at least 3
+        let discoveryCount: Int
+        do {
+            let discoveries = try await discoveryRepository.fetchDiscoveries(limit: 3, before: nil)
+            discoveryCount = discoveries.count
+        } catch {
+            print("[IntroState] Failed to fetch discoveries, skipping sanity check: \(error)")
+            return
+        }
+
+        // Run the sanity check
+        _ = await FreeCreditsAlertTracker.shared.resolveIntroStateIfNeeded(
+            balance: balance,
+            discoveryCount: discoveryCount
+        )
+    }
+
     #if DEBUG
     /// Debug-only: Override the local credit cache (does not sync to server).
     func setCreditBalance(_ credits: Int) async {
@@ -420,6 +472,10 @@ public extension AppDependencyContainer {
         
         // Unbind free credits alert tracker (does NOT delete per-user data)
         await FreeCreditsAlertTracker.shared.unbind()
+
+        // Clear compliance cache (user-specific state)
+        await complianceUseCase.clearCache()
+        await complianceLocalStore.clearAll()
     }
 }
 #endif

@@ -16,6 +16,9 @@ public struct RootContentView: View {
     @State private var settingsSheetDetent: PresentationDetent = .fraction(0.8)
     @State private var mainTabDestination: MainTabDestination = .discoveries
     @AppStorage(AppAppearance.storageKey) private var storedAppearance = AppAppearance.system.rawValue
+    @State private var currentScreenIsSafe: Bool = true
+    @State private var showSoftUpdateSheet: Bool = false
+    @State private var showForceGraceSheet: Bool = false
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     /// Single shared AudioServicesContainer instance created once and passed to MainTabView
@@ -36,6 +39,8 @@ public struct RootContentView: View {
     private let resetIPoPPreferences: () async -> Void
     private let clearAllUserData: () async -> Void
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
+    private let complianceUseCase: ComplianceUseCase
+    private let resolveIntroState: () async -> Void
     #if DEBUG
     private let setCreditBalance: (Int) async -> Void
     #endif
@@ -65,7 +70,9 @@ public struct RootContentView: View {
         resetIPoPPreferences: @escaping () async -> Void = {},
         clearAllUserData: @escaping () async -> Void,
         voiceoverPreferencesStore: VoiceoverPreferencesStore,
-        setCreditBalance: @escaping (Int) async -> Void = { _ in }
+        complianceUseCase: ComplianceUseCase,
+        setCreditBalance: @escaping (Int) async -> Void = { _ in },
+        resolveIntroState: @escaping () async -> Void = {}
     ) {
         #if DEBUG
         self.setCreditBalance = setCreditBalance
@@ -95,7 +102,9 @@ public struct RootContentView: View {
         self.resetIPoPPreferences = resetIPoPPreferences
         self.clearAllUserData = clearAllUserData
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
-        
+        self.complianceUseCase = complianceUseCase
+        self.resolveIntroState = resolveIntroState
+
         // Compose clearAllUserData with observer reset to clear all UI state on sign-out
         let observerToReset = storeObserver
         let composedClearAll: () async -> Void = {
@@ -104,14 +113,16 @@ public struct RootContentView: View {
                 observerToReset.reset()
             }
         }
-        
+
         _viewModel = StateObject<AppRootViewModel>(
             wrappedValue: AppRootViewModel(
                 authUseCase: authUseCase,
                 onboardingUseCase: onboardingUseCase,
                 flowResolver: flowResolver,
                 clearAllUserData: composedClearAll,
-                voiceoverPreferencesStore: voiceoverPreferencesStore
+                voiceoverPreferencesStore: voiceoverPreferencesStore,
+                complianceUseCase: complianceUseCase,
+                resolveIntroState: resolveIntroState
             )
         )
     }
@@ -123,6 +134,7 @@ public struct RootContentView: View {
 
             mainContent
             passwordResetOverlay
+            complianceOverlay
         }
         .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         .animation(.easeInOut, value: viewModel.flowState)
@@ -202,6 +214,44 @@ public struct RootContentView: View {
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
+        .sheet(isPresented: $showSoftUpdateSheet) {
+            if case .softUpdateReminder(let version, let url, let message) = viewModel.complianceNonBlockingState {
+                SoftUpdatePromptView(
+                    targetVersion: version,
+                    message: message,
+                    onUpdate: {
+                        if let appStoreUrl = URL(string: url) {
+                            UIApplication.shared.open(appStoreUrl)
+                        }
+                        showSoftUpdateSheet = false
+                    },
+                    onDismiss: {
+                        Task { await viewModel.dismissSoftUpdateReminder() }
+                        showSoftUpdateSheet = false
+                    }
+                )
+                .presentationDetents([.medium])
+            }
+        }
+        .sheet(isPresented: $showForceGraceSheet) {
+            if case .forceUpdateGrace(let version, let days, let url, let message) = viewModel.complianceNonBlockingState {
+                ForceUpdateGracePromptView(
+                    targetVersion: version,
+                    daysRemaining: days,
+                    message: message,
+                    onUpdate: {
+                        if let appStoreUrl = URL(string: url) {
+                            UIApplication.shared.open(appStoreUrl)
+                        }
+                        showForceGraceSheet = false
+                    },
+                    onDismiss: {
+                        showForceGraceSheet = false
+                    }
+                )
+                .presentationDetents([.medium])
+            }
+        }
         .alert(
             authError?.alertTitle ?? "Something went wrong",
             isPresented: Binding(
@@ -270,6 +320,8 @@ public struct RootContentView: View {
                     } else {
                         // print("[App][ScenePhase] -> active (flow=main) but no startLocationTracking")
                     }
+                    // Refresh compliance if stale when app returns to foreground
+                    Task { await viewModel.refreshComplianceIfStale() }
                 } else {
                     // print("[App][ScenePhase] -> active (flow=\(String(describing: viewModel.flowState))) not starting tracking")
                 }
@@ -277,6 +329,17 @@ public struct RootContentView: View {
                 // print("[App][ScenePhase] -> \(newPhase == .background ? "background" : "inactive") stopping location tracking")
                 stopLocationTracking?()
             @unknown default:
+                break
+            }
+        }
+        .onChange(of: viewModel.complianceNonBlockingState) { _, newValue in
+            guard currentScreenIsSafe else { return }
+            switch newValue {
+            case .softUpdateReminder:
+                showSoftUpdateSheet = true
+            case .forceUpdateGrace:
+                showForceGraceSheet = true
+            case .none:
                 break
             }
         }
@@ -432,7 +495,10 @@ public struct RootContentView: View {
                     isSettingsPresented = true
                 },
                 isSettingsPresented: $isSettingsPresented,
-                makeCreditsViewModel: makeCreditsViewModel
+                makeCreditsViewModel: makeCreditsViewModel,
+                onScreenSafetyChanged: { isSafe in
+                    currentScreenIsSafe = isSafe
+                }
             )
             .onAppear {
                 mainTabDestination = .discoveries
@@ -473,6 +539,45 @@ public struct RootContentView: View {
             )
             .transition(.opacity)
             .zIndex(1)
+        }
+    }
+
+    @ViewBuilder
+    private var complianceOverlay: some View {
+        // Only show blocking overlays when:
+        // 1. In main app state (authenticated and past onboarding)
+        // 2. There's a blocking compliance state
+        // 3. User is on a safe screen (Discoveries or Audio Guides tab, not in creation flow)
+        //
+        // This prevents compliance overlays from interrupting the discovery creation flow,
+        // which has its own specialized flow logic that should not be disrupted.
+        if case .main = viewModel.flowState,
+           let blockingState = viewModel.complianceBlockingState,
+           currentScreenIsSafe {
+            ComplianceOverlayView(
+                blockingState: blockingState,
+                onAcceptTerms: { tosVersion, privacyVersion in
+                    do {
+                        try await viewModel.acceptTerms(tosVersion: tosVersion, privacyVersion: privacyVersion)
+                        return .success(())
+                    } catch {
+                        return .failure(error)
+                    }
+                },
+                onSignOut: {
+                    try? await viewModel.signOut()
+                },
+                onOpenAppStore: { url in
+                    if let url = URL(string: url) {
+                        UIApplication.shared.open(url)
+                    }
+                },
+                onCheckAgain: {
+                    await viewModel.checkCompliance()
+                }
+            )
+            .transition(.opacity)
+            .zIndex(2)
         }
     }
 

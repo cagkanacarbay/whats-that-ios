@@ -29,7 +29,7 @@ Our Supabase + Google credentials flow from XCConfig files into `Config/AppInfo.
 
 ## 2. Remote Dependencies Toggle (`USE_REMOTE_DEPS`)
 
-SwiftPM packages (Supabase, Google Sign-In, Nuke, etc.) are enabled by default. The manifest treats anything other than `USE_REMOTE_DEPS=0` as “remote deps on”.
+SwiftPM packages (Supabase, Google Sign-In, Nuke, etc.) are enabled by default. The manifest treats anything other than `USE_REMOTE_DEPS=0` as "remote deps on".
 
 | Scenario | Action |
 | --- | --- |
@@ -44,7 +44,7 @@ Add an environment variable `USE_REMOTE_DEPS` with value `1` under *Scheme → R
 ## 3. Building & Running Today
 
 - **Xcode Workspace:** Open `native/WhatsThatIOS.xcworkspace`. The `WhatsThatIOS` scheme already sets `USE_REMOTE_DEPS=1`.
-- **Simulator Run:** Select an iOS 18 simulator (e.g., iPhone 16 Pro) and build/run. On first launch you’ll see onboarding → auth → post-onboarding → feed.
+- **Simulator Run:** Select an iOS 18 simulator (e.g., iPhone 16 Pro) and build/run. On first launch you'll see onboarding → auth → post-onboarding → feed.
 - **Command-line Run (MCP tooling or xcodebuild):**
   ```bash
   xcodebuild \
@@ -64,4 +64,47 @@ Add an environment variable `USE_REMOTE_DEPS` with value `1` under *Scheme → R
 - Any TestFlight or App Store submissions should use a production environment XCConfig with live Supabase/Google credentials and `USE_REMOTE_DEPS` left at its default (enabled).
 - Keep `Config/AppInfo.plist` in sync with environment values; if a build ships without Supabase keys the app will now terminate at launch so the misconfiguration is obvious.
 
-That’s the full setup we’re running today. Update this document whenever environment includes or build steps change.***
+## 6. Supabase Database Migrations
+
+Migration files live in `supabase/migrations/`. Follow these conventions:
+
+### Naming Format
+
+Use the **timestamp format** `YYYYMMDDHHMMSS_description.sql`:
+
+```
+20260120143000_version_control.sql
+20251230002500_create_initial_credit_grants_table.sql
+```
+
+- **Timestamp** = date + time in 24-hour format (ensures global uniqueness and correct ordering)
+- **Description** = lowercase with underscores, describing the change
+
+> [!IMPORTANT]
+> This is Supabase's recommended format. Avoid custom formats like `YYYYMMDD##` which can cause ordering issues with multiple same-day migrations.
+
+### Creating New Migrations
+
+```bash
+supabase migration new my_migration_name
+```
+
+This auto-generates the timestamp prefix based on current UTC time.
+
+### Applying Migrations
+
+```bash
+# Push pending migrations to remote database
+supabase db push
+
+# Check migration status
+supabase migration list
+```
+
+### Already-Applied Migrations
+
+Once a migration is pushed to a remote database, its filename is stored in `supabase_migrations.schema_migrations`. **Do not rename** applied migrations—the new name won't match the recorded history and will cause the migration to re-run or fail.
+
+---
+
+That's the full setup we're running today. Update this document whenever environment includes or build steps change.

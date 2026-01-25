@@ -26,15 +26,22 @@ public final class SupabaseNearbyPlacesFetcher: NearbyPlacesFetching {
     ) async throws -> [NearbyPlace] {
         print("[Nearby] Requesting Edge nearby-places: lat=\(latitude), lon=\(longitude), radius=\(radius)")
         guard let supabaseURL = configuration.supabaseURL else {
+            print("[Nearby] ERROR: Invalid configuration - no supabaseURL")
             throw NearbyPlacesFetcherError.invalidConfiguration
         }
 
         guard let accessToken = client.auth.currentSession?.accessToken else {
+            print("[Nearby] ERROR: No access token - user not authenticated")
             throw NearbyPlacesFetcherError.unauthenticated
         }
 
         let requestURL = Self.functionsBaseURL(from: supabaseURL)
             .appendingPathComponent("nearby-places")
+
+        // DEBUG: Log the full URL and token info
+        print("[Nearby] Full URL: \(requestURL.absoluteString)")
+        print("[Nearby] Token prefix: \(String(accessToken.prefix(20)))...")
+        print("[Nearby] Supabase base URL: \(supabaseURL.absoluteString)")
 
         var request = URLRequest(url: requestURL)
         request.httpMethod = "POST"
@@ -52,10 +59,16 @@ public final class SupabaseNearbyPlacesFetcher: NearbyPlacesFetching {
         let (data, response) = try await urlSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("[Nearby] ERROR: Unexpected response type")
             throw NearbyPlacesFetcherError.unexpectedResponse
         }
 
+        print("[Nearby] Response status: \(httpResponse.statusCode)")
+
         guard (200..<300).contains(httpResponse.statusCode) else {
+            // Log error response body
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unable to decode"
+            print("[Nearby] ERROR body: \(errorBody)")
             throw NearbyPlacesFetcherError.httpStatus(httpResponse.statusCode)
         }
 

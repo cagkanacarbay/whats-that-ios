@@ -77,6 +77,7 @@ struct BrandNoFadeButtonStyle: ButtonStyle {
 
 struct BrandSecondaryButton: View {
     let title: String
+    var isLoading: Bool = false
     var action: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -88,6 +89,14 @@ struct BrandSecondaryButton: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, UIDevice.isIPad ? 18 : 14)
                 .contentShape(Rectangle())
+                .overlay(alignment: .trailing) {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(primaryColor)
+                            .padding(.trailing, 16)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .foregroundStyle(primaryColor)
@@ -98,6 +107,7 @@ struct BrandSecondaryButton: View {
             RoundedRectangle(cornerRadius: BrandCornerRadius.medium)
                 .stroke(borderColor, lineWidth: 1)
         }
+        .opacity(isLoading ? 0.7 : 1)
     }
 
     private var primaryColor: Color {

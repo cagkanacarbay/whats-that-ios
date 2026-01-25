@@ -31,7 +31,7 @@ struct DiscoveryCreationFlowView: View {
     }
 
     private enum ActiveSheet: Identifiable {
-        case credits
+        case credits(CreditsViewModel)
         case missingUploadLocation
 
         var id: String {
@@ -140,16 +140,9 @@ struct DiscoveryCreationFlowView: View {
                 }
             }) { sheet in
                 switch sheet {
-                case .credits:
+                case .credits(let creditsViewModel):
                     NavigationStack {
-                        // Use presentedCreditsViewModel directly - it's set before activeSheet
-                        if let creditsViewModel = presentedCreditsViewModel {
-                            CreditsView(viewModel: creditsViewModel)
-                        } else {
-                            Text("Credits unavailable")
-                                .font(.headline)
-                                .padding()
-                        }
+                        CreditsView(viewModel: creditsViewModel)
                     }
                     .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
                     .presentationDragIndicator(.visible)
@@ -238,27 +231,24 @@ struct DiscoveryCreationFlowView: View {
 
     @MainActor
     private func presentCreditsSheet() {
-        guard ensureCreditsViewModel() != nil else { return }
-        creditsSheetDetent = .fraction(0.8)
-        activeSheet = .credits
-    }
-
-    @MainActor
-    @discardableResult
-    private func ensureCreditsViewModel() -> CreditsViewModel? {
+        let creditsViewModel: CreditsViewModel
         if let existing = presentedCreditsViewModel {
-            return existing
-        }
-        guard let factory = makeCreditsViewModel else { return nil }
-        let creditsViewModel = factory()
-        let flowViewModel = viewModel
-        creditsViewModel.onBalanceUpdated = { newBalance in
-            Task { [weak flowViewModel] in
-                await flowViewModel?.syncCreditBalance(newBalance)
+            creditsViewModel = existing
+        } else {
+            guard let factory = makeCreditsViewModel else { return }
+            let newViewModel = factory()
+            let flowViewModel = viewModel
+            newViewModel.onBalanceUpdated = { newBalance in
+                Task { [weak flowViewModel] in
+                    await flowViewModel?.syncCreditBalance(newBalance)
+                }
             }
+            presentedCreditsViewModel = newViewModel
+            creditsViewModel = newViewModel
         }
-        presentedCreditsViewModel = creditsViewModel
-        return creditsViewModel
+
+        creditsSheetDetent = .fraction(0.8)
+        activeSheet = .credits(creditsViewModel)
     }
 
     private func showLocationPermissionsAlert() {

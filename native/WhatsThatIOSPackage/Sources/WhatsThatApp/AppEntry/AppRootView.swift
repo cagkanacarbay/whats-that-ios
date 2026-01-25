@@ -133,10 +133,14 @@ public struct AppRootView: View {
                 await container.clearAllUserData()
             },
             voiceoverPreferencesStore: container.voiceoverPreferencesStore,
+            complianceUseCase: container.complianceUseCase,
             setCreditBalance: { credits in
                 #if DEBUG
                 await container.setCreditBalance(credits)
                 #endif
+            },
+            resolveIntroState: {
+                await container.resolveIntroStateIfNeeded()
             }
         )
         .task {

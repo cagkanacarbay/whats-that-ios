@@ -5,7 +5,7 @@
 
 const denoEnv = (Deno.env.get('DENO_ENV') || 'production').toLowerCase();
 const DEFAULT_ALLOWED_ORIGINS = denoEnv === 'development'
-  ? ['https://whats-that.app', 'http://localhost:5173']
+  ? ['https://whats-that.app', 'https://dev.whats-that.app', 'http://localhost:5173']
   : ['https://whats-that.app'];
 
 const normalizedAllowedOrigins = new Set(DEFAULT_ALLOWED_ORIGINS.map(o => o.toLowerCase()));

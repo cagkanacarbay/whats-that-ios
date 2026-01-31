@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(./.env.production)",
+      "Read(./.env.staging)",
+      "Read(./.env.development)",
+      "Read(./config.json)",
+      "Read(./secrets/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/*.p12)",
+      "Read(./**/*.pfx)",
+      "Read(./credentials.json)",
+      "Read(./.npmrc)",
+      "Read(./.yarnrc)",
+      "Read(./**/*secret*)",
+      "Read(./**/*credential*)",
+      "Read(./**/service-account*.json)",
+      "Read(./.git-credentials)",
+      "Read(./.netrc)",
+      "Read(./.docker/config.json)",
+      "Read(./**/*.sqlite)",
+      "Read(./**/*.db)",
+      "Read(./native/Config/Environments/*.xcconfig)",
+      "Read(./.env.mcp)",
+      "Read(./mcp_config.json)"
+    ]
+  }
+}

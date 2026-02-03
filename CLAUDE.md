@@ -56,5 +56,5 @@ rg -n "error:" build.log
 ## Key Documentation
 
 - `docs/development/building-ios.md` - Full build workflow details
-- `docs/build-and-deploy.md` - Environment configuration and deployment
+- `docs/production-management/build-and-deploy.md` - Environment configuration and deployment
 - `docs/development/database-development-patterns.md` - **Read when developing database functions or Supabase RPC features** to follow established conventions

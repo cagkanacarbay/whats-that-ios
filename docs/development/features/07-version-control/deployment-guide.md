@@ -11,7 +11,7 @@
 
 Edit [TERMS_AND_CONDITIONS.md](file:///Users/cagkanacarbay/Projects/whats-that/whats-that-ios/docs/legal/TERMS_AND_CONDITIONS.md):
 - Update "Effective date" at the top
-- Update "Version" number
+- Update "Version" number (use semantic versioning: Major.Minor.Patch)
 - Make your changes
 
 ### 2. Deploy to Website
@@ -26,16 +26,19 @@ Ensure the updated ToS is live at `https://whats-that.app/legal/terms-and-condit
 INSERT INTO public.version_log (type, version, message)
 VALUES (
   'tos',
-  '1.1',  -- Increment from previous version
+  '1.1.0',  -- Use semantic versioning: Major.Minor.Patch
   'Added section on audio guides and data processing.'
 );
 ```
 
 The `message` field is **optional but recommended** — it will be shown to users in the acceptance modal to explain what changed.
 
+> [!NOTE]
+> **Semantic Version Comparison:** The system uses semantic version comparison, so `1.0.0 < 1.0.1 < 1.1.0 < 2.0.0`. Users only need to accept if their accepted version is less than the latest version.
+
 ### 4. Verify
 
-- Launch app as a test user who has accepted ToS 1.0
+- Launch app as a test user who has accepted ToS 1.0.0
 - Should see Legal Acceptance modal with checkbox (immediately on next launch)
 - Accept → verify new row in `user_agreements` table
 - Modal dismisses, app continues
@@ -48,7 +51,7 @@ The `message` field is **optional but recommended** — it will be shown to user
 
 Edit [PRIVACY_POLICY.md](file:///Users/cagkanacarbay/Projects/whats-that/whats-that-ios/docs/legal/PRIVACY_POLICY.md):
 - Update "Effective date"
-- Update "Version" number
+- Update "Version" number (use semantic versioning: Major.Minor.Patch)
 - Make your changes
 
 ### 2. Deploy to Website
@@ -61,7 +64,7 @@ Ensure updated policy is live at `https://whats-that.app/legal/privacy-policy`
 INSERT INTO public.version_log (type, version, message)
 VALUES (
   'privacy',
-  '1.1',
+  '1.1.0',  -- Use semantic versioning: Major.Minor.Patch
   'Updated data retention policies and added Fish Audio as TTS provider.'
 );
 ```
@@ -154,11 +157,29 @@ VALUES (
 
 ## Version Numbering
 
+All version types use **Semantic Versioning (Major.Minor.Patch)**:
+
 | Type | Format | Examples |
 |------|--------|----------|
-| ToS | Major.Minor | 1.0, 1.1, 2.0 |
-| Privacy | Major.Minor | 1.0, 1.1, 2.0 |
-| App | Semantic (Major.Minor.Patch) | 1.0.0, 1.2.3, 2.0.0 |
+| ToS | Major.Minor.Patch | 1.0.0, 1.1.0, 2.0.0 |
+| Privacy | Major.Minor.Patch | 1.0.0, 1.1.0, 2.0.0 |
+| App | Major.Minor.Patch | 1.0.0, 1.2.3, 2.0.0 |
+
+### Version Comparison
+
+The system uses **semantic version comparison** for all version types:
+- `1.0.0 < 1.0.1` (patch update)
+- `1.0.1 < 1.1.0` (minor update)
+- `1.1.0 < 2.0.0` (major update)
+- `1.9.0 < 1.10.0` (semantic, not string comparison)
+
+### When to Increment
+
+| Change Type | Example | When to Use |
+|-------------|---------|-------------|
+| **Patch** (x.x.1) | 1.0.0 → 1.0.1 | Typo fixes, clarifications, minor wording changes |
+| **Minor** (x.1.x) | 1.0.0 → 1.1.0 | New sections, feature-related updates, policy additions |
+| **Major** (1.x.x) | 1.0.0 → 2.0.0 | Significant restructuring, major policy changes, legal requirement changes |
 
 ---
 
@@ -171,12 +192,12 @@ If you made a mistake (e.g., wrong version number, typo in message):
 
 **Publish a corrected version:**
 ```sql
--- Example: You accidentally published ToS 1.2 but meant 1.1
--- Simply publish the correct version as 1.1
+-- Example: You accidentally published ToS 1.2.0 but meant 1.1.0
+-- Simply publish the correct version as 1.1.0
 INSERT INTO public.version_log (type, version, message)
 VALUES (
   'tos',
-  '1.1',  -- Correct version
+  '1.1.0',  -- Correct version
   'Corrected terms update.'
 );
 ```
@@ -198,17 +219,17 @@ ORDER BY type, released_at DESC;
 ### Check User Acceptances
 
 ```sql
--- Count users who have accepted latest ToS (1.1)
-SELECT COUNT(DISTINCT user_id) 
-FROM public.user_agreements 
-WHERE tos_version = '1.1';
+-- Count users who have accepted latest ToS (e.g., 1.1.0)
+SELECT COUNT(DISTINCT user_id)
+FROM public.user_agreements
+WHERE tos_version = '1.1.0';
 
 -- Users who haven't accepted latest ToS
 SELECT DISTINCT ua.user_id
 FROM public.user_agreements ua
 WHERE NOT EXISTS (
-  SELECT 1 FROM public.user_agreements 
-  WHERE user_id = ua.user_id AND tos_version = '1.1'
+  SELECT 1 FROM public.user_agreements
+  WHERE user_id = ua.user_id AND tos_version = '1.1.0'
 );
 ```
 

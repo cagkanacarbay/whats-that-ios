@@ -38,7 +38,7 @@ CREATE TABLE public.version_log (
   -- What type of version is this?
   type version_type NOT NULL,
   
-  -- Version identifier (e.g., "1.0", "1.1", "2.0.3")
+  -- Version identifier using semantic versioning (e.g., "1.0.0", "1.1.0", "2.0.3")
   version TEXT NOT NULL,
   
   -- Optional message to show users about what changed
@@ -159,9 +159,10 @@ INSERT INTO public.app_config (min_supported_version) VALUES ('1.0.0');
 ### Initial Data Seed
 
 ```sql
+-- All versions use semantic versioning: Major.Minor.Patch
 INSERT INTO public.version_log (type, version, message) VALUES
-  ('tos', '1.0', 'Initial Terms of Service'),
-  ('privacy', '1.0', 'Initial Privacy Policy'),
+  ('tos', '1.0.0', 'Initial Terms of Service'),
+  ('privacy', '1.0.0', 'Initial Privacy Policy'),
   ('app', '1.0.0', 'Initial release');
 ```
 
@@ -169,12 +170,12 @@ INSERT INTO public.version_log (type, version, message) VALUES
 
 ### Existing User Backfill (One-Time Migration)
 
-At feature deployment, all existing users need acceptance records for v1.0 (they agreed at signup):
+At feature deployment, all existing users need acceptance records for v1.0.0 (they agreed at signup):
 
 ```sql
 -- Run once at feature deployment
 INSERT INTO public.user_agreements (user_id, tos_version, privacy_version, accepted_at)
-SELECT id, '1.0', '1.0', NOW()  -- Use NOW() to approximate "accepted before feature launch"
+SELECT id, '1.0.0', '1.0.0', NOW()  -- Use NOW() to approximate "accepted before feature launch"
 FROM auth.users
 WHERE id NOT IN (SELECT DISTINCT user_id FROM public.user_agreements);
 ```
@@ -447,12 +448,12 @@ The server returns this JSON structure:
     "message": null
   },
   "tos": {
-    "version": "1.0",
+    "version": "1.0.0",
     "message": "Initial Terms of Service",
     "released_at": "2024-01-15T10:00:00Z"
   },
   "privacy": {
-    "version": "1.0",
+    "version": "1.0.0",
     "message": "Initial Privacy Policy",
     "released_at": "2024-01-15T10:00:00Z"
   },
@@ -468,8 +469,8 @@ The server returns this JSON structure:
   "user_status": {
     "needs_tos_acceptance": false,
     "needs_privacy_acceptance": false,
-    "accepted_tos_version": "1.0",
-    "accepted_privacy_version": "1.0"
+    "accepted_tos_version": "1.0.0",
+    "accepted_privacy_version": "1.0.0"
   }
 }
 ```
@@ -553,8 +554,8 @@ struct UserComplianceStatus: Codable {
 ```json
 {
   "success": true,
-  "accepted_tos_version": "1.1",
-  "accepted_privacy_version": "1.1"
+  "accepted_tos_version": "1.1.0",
+  "accepted_privacy_version": "1.1.0"
 }
 ```
 

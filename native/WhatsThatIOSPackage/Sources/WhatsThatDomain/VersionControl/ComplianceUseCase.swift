@@ -93,8 +93,9 @@ public actor ComplianceUseCase {
         // Priority 2: Below minimum supported version (immediate block)
         if userAppVersion.isVersionLessThan(config.app.minSupportedVersion) {
             return .forceUpdateImmediate(
-                targetVersion: config.app.version,
-                appStoreUrl: config.app.appStoreUrl
+                targetVersion: config.app.minSupportedVersion,
+                appStoreUrl: config.app.appStoreUrl,
+                message: config.app.message
             )
         }
 
@@ -111,9 +112,9 @@ public actor ComplianceUseCase {
 
             if isForceGracePeriodExpired(state: state) {
                 return .forceUpdateExpired(
-                    targetVersion: config.app.version,
+                    targetVersion: lastForceVersion,
                     appStoreUrl: config.app.appStoreUrl,
-                    message: config.app.message
+                    message: config.app.lastForceMessage ?? config.app.message
                 )
             }
         }
@@ -151,13 +152,19 @@ public actor ComplianceUseCase {
             let state = await localStore.loadAppUpdateReminderState()
             if !isForceGracePeriodExpired(state: state),
                let startDate = state.forceGracePeriodStartDate {
-                let daysRemaining = max(0, 7 - Int(Date().timeIntervalSince(startDate) / 86400))
-                return .forceUpdateGrace(
-                    targetVersion: config.app.version,
-                    daysRemaining: daysRemaining,
-                    appStoreUrl: config.app.appStoreUrl,
-                    message: config.app.message
-                )
+                // Check if user dismissed within last 24 hours
+                if let dismissedDate = state.forceGracePeriodDismissedDate,
+                   Date().timeIntervalSince(dismissedDate) < 86400 {
+                    // Don't show, dismissed recently
+                } else {
+                    let daysRemaining = max(0, 7 - Int(Date().timeIntervalSince(startDate) / 86400))
+                    return .forceUpdateGrace(
+                        targetVersion: config.app.version,
+                        daysRemaining: daysRemaining,
+                        appStoreUrl: config.app.appStoreUrl,
+                        message: config.app.lastForceMessage ?? config.app.message
+                    )
+                }
             }
         }
 
@@ -194,6 +201,13 @@ public actor ComplianceUseCase {
         await localStore.saveAppUpdateReminderState(state)
     }
 
+    /// Records that the user dismissed the force grace period reminder
+    public func dismissForceGracePeriodReminder() async {
+        var state = await localStore.loadAppUpdateReminderState()
+        state.forceGracePeriodDismissedDate = Date()
+        await localStore.saveAppUpdateReminderState(state)
+    }
+
     /// Clears the force grace period when user updates their app
     public func clearForceGracePeriodIfUpdated(userVersion: String, lastForceVersion: String?) async {
         guard let forceVersion = lastForceVersion else { return }
@@ -223,7 +237,7 @@ public actor ComplianceUseCase {
         guard let startDate = state.forceGracePeriodStartDate else {
             return false
         }
-        let gracePeriodSeconds: TimeInterval = 7 * 24 * 60 * 60
+        let gracePeriodSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
         return Date().timeIntervalSince(startDate) > gracePeriodSeconds
     }
 

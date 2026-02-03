@@ -13,82 +13,103 @@ struct LegalAcceptanceModalView: View {
     let onSignOut: () async -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isChecked = false
+    @State private var tosChecked = false
+    @State private var privacyChecked = false
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showSignOutConfirmation = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: BrandSpacing.large) {
-                // Header
-                VStack(spacing: BrandSpacing.small) {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: BrandSpacing.large) {
+                    Spacer()
+                        .frame(height: BrandSpacing.large)
+
+                    // Header with emoji
                     Text("📜")
                         .font(.system(size: 48))
-                    Text("Terms Update Required")
+
+                    Text("Updated Terms")
                         .font(.adaptiveSystem(size: 24, weight: .bold))
                         .foregroundStyle(titleColor)
-                }
-                .padding(.top, BrandSpacing.large)
 
-                // Document Cards
-                VStack(spacing: BrandSpacing.medium) {
-                    if needsTos, let version = tosVersion {
-                        DocumentCard(
-                            title: "Terms of Service",
-                            version: version,
-                            message: tosMessage,
-                            url: AppConfiguration.termsAndConditionsURL
-                        )
-                    }
-
-                    if needsPrivacy, let version = privacyVersion {
-                        DocumentCard(
-                            title: "Privacy Policy",
-                            version: version,
-                            message: privacyMessage,
-                            url: AppConfiguration.privacyPolicyURL
-                        )
-                    }
-                }
-
-                // Checkbox
-                Toggle(isOn: $isChecked) {
-                    Text(checkboxText)
-                        .font(.adaptiveSystem(size: 14, weight: .medium))
+                    Text("Please review and accept the updated terms to continue using the app.")
+                        .font(.adaptiveSystem(size: 15))
                         .foregroundStyle(bodyColor)
-                }
-                .toggleStyle(SwitchToggleStyle(tint: primaryColor))
-                .disabled(isSubmitting)
-
-                // Error message
-                if let error = errorMessage {
-                    Text(error)
-                        .font(.adaptiveSystem(size: 14, weight: .medium))
-                        .foregroundStyle(Color.red.opacity(0.85))
                         .multilineTextAlignment(.center)
-                }
+                        .padding(.horizontal, BrandSpacing.small)
 
-                // Accept button
-                BrandPrimaryButton(
-                    title: isSubmitting ? "Accepting..." : "Accept and Continue",
-                    isLoading: isSubmitting
-                ) {
-                    Task { await handleAccept() }
-                }
-                .disabled(!isChecked || isSubmitting)
+                    // Document Cards with toggles
+                    VStack(spacing: BrandSpacing.large) {
+                        if needsTos, let version = tosVersion {
+                            VStack(alignment: .leading, spacing: BrandSpacing.medium) {
+                                DocumentCard(
+                                    title: "Terms of Service",
+                                    version: version,
+                                    message: tosMessage,
+                                    url: AppConfiguration.termsAndConditionsURL
+                                )
+                                Toggle(isOn: $tosChecked) {
+                                    Text("I have read and agree to the Terms of Service")
+                                        .font(.adaptiveSystem(size: 14, weight: .medium))
+                                        .foregroundStyle(bodyColor)
+                                }
+                                .toggleStyle(SwitchToggleStyle(tint: primaryColor))
+                                .disabled(isSubmitting)
+                            }
+                        }
 
-                // Sign Out button
-                Button("Sign Out") {
-                    showSignOutConfirmation = true
-                }
-                .font(.adaptiveSystem(size: 16, weight: .medium))
-                .foregroundStyle(bodyColor.opacity(0.7))
-                .disabled(isSubmitting)
+                        if needsPrivacy, let version = privacyVersion {
+                            VStack(alignment: .leading, spacing: BrandSpacing.medium) {
+                                DocumentCard(
+                                    title: "Privacy Policy",
+                                    version: version,
+                                    message: privacyMessage,
+                                    url: AppConfiguration.privacyPolicyURL
+                                )
+                                Toggle(isOn: $privacyChecked) {
+                                    Text("I have read and agree to the Privacy Policy")
+                                        .font(.adaptiveSystem(size: 14, weight: .medium))
+                                        .foregroundStyle(bodyColor)
+                                }
+                                .toggleStyle(SwitchToggleStyle(tint: primaryColor))
+                                .disabled(isSubmitting)
+                            }
+                        }
+                    }
+                    .padding(.top, BrandSpacing.small)
 
-                Spacer(minLength: BrandSpacing.large)
+                    // Error message
+                    if let error = errorMessage {
+                        Text(error)
+                            .font(.adaptiveSystem(size: 14, weight: .medium))
+                            .foregroundStyle(Color.red.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                    }
+
+                    // Accept button
+                    BrandPrimaryButton(
+                        title: isSubmitting ? "Accepting..." : "Accept and Continue",
+                        isLoading: isSubmitting
+                    ) {
+                        Task { await handleAccept() }
+                    }
+                    .disabled(!allRequiredChecked || isSubmitting)
+                    .padding(.top, BrandSpacing.small)
+                }
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.bottom, BrandSpacing.large)
             }
-            .padding(.horizontal, BrandSpacing.large)
+
+            // Sign Out button pinned to bottom
+            Button("Sign Out") {
+                showSignOutConfirmation = true
+            }
+            .font(.adaptiveSystem(size: 14, weight: .medium))
+            .foregroundStyle(bodyColor.opacity(0.5))
+            .disabled(isSubmitting)
+            .padding(.vertical, BrandSpacing.medium)
         }
         .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
         .alert("Sign Out?", isPresented: $showSignOutConfirmation) {
@@ -101,14 +122,10 @@ struct LegalAcceptanceModalView: View {
         }
     }
 
-    private var checkboxText: String {
-        if needsTos && needsPrivacy {
-            return "I have read and agree to the updated Terms of Service and Privacy Policy"
-        } else if needsTos {
-            return "I have read and agree to the updated Terms of Service"
-        } else {
-            return "I have read and agree to the updated Privacy Policy"
-        }
+    private var allRequiredChecked: Bool {
+        let tosOk = !needsTos || tosChecked
+        let privacyOk = !needsPrivacy || privacyChecked
+        return tosOk && privacyOk
     }
 
     private func handleAccept() async {

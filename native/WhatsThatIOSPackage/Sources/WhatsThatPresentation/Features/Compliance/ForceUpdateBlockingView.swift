@@ -1,85 +1,58 @@
+import MarkdownUI
 import SwiftUI
 import WhatsThatShared
 
 struct ForceUpdateBlockingView: View {
     let targetVersion: String
+    let currentVersion: String
     let message: String?
     let isGraceExpired: Bool
     let onOpenAppStore: () -> Void
-    let onCheckAgain: () async -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isChecking = false
-    @State private var lastCheckTime: Date?
-    private let checkCooldown: TimeInterval = 60
 
     var body: some View {
         VStack(spacing: BrandSpacing.large) {
-            Spacer()
+            ScrollView {
+                VStack(spacing: BrandSpacing.large) {
+                    Spacer().frame(height: BrandSpacing.large)
 
-            Text("🔒")
-                .font(.system(size: 64))
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundStyle(primaryColor)
 
-            Text("Update Required")
-                .font(.adaptiveSystem(size: 28, weight: .bold))
-                .foregroundStyle(titleColor)
+                    Text("New Version Available")
+                        .font(.adaptiveSystem(size: 24, weight: .bold))
+                        .foregroundStyle(titleColor)
 
-            Text("A required update must be installed to continue using What's That?")
-                .font(.adaptiveSystem(size: 16))
-                .foregroundStyle(bodyColor)
-                .multilineTextAlignment(.center)
+                    VersionUpgradeBadge(currentVersion: currentVersion, targetVersion: targetVersion)
 
-            Text("Version \(targetVersion)")
-                .font(.adaptiveSystem(size: 14, weight: .medium))
-                .foregroundStyle(bodyColor.opacity(0.7))
+                    Text("We've made some important improvements and need you to update to continue.")
+                        .font(.adaptiveSystem(size: 16))
+                        .foregroundStyle(bodyColor)
+                        .multilineTextAlignment(.center)
 
-            if let message, !message.isEmpty {
-                Text(message)
-                    .font(.adaptiveSystem(size: 14))
-                    .foregroundStyle(bodyColor.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .padding(BrandSpacing.medium)
-                    .background(cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-
-            Spacer()
-
-            VStack(spacing: BrandSpacing.medium) {
-                BrandPrimaryButton(title: "Update Now") {
-                    onOpenAppStore()
+                    if let message, !message.isEmpty {
+                        Markdown("## Update Notes\n\n\(message)")
+                            .markdownTheme(complianceTheme)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(BrandSpacing.medium)
+                            .background(cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                 }
-
-                BrandSecondaryButton(
-                    title: isChecking ? "Checking..." : "Check Again",
-                    isLoading: isChecking
-                ) {
-                    Task { await handleCheckAgain() }
-                }
-                .disabled(isChecking)
+                .padding(.horizontal, BrandSpacing.large)
+                .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
             }
+            .scrollBounceBehavior(.basedOnSize)
 
-            Spacer()
+            BrandPrimaryButton(title: "Update Now") {
+                onOpenAppStore()
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.large)
+            .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
         }
-        .padding(.horizontal, BrandSpacing.large)
-        .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
-    }
-
-    private func handleCheckAgain() async {
-        await MainActor.run { isChecking = true }
-
-        let now = Date()
-        let canCheck = lastCheckTime == nil || now.timeIntervalSince(lastCheckTime!) >= checkCooldown
-
-        if canCheck {
-            await MainActor.run { lastCheckTime = now }
-            await onCheckAgain()
-        } else {
-            // Rate limited - show spinner briefly for UX
-            try? await Task.sleep(for: .seconds(1))
-        }
-
-        await MainActor.run { isChecking = false }
     }
 
     private var titleColor: Color {
@@ -90,7 +63,15 @@ struct ForceUpdateBlockingView: View {
         colorScheme == .dark ? BrandColors.Dark.bodyText : BrandColors.Light.bodyText
     }
 
+    private var primaryColor: Color {
+        colorScheme == .dark ? BrandColors.Dark.primaryAction : BrandColors.Light.primaryAction
+    }
+
     private var cardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03)
+    }
+
+    private var complianceTheme: Theme {
+        BrandMarkdownThemeFactory.complianceMessageTheme(for: BrandTheme.palette(for: colorScheme))
     }
 }

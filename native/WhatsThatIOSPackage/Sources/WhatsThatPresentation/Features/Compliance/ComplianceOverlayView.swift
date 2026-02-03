@@ -21,21 +21,21 @@ struct ComplianceOverlayView: View {
                     message: message,
                     onCheckAgain: onCheckAgain
                 )
-            case .forceUpdateImmediate(let targetVersion, let appStoreUrl):
+            case .forceUpdateImmediate(let targetVersion, let appStoreUrl, let message):
                 ForceUpdateBlockingView(
                     targetVersion: targetVersion,
-                    message: nil,
+                    currentVersion: Bundle.main.appVersion,
+                    message: message,
                     isGraceExpired: false,
-                    onOpenAppStore: { onOpenAppStore(appStoreUrl) },
-                    onCheckAgain: onCheckAgain
+                    onOpenAppStore: { onOpenAppStore(appStoreUrl) }
                 )
             case .forceUpdateExpired(let targetVersion, let appStoreUrl, let message):
                 ForceUpdateBlockingView(
                     targetVersion: targetVersion,
+                    currentVersion: Bundle.main.appVersion,
                     message: message,
                     isGraceExpired: true,
-                    onOpenAppStore: { onOpenAppStore(appStoreUrl) },
-                    onCheckAgain: onCheckAgain
+                    onOpenAppStore: { onOpenAppStore(appStoreUrl) }
                 )
             case .legalAcceptance(let needsTos, let needsPrivacy, let tosVersion, let privacyVersion, let tosMessage, let privacyMessage):
                 LegalAcceptanceModalView(

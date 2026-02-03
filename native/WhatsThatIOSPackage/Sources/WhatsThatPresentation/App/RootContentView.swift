@@ -214,10 +214,11 @@ public struct RootContentView: View {
             )
             .presentationDetents([.fraction(0.8), .large], selection: $settingsSheetDetent)
         }
-        .sheet(isPresented: $showSoftUpdateSheet) {
+        .fullScreenCover(isPresented: $showSoftUpdateSheet) {
             if case .softUpdateReminder(let version, let url, let message) = viewModel.complianceNonBlockingState {
                 SoftUpdatePromptView(
                     targetVersion: version,
+                    currentVersion: Bundle.main.appVersion,
                     message: message,
                     onUpdate: {
                         if let appStoreUrl = URL(string: url) {
@@ -230,13 +231,13 @@ public struct RootContentView: View {
                         showSoftUpdateSheet = false
                     }
                 )
-                .presentationDetents([.medium])
             }
         }
-        .sheet(isPresented: $showForceGraceSheet) {
+        .fullScreenCover(isPresented: $showForceGraceSheet) {
             if case .forceUpdateGrace(let version, let days, let url, let message) = viewModel.complianceNonBlockingState {
                 ForceUpdateGracePromptView(
                     targetVersion: version,
+                    currentVersion: Bundle.main.appVersion,
                     daysRemaining: days,
                     message: message,
                     onUpdate: {
@@ -246,10 +247,10 @@ public struct RootContentView: View {
                         showForceGraceSheet = false
                     },
                     onDismiss: {
+                        Task { await viewModel.dismissForceGracePeriodReminder() }
                         showForceGraceSheet = false
                     }
                 )
-                .presentationDetents([.medium])
             }
         }
         .alert(
@@ -320,6 +321,17 @@ public struct RootContentView: View {
                     } else {
                         // print("[App][ScenePhase] -> active (flow=main) but no startLocationTracking")
                     }
+
+                    // Re-show non-blocking compliance sheets if they were dismissed but state still active
+                    // This handles the case where user tapped "Update Now", went to App Store, and returned without updating
+                    if currentScreenIsSafe {
+                        if case .softUpdateReminder = viewModel.complianceNonBlockingState, !showSoftUpdateSheet {
+                            showSoftUpdateSheet = true
+                        } else if case .forceUpdateGrace = viewModel.complianceNonBlockingState, !showForceGraceSheet {
+                            showForceGraceSheet = true
+                        }
+                    }
+
                     // Refresh compliance if stale when app returns to foreground
                     Task { await viewModel.refreshComplianceIfStale() }
                 } else {

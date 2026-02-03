@@ -31,8 +31,10 @@ struct SignUpForm: View {
     @State private var password: String = ""
     @State private var confirmPassword: String = ""
     @State private var agreedToTerms: Bool = false
+    @State private var agreedToSocialTerms: Bool = false
     @State private var isLoading: Bool = false
     @State private var didAttemptSubmit: Bool = false
+    @State private var didAttemptSocialAuth: Bool = false
     // Focus handling to show validation only after leaving a field
     @FocusState private var emailFocused: Bool
     @FocusState private var passwordFocused: Bool
@@ -119,15 +121,27 @@ struct SignUpForm: View {
                 DividerWithLabel(label: "or")
 
                 VStack(spacing: BrandSpacing.small) {
-                    Text(socialAuthAgreementAttributedString)
-                        .font(.adaptiveSystem(size: 12, weight: .medium))
-                        .foregroundStyle(bodyColor.opacity(0.8))
-                        .tint(primaryColor)
-                        .multilineTextAlignment(.center)
-                    BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
+                    Toggle(isOn: $agreedToSocialTerms) {
+                        Text(socialAuthAgreementAttributedString)
+                            .font(.adaptiveSystem(size: 14, weight: .medium))
+                            .foregroundStyle(bodyColor)
+                            .tint(primaryColor)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: primaryColor))
+
+                    if shouldShowSocialTermsError {
+                        Text("You must agree before continuing.")
+                            .font(.adaptiveSystem(size: 12, weight: .medium))
+                            .foregroundStyle(Color.red.opacity(0.85))
+                            .animation(nil, value: shouldShowSocialTermsError)
+                    }
+
+                    BrandSocialButton(kind: .google, isDisabled: isPerformingAction || !agreedToSocialTerms) {
                         handleSocialAuth(using: onGoogle)
                     }
-                    BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
+                    BrandSocialButton(kind: .apple, isDisabled: isPerformingAction || !agreedToSocialTerms) {
                         handleSocialAuth(using: onApple)
                     }
                 }
@@ -190,6 +204,10 @@ struct SignUpForm: View {
         didAttemptSubmit && !agreedToTerms
     }
 
+    private var shouldShowSocialTermsError: Bool {
+        didAttemptSocialAuth && !agreedToSocialTerms
+    }
+
     private func submit() {
         didAttemptSubmit = true
 
@@ -207,6 +225,12 @@ struct SignUpForm: View {
     private func handleSocialAuth(
         using handler: (@escaping (Result<Void, AuthError>) -> Void) -> Void
     ) {
+        didAttemptSocialAuth = true
+
+        guard agreedToSocialTerms else {
+            return
+        }
+
         isLoading = true
         handler { result in
             isLoading = false
@@ -255,22 +279,20 @@ struct SignUpForm: View {
     }
 
     private var socialAuthAgreementAttributedString: AttributedString {
-        var result = AttributedString("By continuing with Google or Apple, you agree to our ")
-        
-        var terms = AttributedString("Terms")
+        var result = AttributedString("I agree to the ")
+
+        var terms = AttributedString("Terms and Conditions")
         terms.link = AppConfiguration.termsAndConditionsURL
         terms.underlineStyle = .single
         result.append(terms)
-        
+
         result.append(AttributedString(" and "))
-        
+
         var privacy = AttributedString("Privacy Policy")
         privacy.link = AppConfiguration.privacyPolicyURL
         privacy.underlineStyle = .single
         result.append(privacy)
-        
-        result.append(AttributedString("."))
-        
+
         return result
     }
 }

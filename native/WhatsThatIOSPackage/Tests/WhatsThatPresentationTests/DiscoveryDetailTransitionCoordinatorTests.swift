@@ -79,5 +79,9 @@ final class StubVoiceoverRepository: DiscoveryVoiceoverRepository, @unchecked Se
             wasRefunded: false
         )
     }
+
+    func countUserVoiceovers() async -> Int {
+        0
+    }
 }
 

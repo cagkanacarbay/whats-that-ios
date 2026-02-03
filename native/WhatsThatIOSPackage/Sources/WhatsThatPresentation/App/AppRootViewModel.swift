@@ -26,6 +26,10 @@ public final class AppRootViewModel: ObservableObject {
     private var latestSession: AuthSession = .signedOut
     private var observationTask: Task<Void, Never>?
 
+    /// Tracks if user started signup but is waiting for email verification.
+    /// When they verify, we'll record their terms acceptance.
+    private var pendingNewSignupVerification: Bool = false
+
     public init(
         authUseCase: AuthUseCase,
         onboardingUseCase: OnboardingUseCase,
@@ -121,14 +125,19 @@ public final class AppRootViewModel: ObservableObject {
 
         do {
             let result = try await authUseCase.signUp(email: email, password: password)
+            print("[SignUp] Result: \(result)")
             switch result {
             case .authenticated(let session):
-                updateFlow(session: session)
+                print("[SignUp] Authenticated immediately - calling updateFlow with isNewSignup=true")
+                updateFlow(session: session, isNewSignup: true)
                 return .session(session)
             case .verificationRequired:
+                print("[SignUp] Verification required - setting pendingNewSignupVerification=true")
+                pendingNewSignupVerification = true
                 return .verificationRequired
             }
         } catch {
+            print("[SignUp] Error: \(error)")
             throw AuthError.unknown
         }
     }
@@ -271,19 +280,21 @@ public final class AppRootViewModel: ObservableObject {
         updateFlow(session: session)
     }
 
-    private func updateFlow(session: AuthSession) {
+    private func updateFlow(session: AuthSession, isNewSignup: Bool = false) {
+        print("[UpdateFlow] Called with isNewSignup=\(isNewSignup), session=\(session)")
         latestSession = session
-        
+
         // For signed-in users, we need to bind stores BEFORE resolving flow state
         // because flow resolution depends on user-specific flags
         if let user = session.user {
+            print("[UpdateFlow] User authenticated: \(user.id)")
             Task {
                 let userId = user.id.uuidString
-                
+
                 // 1. Bind all user-keyed stores first
                 await onboardingUseCase.bind(to: userId)
                 await voiceoverPreferencesStore.bind(to: userId)
-                
+
                 // 2. Bind the free credits alert tracker
                 await FreeCreditsAlertTracker.shared.bind(to: userId)
 
@@ -299,7 +310,23 @@ public final class AppRootViewModel: ObservableObject {
                     self.flowState = self.flowResolver.resolve(session: session, flags: flags)
                 }
 
-                // 6. Check compliance after user is authenticated
+                // 6. For new signups, record terms acceptance BEFORE checking compliance
+                // This ensures the user doesn't see a terms modal immediately after signup
+                // (they already agreed on the signup form)
+                // Check both isNewSignup (immediate auth) and pendingNewSignupVerification (email verification flow)
+                let shouldRecordTerms = isNewSignup || self.pendingNewSignupVerification
+                if shouldRecordTerms {
+                    print("[UpdateFlow] Recording terms acceptance (isNewSignup=\(isNewSignup), pendingVerification=\(self.pendingNewSignupVerification))")
+                    // Clear the pending flag
+                    await MainActor.run {
+                        self.pendingNewSignupVerification = false
+                    }
+                    await self.recordTermsAcceptanceForNewUser()
+                } else {
+                    print("[UpdateFlow] Skipping terms recording (returning user)")
+                }
+
+                // 7. Check compliance after user is authenticated
                 await self.checkCompliance()
             }
         } else {
@@ -310,6 +337,22 @@ public final class AppRootViewModel: ObservableObject {
             complianceBlockingState = nil
             complianceNonBlockingState = nil
             pendingLegalAcceptance = false
+        }
+    }
+
+    /// Records terms acceptance for a newly signed up user.
+    /// Called after successful signup since user agreed to terms on the signup form.
+    private func recordTermsAcceptanceForNewUser() async {
+        do {
+            let config = try await complianceUseCase.fetchConfig(forceFresh: true)
+            _ = try await complianceUseCase.acceptTerms(
+                tosVersion: config.tos.version,
+                privacyVersion: config.privacy.version
+            )
+            print("[ViewModel] Recorded terms acceptance for new user - tos=\(config.tos.version), privacy=\(config.privacy.version)")
+        } catch {
+            // Failure is acceptable - user will see modal on first safe screen
+            print("[ViewModel] Failed to record terms acceptance for new user: \(error)")
         }
     }
 
@@ -364,6 +407,14 @@ public final class AppRootViewModel: ObservableObject {
     /// Dismisses the soft update reminder
     public func dismissSoftUpdateReminder() async {
         await complianceUseCase.markSoftReminderShown()
+        await MainActor.run {
+            self.complianceNonBlockingState = nil
+        }
+    }
+
+    /// Dismisses the force grace period reminder
+    public func dismissForceGracePeriodReminder() async {
+        await complianceUseCase.dismissForceGracePeriodReminder()
         await MainActor.run {
             self.complianceNonBlockingState = nil
         }

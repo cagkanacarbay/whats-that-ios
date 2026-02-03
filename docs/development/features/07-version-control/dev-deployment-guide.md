@@ -51,7 +51,7 @@ SELECT * FROM public.app_config;
 
 You should see:
 
-- 3 rows in `version_log` (tos v1.0, privacy v1.0, app v1.0.0)
+- 3 rows in `version_log` (tos v1.0.0, privacy v1.0.0, app v1.0.0)
 - 1 row in `app_config`
 
 ### 1.3 Test RPC Functions
@@ -68,8 +68,8 @@ Expected response structure:
 ```json
 {
   "maintenance": { "enabled": false, "message": null },
-  "tos": { "version": "1.0", "message": "Initial Terms of Service", "released_at": "..." },
-  "privacy": { "version": "1.0", "message": "Initial Privacy Policy", "released_at": "..." },
+  "tos": { "version": "1.0.0", "message": "Initial Terms of Service", "released_at": "..." },
+  "privacy": { "version": "1.0.0", "message": "Initial Privacy Policy", "released_at": "..." },
   "app": { "version": "1.0.0", ... },
   "user_status": { "needs_tos_acceptance": true, "needs_privacy_acceptance": true, ... }
 }
@@ -79,11 +79,11 @@ Expected response structure:
 
 ## Step 2: Backfill Existing Users (If Any)
 
-If you have existing test users, run this to mark them as having accepted v1.0 terms:
+If you have existing test users, run this to mark them as having accepted v1.0.0 terms:
 
 ```sql
 INSERT INTO public.user_agreements (user_id, tos_version, privacy_version, accepted_at)
-SELECT id, '1.0', '1.0', NOW()
+SELECT id, '1.0.0', '1.0.0', NOW()
 FROM auth.users
 WHERE id NOT IN (SELECT DISTINCT user_id FROM public.user_agreements);
 ```
@@ -115,21 +115,21 @@ Open in Xcode and build (Cmd+B), then run on simulator or device.
 3. Create a new account (email signup)
 4. **Expected:** User should complete signup with terms checkbox
 5. Check database: `SELECT * FROM user_agreements WHERE user_id = '<new-user-id>';`
-6. **Expected:** Row with tos_version='1.0', privacy_version='1.0'
+6. **Expected:** Row with tos_version='1.0.0', privacy_version='1.0.0'
 
 ### Test Case 2: Terms Update - Legal Modal Appears
 
-1. Login as an existing user who has accepted v1.0
+1. Login as an existing user who has accepted v1.0.0
 2. In Supabase, add a new ToS version:
    ```sql
    INSERT INTO public.version_log (type, version, message)
-   VALUES ('tos', '1.1', 'Updated Terms of Service - January 2026');
+   VALUES ('tos', '1.1.0', 'Updated Terms of Service - January 2026');
    ```
 3. Force app refresh (background then foreground, or kill and relaunch)
 4. **Expected:** Legal acceptance modal should appear on the Discoveries tab
 5. Toggle checkbox, tap "Accept and Continue"
 6. **Expected:** Modal dismisses, app works normally
-7. Check database: New row in `user_agreements` with tos_version='1.1'
+7. Check database: New row in `user_agreements` with tos_version='1.1.0'
 
 ### Test Case 3: Legal Modal Deferred on Unsafe Screens
 
@@ -248,8 +248,8 @@ DELETE FROM public.user_agreements;
 -- Reset version log to initial state
 DELETE FROM public.version_log;
 INSERT INTO public.version_log (type, version, message) VALUES
-  ('tos', '1.0', 'Initial Terms of Service'),
-  ('privacy', '1.0', 'Initial Privacy Policy'),
+  ('tos', '1.0.0', 'Initial Terms of Service'),
+  ('privacy', '1.0.0', 'Initial Privacy Policy'),
   ('app', '1.0.0', 'Initial release');
 
 -- Reset app config

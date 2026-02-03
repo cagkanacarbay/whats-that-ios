@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 import WhatsThatShared
 
@@ -27,10 +28,9 @@ struct MaintenanceBlockingView: View {
                 .multilineTextAlignment(.center)
 
             if let message, !message.isEmpty {
-                Text(message)
-                    .font(.adaptiveSystem(size: 14))
-                    .foregroundStyle(bodyColor.opacity(0.8))
-                    .multilineTextAlignment(.center)
+                Markdown("## Details\n\n\(message)")
+                    .markdownTheme(complianceTheme)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(BrandSpacing.medium)
                     .background(cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -79,5 +79,9 @@ struct MaintenanceBlockingView: View {
 
     private var cardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03)
+    }
+
+    private var complianceTheme: Theme {
+        BrandMarkdownThemeFactory.complianceMessageTheme(for: BrandTheme.palette(for: colorScheme))
     }
 }

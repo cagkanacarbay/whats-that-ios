@@ -40,7 +40,7 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
                 .token("## Redwood Sentinel\n\n"),
                 .token("An ancient tree stands tall along the ridge.\n\n"),
                 .token("### metadata_json\n{\"title\":\"Redwood Sentinel\",\"shortDescription\":\"A centuries-old coast redwood.\"}\n"),
-                .complete(discoveryId: 99, systemPromptVersion: "1", userPromptVersion: "1"),
+                .complete(discoveryId: 99, systemPromptVersion: "1", userPromptVersion: "1", creditBalance: 4),
                 .end
             ]
         )
@@ -62,7 +62,7 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         )
 
         let createdExpectation = expectation(description: "discovery created")
-        viewModel.onDiscoveryCreated = { identifier in
+        viewModel.onDiscoveryCreated = { (identifier: Int64) in
             XCTAssertEqual(identifier, 99)
             createdExpectation.fulfill()
         }

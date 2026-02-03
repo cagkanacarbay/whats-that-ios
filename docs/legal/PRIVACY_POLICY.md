@@ -1,7 +1,7 @@
 # Privacy Policy — “What’s That?”
 
 Effective date: 8 January 2026
-Version: 1.0
+Version: 1.0.0
 
 This Privacy Policy explains how we collect, use, disclose, and protect information about you when you use the “What’s That?” mobile application and related services (the “Service”).
 

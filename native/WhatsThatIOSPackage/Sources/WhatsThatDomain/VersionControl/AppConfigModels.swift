@@ -64,6 +64,7 @@ public struct AppVersionInfo: Codable, Sendable, Equatable {
     public let minSupportedVersion: String
     public let appStoreUrl: String
     public let lastForceVersion: String?
+    public let lastForceMessage: String?
 
     public init(
         version: String,
@@ -72,7 +73,8 @@ public struct AppVersionInfo: Codable, Sendable, Equatable {
         appUpdateType: UpdateType,
         minSupportedVersion: String,
         appStoreUrl: String,
-        lastForceVersion: String?
+        lastForceVersion: String?,
+        lastForceMessage: String? = nil
     ) {
         self.version = version
         self.message = message
@@ -81,6 +83,7 @@ public struct AppVersionInfo: Codable, Sendable, Equatable {
         self.minSupportedVersion = minSupportedVersion
         self.appStoreUrl = appStoreUrl
         self.lastForceVersion = lastForceVersion
+        self.lastForceMessage = lastForceMessage
     }
 
     enum CodingKeys: String, CodingKey {
@@ -90,6 +93,7 @@ public struct AppVersionInfo: Codable, Sendable, Equatable {
         case minSupportedVersion = "min_supported_version"
         case appStoreUrl = "app_store_url"
         case lastForceVersion = "last_force_version"
+        case lastForceMessage = "last_force_message"
     }
 }
 
@@ -151,17 +155,20 @@ public struct AppUpdateReminderState: Codable, Sendable, Equatable {
     public var lastReminderDate: Date?
     public var reminderCount: Int
     public var forceGracePeriodStartDate: Date?
+    public var forceGracePeriodDismissedDate: Date?
 
     public init(
         softUpdateVersion: String? = nil,
         lastReminderDate: Date? = nil,
         reminderCount: Int = 0,
-        forceGracePeriodStartDate: Date? = nil
+        forceGracePeriodStartDate: Date? = nil,
+        forceGracePeriodDismissedDate: Date? = nil
     ) {
         self.softUpdateVersion = softUpdateVersion
         self.lastReminderDate = lastReminderDate
         self.reminderCount = reminderCount
         self.forceGracePeriodStartDate = forceGracePeriodStartDate
+        self.forceGracePeriodDismissedDate = forceGracePeriodDismissedDate
     }
 }
 
@@ -185,7 +192,7 @@ public struct CachedMaintenanceState: Codable, Sendable {
 
 public enum ComplianceBlockingState: Equatable, Sendable {
     case maintenance(message: String?)
-    case forceUpdateImmediate(targetVersion: String, appStoreUrl: String)
+    case forceUpdateImmediate(targetVersion: String, appStoreUrl: String, message: String?)
     case forceUpdateExpired(targetVersion: String, appStoreUrl: String, message: String?)
     case legalAcceptance(
         needsTos: Bool,

@@ -29,7 +29,7 @@ public final class SupabaseAppConfigRepository: AppConfigRepository, @unchecked 
             let p_privacy_version: String?
         }
 
-        print("[AcceptTerms] Calling RPC with tosVersion=\(tosVersion ?? "nil"), privacyVersion=\(privacyVersion ?? "nil")")
+        print("[AcceptTerms] Calling RPC with p_tos_version=\(tosVersion ?? "nil"), p_privacy_version=\(privacyVersion ?? "nil")")
 
         do {
             let response: AcceptTermsResponse = try await client

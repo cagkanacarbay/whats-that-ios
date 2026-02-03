@@ -22,7 +22,22 @@ This feature implements two core systems:
 ### Database Functions
 
 - **`get_app_config()`** - Returns latest versions + user's compliance status (called via `supabase.rpc()`)
-- **`accept_terms(accept_tos, accept_privacy)`** - Records acceptance of LATEST versions (validates server-side)
+- **`accept_terms(p_tos_version, p_privacy_version)`** - Records acceptance of LATEST versions (validates server-side)
+- **`compare_versions(v1, v2)`** - Compares two semantic versions (-1 if v1 < v2, 0 if equal, 1 if v1 > v2)
+- **`version_less_than(v1, v2)`** - Returns true if v1 < v2 using semantic comparison
+
+### Version Format
+
+All versions (ToS, Privacy, App) use **Semantic Versioning: Major.Minor.Patch**
+
+| Version | Meaning |
+|---------|---------|
+| `1.0.0` | Initial version |
+| `1.0.1` | Patch (typo fixes, minor clarifications) |
+| `1.1.0` | Minor (new sections, feature updates) |
+| `2.0.0` | Major (significant changes, restructuring) |
+
+**Comparison:** `1.0.0 < 1.0.1 < 1.1.0 < 1.10.0 < 2.0.0` (semantic, not string comparison)
 
 ### Client-Side Caching
 

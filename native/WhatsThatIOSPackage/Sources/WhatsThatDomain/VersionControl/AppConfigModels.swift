@@ -156,19 +156,22 @@ public struct AppUpdateReminderState: Codable, Sendable, Equatable {
     public var reminderCount: Int
     public var forceGracePeriodStartDate: Date?
     public var forceGracePeriodDismissedDate: Date?
+    public var forceUpdateVersion: String?  // Tracks which force version the grace period is for
 
     public init(
         softUpdateVersion: String? = nil,
         lastReminderDate: Date? = nil,
         reminderCount: Int = 0,
         forceGracePeriodStartDate: Date? = nil,
-        forceGracePeriodDismissedDate: Date? = nil
+        forceGracePeriodDismissedDate: Date? = nil,
+        forceUpdateVersion: String? = nil
     ) {
         self.softUpdateVersion = softUpdateVersion
         self.lastReminderDate = lastReminderDate
         self.reminderCount = reminderCount
         self.forceGracePeriodStartDate = forceGracePeriodStartDate
         self.forceGracePeriodDismissedDate = forceGracePeriodDismissedDate
+        self.forceUpdateVersion = forceUpdateVersion
     }
 }
 

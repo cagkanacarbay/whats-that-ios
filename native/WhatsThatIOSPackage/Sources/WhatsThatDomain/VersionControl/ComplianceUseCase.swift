@@ -104,9 +104,11 @@ public actor ComplianceUseCase {
            userAppVersion.isVersionLessThan(lastForceVersion) {
             var state = await localStore.loadAppUpdateReminderState()
 
-            // Mark force update seen (only sets if nil - doesn't reset)
-            if state.forceGracePeriodStartDate == nil {
+            // Reset grace period if a NEW force version is released
+            if state.forceUpdateVersion != lastForceVersion {
                 state.forceGracePeriodStartDate = Date()
+                state.forceGracePeriodDismissedDate = nil
+                state.forceUpdateVersion = lastForceVersion
                 await localStore.saveAppUpdateReminderState(state)
             }
 
@@ -150,9 +152,11 @@ public actor ComplianceUseCase {
         if let lastForceVersion = config.app.lastForceVersion,
            userAppVersion.isVersionLessThan(lastForceVersion) {
             let state = await localStore.loadAppUpdateReminderState()
-            if !isForceGracePeriodExpired(state: state),
+            let expired = isForceGracePeriodExpired(state: state)
+            if !expired,
                let startDate = state.forceGracePeriodStartDate {
                 // Check if user dismissed within last 24 hours
+                // (The blocking check resets dismissedDate when a new version is detected)
                 if let dismissedDate = state.forceGracePeriodDismissedDate,
                    Date().timeIntervalSince(dismissedDate) < 86400 {
                     // Don't show, dismissed recently

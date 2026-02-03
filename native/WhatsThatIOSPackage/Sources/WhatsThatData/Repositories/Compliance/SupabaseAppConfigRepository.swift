@@ -13,13 +13,125 @@ public final class SupabaseAppConfigRepository: AppConfigRepository, @unchecked 
 
     public func fetchConfig() async throws -> AppConfigResponse {
         do {
-            let response: AppConfigResponse = try await client.rpc("get_app_config").execute().value
-            print("[FetchConfig] Success - tos: \(response.tos.version), privacy: \(response.privacy.version)")
-            print("[FetchConfig] UserStatus: \(String(describing: response.userStatus))")
-            return response
+            // The SQL function returns a flat table row, which we decode and map to the nested structure
+            // Use JSONObject + Supabase's decode() for proper date handling (same pattern as SupabaseDiscoveryRepository)
+            let response: PostgrestResponse<[JSONObject]> = try await client.rpc("get_app_config").execute()
+            let jsonArray: JSONArray = response.value.map { AnyJSON.object($0) }
+            let rows: [AppConfigRow] = try jsonArray.decode(as: AppConfigRow.self)
+            guard let row = rows.first else {
+                throw AppConfigError.noData
+            }
+            return row.toAppConfigResponse()
         } catch {
-            print("[FetchConfig] ERROR: \(error)")
             throw error
+        }
+    }
+
+    enum AppConfigError: Error {
+        case noData
+    }
+
+    /// Raw row structure matching the flat RETURNS TABLE from get_app_config()
+    private struct AppConfigRow: Decodable {
+        // Maintenance
+        let maintenanceEnabled: Bool
+        let maintenanceMessage: String?
+        // ToS
+        let tosVersion: String
+        let tosMessage: String?
+        let tosReleasedAt: Date
+        // Privacy
+        let privacyVersion: String
+        let privacyMessage: String?
+        let privacyReleasedAt: Date
+        // App
+        let appVersion: String
+        let appMessage: String?
+        let appReleasedAt: Date
+        let appUpdateType: String
+        let minSupportedVersion: String
+        let appStoreUrl: String
+        let lastForceVersion: String?
+        let lastForceMessage: String?
+        // User status
+        let needsTosAcceptance: Bool?
+        let needsPrivacyAcceptance: Bool?
+        let acceptedTosVersion: String?
+        let acceptedPrivacyVersion: String?
+
+        enum CodingKeys: String, CodingKey {
+            case maintenanceEnabled = "maintenance_enabled"
+            case maintenanceMessage = "maintenance_message"
+            case tosVersion = "tos_version"
+            case tosMessage = "tos_message"
+            case tosReleasedAt = "tos_released_at"
+            case privacyVersion = "privacy_version"
+            case privacyMessage = "privacy_message"
+            case privacyReleasedAt = "privacy_released_at"
+            case appVersion = "app_version"
+            case appMessage = "app_message"
+            case appReleasedAt = "app_released_at"
+            case appUpdateType = "app_update_type"
+            case minSupportedVersion = "min_supported_version"
+            case appStoreUrl = "app_store_url"
+            case lastForceVersion = "last_force_version"
+            case lastForceMessage = "last_force_message"
+            case needsTosAcceptance = "needs_tos_acceptance"
+            case needsPrivacyAcceptance = "needs_privacy_acceptance"
+            case acceptedTosVersion = "accepted_tos_version"
+            case acceptedPrivacyVersion = "accepted_privacy_version"
+        }
+
+        func toAppConfigResponse() -> AppConfigResponse {
+            let maintenance = MaintenanceConfig(
+                enabled: maintenanceEnabled,
+                message: maintenanceMessage
+            )
+
+            let tos = VersionInfo(
+                version: tosVersion,
+                message: tosMessage,
+                releasedAt: tosReleasedAt
+            )
+
+            let privacy = VersionInfo(
+                version: privacyVersion,
+                message: privacyMessage,
+                releasedAt: privacyReleasedAt
+            )
+
+            let updateType = UpdateType(rawValue: appUpdateType) ?? .soft
+            let app = AppVersionInfo(
+                version: appVersion,
+                message: appMessage,
+                releasedAt: appReleasedAt,
+                appUpdateType: updateType,
+                minSupportedVersion: minSupportedVersion,
+                appStoreUrl: appStoreUrl,
+                lastForceVersion: lastForceVersion,
+                lastForceMessage: lastForceMessage
+            )
+
+            // User status is nil if not authenticated (all fields will be null)
+            let userStatus: UserComplianceStatus?
+            if let needsTos = needsTosAcceptance, let needsPrivacy = needsPrivacyAcceptance {
+                userStatus = UserComplianceStatus(
+                    needsTosAcceptance: needsTos,
+                    needsPrivacyAcceptance: needsPrivacy,
+                    acceptedTosVersion: acceptedTosVersion,
+                    acceptedPrivacyVersion: acceptedPrivacyVersion
+                )
+            } else {
+                userStatus = nil
+            }
+
+            return AppConfigResponse(
+                maintenance: maintenance,
+                tos: tos,
+                privacy: privacy,
+                app: app,
+                userStatus: userStatus
+            )
         }
     }
 

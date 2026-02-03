@@ -19,6 +19,31 @@ Ask the user:
    - Bug fixes
    - Security updates
 
+### Version Format Validation (REQUIRED)
+
+**All versions MUST use semantic versioning: `MAJOR.MINOR.PATCH` (e.g., 1.0.0, 1.2.3, 2.0.0)**
+
+Always validate and auto-correct the user's version input:
+
+| User Input | Corrected To | Rule |
+|------------|--------------|------|
+| `1.1.0` | `1.1.0` | Valid, no change |
+| `1.1` | `1.1.0` | Missing patch → append `.0` |
+| `2` | `2.0.0` | Missing minor.patch → append `.0.0` |
+| `1.01` | `1.0.1` | Leading zero = separate digit |
+| `1.10` | `1.10.0` | Missing patch → append `.0` |
+| `2.05` | `2.0.5` | Leading zero = separate digit |
+
+**Rules:**
+- Version must have exactly 3 parts separated by dots: `X.Y.Z`
+- If user provides 2 parts, append `.0` (e.g., `1.1` → `1.1.0`)
+- If user provides 1 part, append `.0.0` (e.g., `2` → `2.0.0`)
+- Leading zeros indicate separate digits (e.g., `1.01` → `1.0.1`, `2.05` → `2.0.5`)
+- **If any correction is made, note it at the end of your message:**
+  ```
+  Note: Version corrected from `1.01` to `1.0.1`
+  ```
+
 ### Step 2: Generate Update Notes
 
 Based on the user's input, create a well-formatted update message using Markdown:

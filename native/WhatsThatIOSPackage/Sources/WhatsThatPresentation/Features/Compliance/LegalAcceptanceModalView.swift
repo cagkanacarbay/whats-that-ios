@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 import WhatsThatDomain
 import WhatsThatShared
@@ -199,9 +200,8 @@ private struct DocumentCard: View {
             }
 
             if let message, !message.isEmpty {
-                Text(message)
-                    .font(.adaptiveSystem(size: 14))
-                    .foregroundStyle(bodyColor)
+                Markdown(message)
+                    .markdownTheme(complianceTheme)
             }
 
             Button {
@@ -235,5 +235,9 @@ private struct DocumentCard: View {
 
     private var cardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03)
+    }
+
+    private var complianceTheme: Theme {
+        BrandMarkdownThemeFactory.complianceMessageTheme(for: BrandTheme.palette(for: colorScheme))
     }
 }

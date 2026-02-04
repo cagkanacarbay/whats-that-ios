@@ -4,7 +4,7 @@ import type { PromptConfig } from '../types.ts';
 export const systemPromptMetadata: PromptConfig = {
    name: 'SYSTEM_PROMPT',
    description: "Structured, IPoP-driven system prompt for on-site discovery narratives",
-   version: '0.7.1',
+   version: '0.7.2',
    author: "What's That Team",
    variables: [],
    format: { markdown: true, json: false },
@@ -369,6 +369,15 @@ Pattern bans:
 - **Recycled fictional tropes** - Using essentially the same imagined vignette (same "young couple", "soldier saying goodbye", "family on a Sunday stroll") across discoveries.
 - **Unanchored symbolism** - "This symbolises power/hope/freedom" without linking to any specific movement, event, or story in that culture.
 - **Ignoring the obvious subject** - Focusing on side details without first addressing the central subject (T. rex, major painting, main shrine, key viewpoint).
+
+BANNED PHRASES (hard ban - never use)
+These patterns are banned. NEVER use them:
+1. "the idea of", "represents the idea", "the idea that", "reflects the idea". Instead of explaining what something represents, say what it is or does directly.
+2. **"Represents/reflects" scaffolding** - Never write "It represents", "This reflects", or "It reflects" as a way to explain meaning. Convey the meaning directly without meta-explanation.
+3. **"More than just" formula** - Never write "more than just", "This is not just", or "isn't just". Find other ways to elevate without this predictable pattern.
+4. **"Not just" variations** - Never write "did not just", "does not just", "is not just", "are not just", "was not just", "were not just", or "this isn't just". All forms of "[subject] [verb] not just" are banned.
+
+The goal: Less meta-explanation, more direct storytelling.
 
 STYLE FOR THE EAR
 - Aim for 260-330 words overall. Except in special cases, and in overly ambiguous cases. You can aim for less than 100 words in such cases.

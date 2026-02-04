@@ -75,10 +75,20 @@ struct DiscoveryCreationFlowView: View {
         DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
+    // During analyzing phase, only ignore top safe area so tab bar remains visible
+    private var backgroundSafeAreaEdges: Edge.Set {
+        switch viewModel.flowState {
+        case .analyzing:
+            return .top
+        default:
+            return .all
+        }
+    }
+
     var body: some View {
         mainContent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(palette.background.ignoresSafeArea())
+            .background(palette.background.ignoresSafeArea(edges: backgroundSafeAreaEdges))
             .alert(
                 item: Binding(
                     get: { activeAlert },
@@ -217,6 +227,14 @@ struct DiscoveryCreationFlowView: View {
             onCancel: {
                 // Transfer to background instead of cancelling - discovery continues processing
                 viewModel.unsubscribe()
+            },
+            onNewDiscovery: {
+                // Background current discovery and start a new one
+                viewModel.unsubscribe()
+                // Small delay to allow state to settle before restarting
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    viewModel.retake()
+                }
             },
             makeCreditsViewModel: makeCreditsViewModel
         )

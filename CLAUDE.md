@@ -58,3 +58,7 @@ rg -n "error:" build.log
 - `docs/development/building-ios.md` - Full build workflow details
 - `docs/production-management/build-and-deploy.md` - Environment configuration and deployment
 - `docs/development/database-development-patterns.md` - **Read when developing database functions or Supabase RPC features** to follow established conventions
+
+## Database Migrations
+
+**NEVER run migrations directly** - Claude writes migration files to `supabase/migrations/`, and the user runs them manually. Use the MCP tools only to query/read data, not to execute DDL or DML.

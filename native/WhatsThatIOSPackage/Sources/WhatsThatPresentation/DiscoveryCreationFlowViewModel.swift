@@ -115,6 +115,15 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var ephemeralFreshTask: Task<Void, Never>?
     private var ephemeralFreshInFlight = false
 
+    /// Preserved state for restoration when photo selection is cancelled
+    private struct PreservedStreamingState {
+        let analysisState: DiscoveryAnalysisState
+        let confirmationState: DiscoveryConfirmationState?
+        let currentMedia: DiscoveryCapturedMedia?
+    }
+
+    private var preservedState: PreservedStreamingState?
+
     // Background polling support
     private var pendingMedia: DiscoveryCapturedMedia?
     private var analysisStartTime: Date?
@@ -193,10 +202,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         ephemeralFreshInFlight = false
         pollingTask?.cancel()
         pollingTask = nil
-        
+        preservedState = nil
+
         // Update flowState FIRST to remove the active view from hierarchy
         flowState = .cancelled
-        
+
         // Then clear the state data
         confirmationState = nil
         analysisState = nil
@@ -205,7 +215,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         pendingMedia = nil
         analysisStartTime = nil
         error = nil
-        
+
         // Finally reset to idle
         flowState = .idle
     }
@@ -215,13 +225,22 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     /// Call this when the overlay closes mid-stream.
     func unsubscribe() {
         debugLog("unsubscribe()")
-        
+
+        // Preserve state if we're in analyzing phase with content
+        if let analysisState = self.analysisState {
+            preservedState = PreservedStreamingState(
+                analysisState: analysisState,
+                confirmationState: self.confirmationState,
+                currentMedia: self.currentMedia
+            )
+        }
+
         // Unsubscribe from session manager (stream continues in background)
         if let sessionId = currentSessionId {
             DiscoverySessionManager.shared.unsubscribe(from: sessionId)
             currentSessionId = nil
         }
-        
+
         // Cancel local tasks that are no longer needed
         analysisTask?.cancel()
         analysisTask = nil
@@ -230,10 +249,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         ephemeralFreshInFlight = false
         pollingTask?.cancel()
         pollingTask = nil
-        
+
         // Update flowState FIRST to remove the active view from hierarchy
         flowState = .cancelled
-        
+
         // Then clear the state data
         confirmationState = nil
         analysisState = nil
@@ -242,9 +261,27 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         pendingMedia = nil
         analysisStartTime = nil
         error = nil
-        
+
         // Finally reset to idle
         flowState = .idle
+    }
+
+    /// Restores preserved streaming state after cancelled photo selection
+    private func restorePreservedStateIfAvailable() {
+        guard let preserved = preservedState else { return }
+
+        analysisState = preserved.analysisState
+        confirmationState = preserved.confirmationState
+        currentMedia = preserved.currentMedia
+        flowState = .analyzing(preserved.analysisState)
+
+        preservedState = nil
+        debugLog("Restored preserved streaming state")
+    }
+
+    /// Clears preserved state (call when user successfully selects new photo)
+    private func clearPreservedState() {
+        preservedState = nil
     }
 
     func retake() {
@@ -374,10 +411,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 debugLog("Invoking captureService.capturePhoto() (retake: \(retake))")
                 let media = try await captureService.capturePhoto()
                 debugLog("captureService.capturePhoto() completed successfully")
+                clearPreservedState()
                 await prepareConfirmation(with: media)
             } catch {
                 if DiscoveryFlowCancellationError.isCancellation(error) {
                     self.error = nil
+                    // Restore preserved state if available
+                    if preservedState != nil {
+                        restorePreservedStateIfAvailable()
+                        return
+                    }
                     flowState = .cancelled
                     flowState = .idle
                     return
@@ -397,10 +440,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             flowState = retake ? .selectingRetake : .selectingInitial
             do {
                 let media = try await selectionService.selectPhoto()
+                clearPreservedState()
                 await prepareConfirmation(with: media)
             } catch {
                 if DiscoveryFlowCancellationError.isCancellation(error) {
                     self.error = nil
+                    // Restore preserved state if available
+                    if preservedState != nil {
+                        restorePreservedStateIfAvailable()
+                        return
+                    }
                     flowState = .cancelled
                     flowState = .idle
                     return

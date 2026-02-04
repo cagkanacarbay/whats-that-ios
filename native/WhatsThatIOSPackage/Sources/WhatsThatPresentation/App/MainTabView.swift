@@ -147,6 +147,7 @@ struct MainTabView: View {
             }
         
             // Creation overlay
+            // During analyzing phase, leave space for tab bar so user can navigate
             if let overlayTab = activeOverlayTab,
                let overlayViewModel = viewModel(for: overlayTab),
                shouldShowOverlay(for: overlayViewModel.flowState)
@@ -158,6 +159,7 @@ struct MainTabView: View {
                     retryTitle: overlayTab == .camera ? "Try again" : "Select again",
                     makeCreditsViewModel: makeCreditsViewModel
                 )
+                .padding(.bottom, overlayViewModel.flowState.phase == .analyzing ? 49 : 0)
                 .transition(.opacity)
                 .zIndex(1)
             }

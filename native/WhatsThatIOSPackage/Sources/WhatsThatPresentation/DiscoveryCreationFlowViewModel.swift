@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import WhatsThatDomain
@@ -89,6 +90,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
     var onAnalysisBegan: ((DiscoveryCreationFlowType) -> Void)?
+    let analysisBeganPublisher = PassthroughSubject<DiscoveryCreationFlowType, Never>()
 
     /// Called when polling finds the completed discovery. Parent should upsert discovery to store.
     var onPollingDiscoveryReady: ((DiscoverySummary) -> Void)?
@@ -465,6 +467,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
         print("[DiscoveryCreationFlowViewModel] About to call onAnalysisBegan with type: \(configuration.type), callback is \(onAnalysisBegan == nil ? "nil" : "set")")
         onAnalysisBegan?(configuration.type)
+        analysisBeganPublisher.send(configuration.type)
         print("[DiscoveryCreationFlowViewModel] onAnalysisBegan callback completed")
 
         // Save photo to library if enabled (camera captures only)

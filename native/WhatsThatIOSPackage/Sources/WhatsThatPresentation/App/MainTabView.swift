@@ -319,8 +319,6 @@ struct MainTabView: View {
             uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
             cameraViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
             uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
-            cameraViewModel.onAnalysisBegan = handleAnalysisBegan
-            uploadViewModel.onAnalysisBegan = handleAnalysisBegan
             
             cameraViewModel.onPollingDiscoveryReady = { discovery in
                 handlePollingDiscoveryReady(discovery)
@@ -384,6 +382,12 @@ struct MainTabView: View {
         }
         .onChange(of: activeOverlayTab) { oldValue, newValue in
             print("[MainTabView] onChange(activeOverlayTab): \(String(describing: oldValue)) -> \(String(describing: newValue))")
+        }
+        .onReceive(cameraViewModel.analysisBeganPublisher) { type in
+            handleAnalysisBegan(type)
+        }
+        .onReceive(uploadViewModel.analysisBeganPublisher) { type in
+            handleAnalysisBegan(type)
         }
         // Watch for free credits exhausted modal from either viewModel
         // We present at MainTabView level to ensure visibility regardless of flow state

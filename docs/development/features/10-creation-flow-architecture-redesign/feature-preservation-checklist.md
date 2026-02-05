@@ -24,20 +24,15 @@ These features are independent of the creation flow architecture and will not be
 | Feature | Current Behavior | Migration Notes |
 |---------|-----------------|-----------------|
 | Welcome copy variants | "Now it's your turn" (new) / "Welcome back" (returning) | No change needed |
-| Camera CTA → direct camera launch | `onLaunchCamera` sets `mainTabDestination = .camera` | In new arch: `mainTabDestination = .camera` triggers CTA on camera tab. User must tap one more time unless we auto-present the modal on first visit. **Decision needed.** |
-| Gallery CTA → direct gallery launch | `onLaunchUpload` sets `mainTabDestination = .upload` | Same as camera - one extra tap unless auto-triggered. |
+| Camera CTA → direct camera launch | `onLaunchCamera` sets `mainTabDestination = .camera` | In new arch: `initialTab = .camera` selects the Camera tab, which auto-triggers the picker (pure-trigger design). Zero extra taps. |
+| Gallery CTA → direct gallery launch | `onLaunchUpload` sets `mainTabDestination = .upload` | Same — `initialTab = .upload` auto-triggers the picker. |
 | Skip all configuration | No voice/IPoP setup during onboarding | No change needed |
 
 ### Migration Decision: First-Time Auto-Launch
 
 Currently, selecting "Take a Photo" from the welcome screen immediately opens the camera picker because `handleTabChange(.camera)` calls `cameraViewModel.startFlow()`.
 
-In the new architecture, the camera tab shows a CTA. Options:
-1. **Auto-present modal on first visit** — Check a "hasSeenCameraTab" flag, auto-trigger modal. Simple but adds a flag.
-2. **Accept the extra tap** — User sees the CTA and taps it. Consistent behavior but one more tap on first use.
-3. **Keep auto-start for camera/upload tabs only on initial tab selection** — `mainTabDestination` triggers one-time auto-start.
-
-**Recommendation:** Option 3. When `mainTabDestination` is `.camera` or `.upload` (set by PostOnboardingCarousel), auto-present the modal on tab appear, then reset the flag. This preserves the zero-friction first discovery experience.
+**Decision:** Camera and Gallery tabs are pure triggers — tapping them immediately opens the picker via `fullScreenCover`. When `initialTab = .camera` (from PostOnboardingCarousel), the tab is selected, which auto-triggers the picker. No extra flag needed — this falls out naturally from the pure-trigger design.
 
 ---
 
@@ -235,6 +230,80 @@ The "restore previous discovery" feature (showing the completed discovery if use
 
 ---
 
+## "Discover More" Button on Streaming View (CHANGED BEHAVIOR)
+
+### Current Behavior
+The "Discover More" button on `DiscoveryStreamingStageView` fires `onNewDiscovery` — a single callback that routes through `onDiscoverAnother` in MainTabView. It always returns the user to the same capture method (camera overlay → camera tab, upload overlay → upload tab).
+
+### New Behavior
+The streaming view's "Discover More" button remains a **single action** that re-triggers the same flow type. The user already chose their preferred capture method — no need to ask again.
+
+The **audio generating modal** (shown only once, after first discovery) offers two options: "Take a Photo" and "Upload Another". This is the only place where dual options appear.
+
+### Implementation Note
+`DiscoveryStreamingStageView.onNewDiscovery` callback signature does not change. The parent (`DiscoveryCreationFlowView`) handles it by calling `onRequestNewDiscovery` with the current flow type.
+
+---
+
+## ViewModel Lifecycle Across Modal Presentations (NEW CONCERN)
+
+### Problem
+`cameraViewModel` and `uploadViewModel` are long-lived objects created once in `RootContentView`. When the user dismisses a modal and starts a new flow, the same ViewModel instance is reused.
+
+### Invariant
+Every modal dismiss path MUST ensure: `unsubscribe()` → ViewModel resets to `.idle` → next `startFlow()` succeeds.
+
+### Verification
+- `unsubscribe()` (DiscoveryCreationFlowViewModel.swift:256) sets `flowState = .idle` at the end ✓
+- `startFlow()` (line 210) guards on `canStartFlow()` which checks `flowState` — `.idle` passes ✓
+- If `unsubscribe()` is skipped, the ViewModel may be stuck in `.analyzing` and `canStartFlow()` returns false, silently blocking the next flow
+
+### Dismiss Paths That Must Call unsubscribe()
+1. User taps X to dismiss modal during streaming
+2. "Discover More" from streaming view
+3. "Discover Another" from audio modal
+4. Credits exhausted "Not now" dismiss
+5. Normal completion → user dismisses modal
+
+---
+
+## Mini Player Inside Modal (HIGH RISK — Must Preserve Behavior)
+
+### Current Behavior
+The mini player is rendered in MainTabView's ZStack with phase-based visibility from `MiniPlayerVisibilityWrapper`:
+- **Hidden** during: `.capturingInitial`, `.capturingRetake`, `.selectingInitial`, `.selectingRetake`, `.confirming`, `.requestingPermissions`
+- **Visible** during: `.analyzing` (streaming/complete) — z-index 2 puts it above the creation overlay
+- The streaming view already accounts for mini player space via `MiniPlayerFillerView`
+
+### Migration Requirement
+With a `fullScreenCover`, the MainTabView mini player is hidden behind the modal. To preserve current behavior, the mini player must be rendered **inside** the creation flow modal with the same phase-based visibility logic:
+- Check `viewModel.flowState.phase` instead of `activeOverlayPhase`
+- Same rules: hidden during confirmation, visible during streaming/analyzing
+- `CreationFlowDependencies` must include `playbackController` and `miniPlayerPresence`
+- Mini player tap action during modal needs design decision: dismiss modal and navigate to Audio Guides, or defer navigation until modal dismisses
+
+### The streaming view's `MiniPlayerFillerView` already exists
+`DiscoveryStreamingStageView` already reserves space for the mini player via `MiniPlayerFillerView`. This continues to work — it just needs the actual mini player to appear above it.
+
+---
+
+## Toasts Inside Modal (MEDIUM RISK — Must Preserve Behavior)
+
+### Current Behavior
+`UnifiedToastOverlay` renders in MainTabView's ZStack above everything. Background session completion toasts appear immediately regardless of what the user is doing.
+
+### Migration Requirement
+With a `fullScreenCover`, MainTabView toasts are hidden behind the modal. To preserve behavior, `UnifiedToastOverlay` (or a similar toast layer) must also render **inside** the creation flow modal.
+
+This matters for the "Discover More" flow: user starts session A, taps "Discover More", starts session B. Session A completes in background → toast should be visible while user is in session B's modal.
+
+### Implementation
+- Pass `DiscoverySessionManager` (or its `pendingCompletionToasts` publisher) into the modal via dependencies
+- Render `UnifiedToastOverlay` in a ZStack inside the modal
+- Toast "View Discovery" action: dismiss modal → navigate to the completed discovery on Discoveries tab
+
+---
+
 ## Closure-Based Callbacks (HIGH RISK IN CURRENT, ELIMINATED IN NEW)
 
 ### Current Problem
@@ -269,24 +338,17 @@ Replace all closures with Combine publishers or direct observation:
 
 ---
 
-## Tab Bar Visibility During Analysis (MEDIUM RISK)
+## Tab Bar Visibility During Analysis (RESOLVED)
 
 ### Current Behavior
-The overlay leaves the tab bar visible during analysis. Users can:
-- Switch to Discoveries tab to browse while waiting
-- Switch to Audio Guides tab
-- Tab bar provides navigation context
+The overlay leaves the tab bar visible during analysis.
 
-### New Architecture
-A `fullScreenCover` hides the tab bar. Options:
-
-1. **Use `.sheet(.large)` instead of `fullScreenCover`** — Tab bar remains visible. But `.sheet` has drag-to-dismiss which could accidentally close the creation flow.
-2. **Accept hidden tab bar** — User taps [X] to dismiss and browse. Re-opens from queue.
-3. **Custom presentation** — Build a custom half-sheet or overlay (complex, fragile).
-
-**Recommendation:** Option 1 with `interactiveDismissDisabled(true)` during analysis phase. The sheet covers the full screen but can't be accidentally dismissed. Tab bar remains visible. After analysis completes, enable interactive dismiss.
-
-**Alternative:** Use `fullScreenCover` but add a persistent mini tab bar or "Go to Discoveries" button within the analysis view.
+### Decision
+**Accept `fullScreenCover` (hidden tab bar).** Rationale:
+- The creation flow is a focused, modal experience
+- User can dismiss [X] to browse (session continues in background)
+- Discovery queue on Discoveries tab (Phase 6) lets them return to any in-progress session
+- Trying to preserve tab bar visibility adds complexity that contradicts the simplification goal
 
 ---
 
@@ -327,6 +389,36 @@ The `.onChange(of: activeSheet)` mechanism for triggering `refreshStateAfterCred
 
 ---
 
+## Dead Code to Remove (LOW RISK)
+
+The following parameters and state exist in the current code but become unreachable in the modal architecture:
+
+| Item | Location | Why Unreachable |
+|------|----------|-----------------|
+| `placeholderEmoji` parameter | `DiscoveryCreationFlowView` init | Modal starts in confirming state, never shows idle/CTA screen |
+| `ctaTitle` parameter | `DiscoveryCreationFlowView` init | Same — no CTA screen in modal |
+| `retryTitle` parameter | `DiscoveryCreationFlowView` init | Same |
+| Idle/CTA stage view | `DiscoveryCreationFlowView` body | User has already captured photo before modal presents |
+| `isOverlay` parameter | `DiscoveryCreationFlowView` init | Only one instance, always "real" |
+| `shouldShowOverlay()` method | `MainTabView` | No overlay |
+| `updateOverlayVisibility()` method | `MainTabView` | No overlay |
+
+Remove all of these in Phase 1. Keeping dead code creates confusion for future developers.
+
+---
+
+## Camera/Gallery Tab Content (NEW)
+
+### Current
+Camera and Gallery tabs render `DiscoveryCreationFlowView` as their content (showing idle/CTA screen).
+
+### New
+Camera and Gallery tabs are pure triggers. Their tab content should be a **minimal branded placeholder** (camera/gallery icon centered on app background color) rather than `Color.clear`. This prevents a blank-screen flash during the brief moment between tab selection and modal presentation.
+
+The `onDismiss` callback always sets `selectedTab = .discoveries`, so users should never land on these tabs without a modal. The placeholder is a safety net.
+
+---
+
 ## Summary: Risk Matrix
 
 | Feature | Risk | Action Required |
@@ -339,8 +431,14 @@ The `.onChange(of: activeSheet)` mechanism for triggering `refreshStateAfterCred
 | Credits exhausted screen | High | Move from MainTabView to creation flow modal |
 | Post-purchase configuration | High | Verify nested presentation works |
 | "Discover Another" | Simplified | State preservation removed, replaced by background sessions |
+| "Discover More" (streaming) | Low | Single action, re-triggers same flow type |
 | Closure callbacks | Eliminated | Replace with Combine publishers |
 | Background sessions | None | Already designed for this |
-| Tab bar during analysis | Medium | Choose presentation strategy |
+| Tab bar during analysis | Resolved | Accept fullScreenCover, modal is focused experience |
 | Credits sheet | Medium | Standard nested sheet, verify refresh bug |
 | Photo save / caching | None | ViewModel-internal |
+| ViewModel lifecycle | Medium | Enforce unsubscribe → idle invariant on all dismiss paths |
+| Mini player during modal | High | Render inside modal, phase-based visibility (hidden on confirm, visible on streaming) |
+| Toasts during modal | Medium | Render inside modal, pass SessionManager toast state via dependencies |
+| Tab fallback content | Low | Branded placeholder instead of Color.clear |
+| Dead CTA parameters | Low | Remove in Phase 1 |

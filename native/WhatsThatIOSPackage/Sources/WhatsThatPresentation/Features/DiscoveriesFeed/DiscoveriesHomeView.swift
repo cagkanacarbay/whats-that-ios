@@ -40,6 +40,7 @@ struct DiscoveriesHomeView: View {
     @State private var isDeletionInProgress = false
     @State private var deletionErrorMessage: String?
     @State private var isDetailFromAudioGuides = false
+    @State private var isDetailViewWarmedUp = false
 
     private var headerMetrics: DiscoveriesHeaderMetrics {
         DiscoveriesHeaderMetrics(
@@ -125,8 +126,26 @@ struct DiscoveriesHomeView: View {
             scrollContent(contentWidth: contentWidth, contentHeight: contentHeight, metrics: metrics)
             
             headerContent(contentWidth: contentWidth, metrics: metrics)
-            
+
             detailOverlayContent
+
+            // Invisible warmup view to pre-compile the detail overlay view hierarchy.
+            // This eliminates first-tap animation jank by forcing SwiftUI to compile
+            // the complex view before the user interacts with it.
+            if !isDetailViewWarmedUp {
+                DiscoveryDetailWarmupView(
+                    voiceoverController: voiceoverController,
+                    backgroundColor: backgroundColor,
+                    colorScheme: colorScheme
+                )
+                .allowsHitTesting(false)
+                .zIndex(-1)
+            }
+        }
+        .task {
+            // Schedule warmup completion after the warmup animation completes (300ms + buffer)
+            try? await Task.sleep(nanoseconds: 400_000_000) // 400ms
+            isDetailViewWarmedUp = true
         }
         .onAppear {
             updateSafeAreaBottomInsetIfNeeded(safeBottom)
@@ -180,6 +199,12 @@ struct DiscoveriesHomeView: View {
         }
         .task {
             await storeObserver.loadInitialIfNeeded()
+
+            // Prefetch voiceover metadata to avoid jank on first tap
+            if storeObserver.loadState == .loaded && !storeObserver.discoveries.isEmpty {
+                prefetchVoiceovers(for: storeObserver.discoveries)
+            }
+
             presentPendingDiscoveryIfNeeded()
             resolveOpenFromAudioGuidesIfNeeded()
         }
@@ -188,7 +213,14 @@ struct DiscoveriesHomeView: View {
             let adjusted = rawValue + metrics.gridTopPadding
             scrollOffset = adjusted
         }
-        .onChange(of: storeObserver.discoveries) {
+        .onChange(of: storeObserver.discoveries) { oldValue, newValue in
+            // Prefetch voiceovers for newly added discoveries
+            let oldIds = Set(oldValue.map { $0.id })
+            let newDiscoveries = newValue.filter { !oldIds.contains($0.id) }
+            if !newDiscoveries.isEmpty {
+                prefetchVoiceovers(for: newDiscoveries)
+            }
+
             DispatchQueue.main.async {
                 presentPendingDiscoveryIfNeeded()
                 resolveOpenFromAudioGuidesIfNeeded()
@@ -254,7 +286,7 @@ struct DiscoveriesHomeView: View {
                 deletingDiscoveryId: deletingDiscoveryId,
                 isDeletingDiscovery: isDeletionInProgress,
                 onDelete: { handleDeleteRequest(for: $0) },
-                onShowOptions: nil,
+                onShowOptions: {},  // Enable options/share/map buttons
                 onOpenAudioGuide: onOpenAudioGuide,
                 onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
             )
@@ -534,6 +566,14 @@ struct DiscoveriesHomeView: View {
     private func imageURL(for discovery: DiscoverySummary) -> URL? {
         guard let path = discovery.imagePath else { return nil }
         return URL(string: path)
+    }
+
+    /// Prefetches voiceover metadata for the given discoveries.
+    /// Fire-and-forget - VoiceoverPlaybackController handles caching and deduplication.
+    private func prefetchVoiceovers(for discoveries: [DiscoverySummary]) {
+        let discoveryIds = discoveries.map { $0.id }
+        voiceoverController.prefetch(for: discoveryIds)
+        discoveriesHomeLogger.info("Prefetched voiceovers for \(discoveryIds.count) discoveries")
     }
 
     private var detailEdgeDragGesture: AnyGesture<DragGesture.Value> {

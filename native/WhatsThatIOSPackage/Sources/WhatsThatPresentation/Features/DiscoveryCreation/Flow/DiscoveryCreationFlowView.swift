@@ -7,10 +7,7 @@ struct DiscoveryCreationFlowView: View {
     private enum ActiveAlert: Identifiable {
         case flowError(IdentifiedError)
         case locationPermissions
-        case outOfCredits
         case pollingFailed
-        case freeCreditsExhaustedAtAudioGeneration
-        case freeCreditsExhaustedAtConfirm
 
         var id: String {
             switch self {
@@ -18,19 +15,13 @@ struct DiscoveryCreationFlowView: View {
                 return identifiedError.id.uuidString
             case .locationPermissions:
                 return "locationPermissions"
-            case .outOfCredits:
-                return "outOfCredits"
             case .pollingFailed:
                 return "pollingFailed"
-            case .freeCreditsExhaustedAtAudioGeneration:
-                return "freeCreditsExhaustedAtAudioGeneration"
-            case .freeCreditsExhaustedAtConfirm:
-                return "freeCreditsExhaustedAtConfirm"
             }
         }
     }
 
-    private enum ActiveSheet: Identifiable {
+    private enum ActiveSheet: Identifiable, Equatable {
         case credits(CreditsViewModel)
         case missingUploadLocation
 
@@ -42,19 +33,49 @@ struct DiscoveryCreationFlowView: View {
                 return "missingUploadLocation"
             }
         }
+
+        // Custom Equatable - only compare cases, not associated values
+        static func == (lhs: ActiveSheet, rhs: ActiveSheet) -> Bool {
+            switch (lhs, rhs) {
+            case (.credits, .credits):
+                return true
+            case (.missingUploadLocation, .missingUploadLocation):
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
     let placeholderEmoji: String
     let ctaTitle: String
     let retryTitle: String
+    /// When true, this view is the overlay instance and should present sheets like the audio generating modal.
+    /// When false, this view is embedded in a tab and should not present to avoid duplicate presentation conflicts.
+    private let isOverlay: Bool
+    /// Called when user taps "Discover Another" from the audio generating modal.
+    /// MainTabView handles this to switch to the appropriate tab before starting the new flow.
+    private let onDiscoverAnother: (() -> Void)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
+    private let fetchRecentDiscoveries: (() -> [DiscoverySummary])?
+
+    // Post-purchase configuration closures
+    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
+    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
+    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
+    private let fetchVoiceSampleURL: ((String) async -> URL?)?
+    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
+    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var presentedCreditsViewModel: CreditsViewModel?
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
     @State private var activeAlert: ActiveAlert?
     @State private var activeSheet: ActiveSheet?
+    @State private var shouldCreateAnotherAfterModalDismiss = false
+    @State private var shouldPresentCreditsAfterExhaustedDismiss = false
+    @State private var wasCreditsSheetPresented = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(
@@ -62,13 +83,31 @@ struct DiscoveryCreationFlowView: View {
         placeholderEmoji: String,
         ctaTitle: String,
         retryTitle: String,
-        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
+        isOverlay: Bool = false,
+        onDiscoverAnother: (() -> Void)? = nil,
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
+        fetchRecentDiscoveries: (() -> [DiscoverySummary])? = nil,
+        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
+        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
+        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
+        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
+        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
+        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         _viewModel = ObservedObject(initialValue: viewModel)
         self.placeholderEmoji = placeholderEmoji
         self.ctaTitle = ctaTitle
         self.retryTitle = retryTitle
+        self.isOverlay = isOverlay
+        self.onDiscoverAnother = onDiscoverAnother
         self.makeCreditsViewModel = makeCreditsViewModel
+        self.fetchRecentDiscoveries = fetchRecentDiscoveries
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
     }
 
     private var palette: DiscoveryCreationPalette {
@@ -122,37 +161,42 @@ struct DiscoveryCreationFlowView: View {
                     }
                 }
             }
-            .onChange(of: viewModel.showFreeCreditsExhaustedAtAudioGeneration) { _, showAlert in
-                if showAlert {
-                    DispatchQueue.main.async {
-                        activeAlert = .freeCreditsExhaustedAtAudioGeneration
-                        viewModel.showFreeCreditsExhaustedAtAudioGeneration = false
-                    }
-                }
-            }
-            .onChange(of: viewModel.showFreeCreditsExhaustedAtConfirm) { _, showAlert in
-                if showAlert {
-                    DispatchQueue.main.async {
-                        activeAlert = .freeCreditsExhaustedAtConfirm
-                        viewModel.showFreeCreditsExhaustedAtConfirm = false
-                    }
-                }
-            }
+            // Credits exhausted alerts are now handled via fullScreenCover below
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     viewModel.refreshLocationPermissionOnForeground()
                 }
             }
-            .sheet(item: $activeSheet, onDismiss: {
-                if presentedCreditsViewModel != nil {
+            // Detect when credits sheet closes and force refresh state
+            // This is more reliable than onDismiss which can have timing issues
+            .onChange(of: activeSheet) { _, newValue in
+                // Track when credits sheet was presented
+                if case .credits = newValue {
+                    wasCreditsSheetPresented = true
+                }
+                // When sheet closes after credits was shown, force refresh
+                if newValue == nil && wasCreditsSheetPresented {
+                    wasCreditsSheetPresented = false
                     presentedCreditsViewModel = nil
                     creditsSheetDetent = .fraction(0.8)
+                    Task {
+                        await viewModel.refreshStateAfterCreditsSheet()
+                    }
                 }
-            }) { sheet in
+            }
+            .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .credits(let creditsViewModel):
                     NavigationStack {
-                        CreditsView(viewModel: creditsViewModel)
+                        CreditsView(
+                            viewModel: creditsViewModel,
+                            loadVoiceoverPreferences: loadVoiceoverPreferences,
+                            saveVoiceoverPreferences: saveVoiceoverPreferences,
+                            fetchVoiceOptions: fetchVoiceOptions,
+                            fetchVoiceSampleURL: fetchVoiceSampleURL,
+                            loadIPoPPreferences: loadIPoPPreferences,
+                            saveIPoPPreferences: saveIPoPPreferences
+                        )
                     }
                     .presentationDetents([.fraction(0.8), .large], selection: $creditsSheetDetent)
                     .presentationDragIndicator(.visible)
@@ -164,6 +208,70 @@ struct DiscoveryCreationFlowView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
                 }
+            }
+            // Audio generating modal - only presented by overlay to avoid duplicate presentation conflicts
+            // when both embedded tab view and overlay share the same viewModel
+            .sheet(
+                isPresented: Binding(
+                    get: { isOverlay && viewModel.showAudioGeneratingModal },
+                    set: { viewModel.showAudioGeneratingModal = $0 }
+                ),
+                onDismiss: {
+                    // Handle "Create Another" action AFTER sheet is fully dismissed.
+                    // This prevents the camera picker from trying to present on the dismissing modal.
+                    if shouldCreateAnotherAfterModalDismiss {
+                        shouldCreateAnotherAfterModalDismiss = false
+                        if let onDiscoverAnother {
+                            onDiscoverAnother()
+                        } else {
+                            viewModel.unsubscribe()
+                            viewModel.retake()
+                        }
+                    }
+                }
+            ) {
+                AudioGeneratingModalView(
+                    onCreateAnother: {
+                        // Dismiss modal first, then trigger action in onDismiss.
+                        // This ensures the modal is fully dismissed before starting new camera flow,
+                        // preventing "view not in window hierarchy" errors.
+                        viewModel.showAudioGeneratingModal = false
+                        shouldCreateAnotherAfterModalDismiss = true
+                    },
+                    onReadThisDiscovery: {
+                        viewModel.showAudioGeneratingModal = false
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(isPresented: $viewModel.showFreeCreditsExhaustedAtConfirm, onDismiss: {
+                // Present credits sheet AFTER fullScreenCover is fully dismissed to avoid SwiftUI race condition
+                if shouldPresentCreditsAfterExhaustedDismiss {
+                    shouldPresentCreditsAfterExhaustedDismiss = false
+                    // Small delay to ensure clean presentation after dismiss animation completes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        presentCreditsSheet()
+                    }
+                }
+            }) {
+                CreditsExhaustedFullScreenView(
+                    discoveries: Array((fetchRecentDiscoveries?() ?? []).prefix(3)),
+                    playbackController: nil,
+                    onGetCredits: {
+                        // Don't mark intro complete - user needs to actually purchase credits
+                        // Intro mode will exit when balance > 6 (via resolveIntroStateIfNeeded or purchase handler)
+                        // Set flag to present credits sheet after this fullScreenCover dismisses
+                        shouldPresentCreditsAfterExhaustedDismiss = true
+                        viewModel.showFreeCreditsExhaustedAtConfirm = false
+                    },
+                    onDismiss: {
+                        // Don't mark intro complete - modal will show again next time they try to create
+                        // This ensures user keeps seeing the modal until they purchase credits
+                        shouldPresentCreditsAfterExhaustedDismiss = false
+                        viewModel.showFreeCreditsExhaustedAtConfirm = false
+                    }
+                )
             }
     }
 
@@ -210,8 +318,8 @@ struct DiscoveryCreationFlowView: View {
                 onRequestCredits: makeCreditsHandler,
                 onShowLocationPermissions: { showLocationPermissionsAlert() },
                 onShowMissingUploadLocation: { presentMissingUploadLocationSheet() },
-                onShowOutOfCredits: { showOutOfCreditsAlert() },
-                generateAudioGuide: $viewModel.generateAudioGuide
+                generateAudioGuide: $viewModel.generateAudioGuide,
+                isAudioToggleLocked: viewModel.isInIntroMode
             )
         case .analyzing:
             streamingStage
@@ -229,11 +337,17 @@ struct DiscoveryCreationFlowView: View {
                 viewModel.unsubscribe()
             },
             onNewDiscovery: {
-                // Background current discovery and start a new one
-                viewModel.unsubscribe()
-                // Small delay to allow state to settle before restarting
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    viewModel.retake()
+                // Use MainTabView's callback if available (for overlay) to ensure proper
+                // tab switching and state restoration when user cancels. This matches
+                // the behavior of "Discover Another" from the audio generating modal.
+                if let onDiscoverAnother = onDiscoverAnother {
+                    onDiscoverAnother()
+                } else {
+                    // Fallback for embedded tab views (not the overlay)
+                    viewModel.unsubscribe()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        viewModel.retake()
+                    }
                 }
             },
             makeCreditsViewModel: makeCreditsViewModel
@@ -277,10 +391,6 @@ struct DiscoveryCreationFlowView: View {
         activeSheet = .missingUploadLocation
     }
 
-    private func showOutOfCreditsAlert() {
-        activeAlert = .outOfCredits
-    }
-
     private func alert(for activeAlert: ActiveAlert) -> Alert {
         switch activeAlert {
         case let .flowError(identifiedError):
@@ -291,12 +401,6 @@ struct DiscoveryCreationFlowView: View {
                 message: Text("We use location to improve the results generated by AI. Allow location access for What's That so we can deliver better results."),
                 primaryButton: .default(Text("Settings"), action: openApplicationSettings),
                 secondaryButton: .cancel()
-            )
-        case .outOfCredits:
-            return Alert(
-                title: Text("Out of credits"),
-                message: Text("Each discovery costs 1 credit. Purchase more to continue."),
-                dismissButton: .default(Text("OK"))
             )
         case .pollingFailed:
             return Alert(
@@ -309,35 +413,24 @@ struct DiscoveryCreationFlowView: View {
                     viewModel.cancelFlow()
                 })
             )
-        case .freeCreditsExhaustedAtAudioGeneration:
-            return Alert(
-                title: Text("So Much More to Discover"),
-                message: Text("Your free credits are used up. To listen to this discovery as an audio guide and make new discoveries, add credits."),
-                primaryButton: .default(Text("Get Credits"), action: {
-                    presentCreditsSheet()
-                }),
-                secondaryButton: .cancel(Text("Not Now"))
-            )
-        case .freeCreditsExhaustedAtConfirm:
-            return Alert(
-                title: Text("So Much More to Discover"),
-                message: Text("Your free credits are used up. To generate new discoveries and audio guides, add credits."),
-                primaryButton: .default(Text("Get Credits"), action: {
-                    presentCreditsSheet()
-                }),
-                secondaryButton: .cancel(Text("Not Now"))
-            )
         }
     }
 
     private func alert(forFlowError error: DiscoveryCreationFlowViewModel.FlowError) -> Alert {
         switch error {
-        case .permissionDenied:
+        case .permissionDenied, .cameraPermissionDenied:
             return Alert(
-                title: Text("Permission Needed"),
+                title: Text("Camera Access Required"),
                 message: Text(error.localizedDescription),
-                primaryButton: .default(Text("Open Settings"), action: openApplicationSettings),
-                secondaryButton: .cancel(Text("Not Now"))
+                primaryButton: .default(Text("Go to Settings"), action: openApplicationSettings),
+                secondaryButton: .cancel(Text("Cancel"))
+            )
+        case .photoLibraryPermissionDenied:
+            return Alert(
+                title: Text("Photo Access Required"),
+                message: Text(error.localizedDescription),
+                primaryButton: .default(Text("Go to Settings"), action: openApplicationSettings),
+                secondaryButton: .cancel(Text("Cancel"))
             )
         default:
             return Alert(

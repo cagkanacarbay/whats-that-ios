@@ -45,7 +45,7 @@ struct SignUpForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandSpacing.medium) {
-            Text("Create your account")
+            Text("Your stories start here.")
                 .font(.adaptiveSystem(size: 28, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .center)
                 .foregroundStyle(titleColor)

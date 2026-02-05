@@ -54,6 +54,9 @@ struct DiscoveryCompletionToastOverlay: View {
                 return .ready
             case .processing:
                 return .generating
+            case .failed:
+                // Generation failed - show retry button
+                return .notGenerated
             default:
                 // If toast was created with generateAudioGuide=true but we don't have an asset yet,
                 // assume it's still generating

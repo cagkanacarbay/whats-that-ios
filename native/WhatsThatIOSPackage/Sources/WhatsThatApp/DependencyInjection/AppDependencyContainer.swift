@@ -31,6 +31,7 @@ public struct AppDependencyContainer: Sendable {
     private let locationService: DiscoveryLocationService
     public let complianceUseCase: ComplianceUseCase
     public let complianceLocalStore: ComplianceLocalStore
+    private let sampleDiscoveryRepository: SampleDiscoveryRepository
 #endif
 
 #if os(iOS)
@@ -49,7 +50,8 @@ public struct AppDependencyContainer: Sendable {
         creditBalanceStore: CreditBalanceStore,
         locationService: DiscoveryLocationService,
         complianceUseCase: ComplianceUseCase,
-        complianceLocalStore: ComplianceLocalStore
+        complianceLocalStore: ComplianceLocalStore,
+        sampleDiscoveryRepository: SampleDiscoveryRepository
     ) {
         self.configuration = configuration
         self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
@@ -69,6 +71,7 @@ public struct AppDependencyContainer: Sendable {
         self.locationService = locationService
         self.complianceUseCase = complianceUseCase
         self.complianceLocalStore = complianceLocalStore
+        self.sampleDiscoveryRepository = sampleDiscoveryRepository
     }
 #else
     init(
@@ -224,6 +227,9 @@ public extension AppDependencyContainer {
             repository: appConfigRepository,
             localStore: complianceLocalStore
         )
+
+        // Sample discoveries for pre-onboarding
+        let sampleDiscoveryRepository = SampleDiscoveryRepository(client: client)
         #endif
 
         #if os(iOS)
@@ -242,7 +248,8 @@ public extension AppDependencyContainer {
             creditBalanceStore: creditBalanceStore,
             locationService: locationService,
             complianceUseCase: complianceUseCase,
-            complianceLocalStore: complianceLocalStore
+            complianceLocalStore: complianceLocalStore,
+            sampleDiscoveryRepository: sampleDiscoveryRepository
         )
 #else
         return AppDependencyContainer(
@@ -347,6 +354,24 @@ public extension AppDependencyContainer {
             creditsRepository: creditsRepository,
             store: creditsStore,
             balanceStore: creditBalanceStore
+        )
+    }
+
+    // MARK: - Pre-Onboarding Discovery Gallery
+
+    /// Returns the sample discovery service for fetching sample discoveries.
+    var sampleDiscoveryService: SampleDiscoveryService {
+        sampleDiscoveryRepository
+    }
+
+    /// Creates a VoiceoverPlaybackController for pre-onboarding use (read-only mode).
+    /// This is a simplified controller without preferences store binding.
+    @MainActor
+    func makeOnboardingVoiceoverPlaybackController() -> VoiceoverPlaybackController {
+        VoiceoverPlaybackController(
+            repository: voiceoverRepository,
+            voiceoverCache: VoiceoverFileCache.shared,
+            preferencesStore: nil
         )
     }
 

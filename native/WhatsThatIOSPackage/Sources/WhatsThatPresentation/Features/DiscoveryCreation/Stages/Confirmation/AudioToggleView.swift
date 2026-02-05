@@ -6,11 +6,13 @@ import WhatsThatShared
 struct AudioToggleView: View {
     @Binding var isOn: Bool
     let palette: DiscoveryCreationPalette
-    
+    /// When true, the toggle is locked ON and cannot be changed (intro mode behavior).
+    var isLocked: Bool = false
+
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .subheadline) private var popoverMaxWidth: CGFloat = 300
     @State private var showInfoPopover: Bool = false
-    
+
     var body: some View {
         HStack(spacing: 8) {
             // Audio label + Info button combined
@@ -24,7 +26,7 @@ struct AudioToggleView: View {
                         // User wants "Audio text a part of that info system".
                         // Usually distinct colors for text vs icon are fine, but let's keep them consistent with previous style.
                         .foregroundColor(palette.textSecondary)
-                    
+
                     Image(systemName: "info.circle")
                         .font(.adaptiveSystem(size: 16, weight: .medium))
                         .foregroundColor(palette.textSecondary.opacity(0.8))
@@ -34,11 +36,13 @@ struct AudioToggleView: View {
             .popover(isPresented: $showInfoPopover, arrowEdge: .bottom) {
                 infoPopoverContent
             }
-            
+
             // Toggle styled like AudioGuidesPageView autoplay
-            Toggle("", isOn: $isOn)
+            // When locked (intro mode), force ON and disable
+            Toggle("", isOn: isLocked ? .constant(true) : $isOn)
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: BrandColors.logo))
+                .disabled(isLocked)
         }
     }
     
@@ -47,23 +51,31 @@ struct AudioToggleView: View {
             Text("Audio Guide")
                 .font(.adaptiveSystem(size: 17, weight: .semibold))
                 .foregroundColor(BrandTheme.palette(for: colorScheme).textPrimary)
-            
+
             Text("This option will generate an audio guide after the discovery is made.")
                 .font(.adaptiveSystem(size: 15))
                 .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(2)
-            
+
             HStack(spacing: 6) {
                 Image(systemName: "bolt.fill")
                     .font(.adaptiveSystem(size: 13))
                     .foregroundColor(BrandColors.logo)
-                
+
                 Text("Costs 1 credit")
                     .font(.adaptiveSystem(size: 13, weight: .medium))
                     .foregroundColor(BrandColors.logo)
             }
             .padding(.top, 4)
+
+            if isLocked {
+                Text("Audio is included with your intro credits.")
+                    .font(.adaptiveSystem(size: 13))
+                    .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary.opacity(0.8))
+                    .italic()
+                    .padding(.top, 2)
+            }
         }
         .padding(.horizontal, UIDevice.isIPad ? 24 : 16)
         .padding(.vertical, UIDevice.isIPad ? 32 : 24)

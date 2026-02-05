@@ -22,7 +22,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     }
 
     enum FlowError: LocalizedError, Equatable {
-        case permissionDenied
+        case permissionDenied // Legacy - kept for compatibility
+        case cameraPermissionDenied
+        case photoLibraryPermissionDenied
         case captureFailed
         case selectionFailed
         case encodingFailed
@@ -34,16 +36,29 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             switch self {
             case .permissionDenied:
                 return "Permission denied. Update your settings to continue."
+            case .cameraPermissionDenied:
+                return "To take photos of things you want to discover, allow camera access in Settings."
+            case .photoLibraryPermissionDenied:
+                return "To select photos from your library, allow photo access in Settings."
             case .captureFailed, .selectionFailed:
-                return "We couldn’t get that photo. Try again."
+                return "We couldn't get that photo. Try again."
             case .encodingFailed:
                 return "We had trouble preparing your photo for analysis."
             case .locationUnavailable:
-                return "We couldn’t access your location."
+                return "We couldn't access your location."
             case .noCredits:
                 return "You need at least 1 credit to continue."
             case let .analysisFailed(message):
                 return message
+            }
+        }
+
+        var isPermissionError: Bool {
+            switch self {
+            case .permissionDenied, .cameraPermissionDenied, .photoLibraryPermissionDenied:
+                return true
+            default:
+                return false
             }
         }
     }
@@ -59,12 +74,17 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     @Published private(set) var error: FlowError?
     @Published private(set) var pushToken: String?
     @Published var showPollingFailedAlert: Bool = false
-    @Published var showFreeCreditsExhaustedAtAudioGeneration: Bool = false
     @Published var showFreeCreditsExhaustedAtConfirm: Bool = false
-    
+
+    /// Audio generating modal to show after first discovery stream completes.
+    @Published var showAudioGeneratingModal: Bool = false
+
     /// Whether to generate an audio guide for this discovery. Defaults to the user's global setting
     /// from VoiceoverPreferences but can be overridden per-discovery without affecting the global setting.
     @Published var generateAudioGuide: Bool = true
+
+    /// Whether the user is in intro mode (audio toggle should be locked ON).
+    @Published private(set) var isInIntroMode: Bool = true
 
     var onDiscoveryCreated: ((Int64) -> Void)?
     var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
@@ -72,6 +92,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     /// Called when polling finds the completed discovery. Parent should upsert discovery to store.
     var onPollingDiscoveryReady: ((DiscoverySummary) -> Void)?
+
+    /// Called when preserved state is restored after user cancels a retake (e.g., cancels camera picker after "Discover Another").
+    /// MainTabView uses this to restore the overlay and tab selection.
+    var onStateRestored: ((DiscoveryCreationFlowType) -> Void)?
     
     // Note: Audio generation is now triggered exclusively via DiscoverySessionManager.onDiscoveryCompleted
     // (configured in MainTabView) rather than through a ViewModel callback.
@@ -120,6 +144,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         let analysisState: DiscoveryAnalysisState
         let confirmationState: DiscoveryConfirmationState?
         let currentMedia: DiscoveryCapturedMedia?
+        let sessionId: UUID?
     }
 
     private var preservedState: PreservedStreamingState?
@@ -131,7 +156,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     
     /// Session ID for tracking the current discovery session in the session manager.
     private var currentSessionId: UUID?
-    
+
     /// Returns polling intervals - short for debugging, normal for production
     private var pollingIntervals: [TimeInterval] {
         #if DEBUG
@@ -186,6 +211,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             debugLog("startFlow blocked; currentState=\(flowStateSummary(flowState))")
             return
         }
+
+        // Update flowState synchronously BEFORE scheduling async work to prevent race condition.
+        // Without this, multiple startFlow() calls could pass the guard before the first
+        // beginFlow() runs and updates the state, causing duplicate capturePhoto() calls.
+        flowState = .requestingPermissions
+
         DispatchQueue.main.async { [weak self] in
             Task {
                 await self?.beginFlow(retake: retake)
@@ -227,11 +258,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         debugLog("unsubscribe()")
 
         // Preserve state if we're in analyzing phase with content
+        // Include session ID so we can re-subscribe if user cancels new discovery
         if let analysisState = self.analysisState {
             preservedState = PreservedStreamingState(
                 analysisState: analysisState,
                 confirmationState: self.confirmationState,
-                currentMedia: self.currentMedia
+                currentMedia: self.currentMedia,
+                sessionId: currentSessionId
             )
         }
 
@@ -269,18 +302,144 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     /// Restores preserved streaming state after cancelled photo selection
     private func restorePreservedStateIfAvailable() {
         guard let preserved = preservedState else { return }
+        print("[DiscoveryCreationFlowViewModel] restorePreservedStateIfAvailable called")
 
+        // Check if the session has already completed while we were away
+        if let sessionId = preserved.sessionId {
+            let sessionManager = DiscoverySessionManager.shared
+            print("[DiscoveryCreationFlowViewModel] Checking session status for \(sessionId)")
+            if let status = sessionManager.sessionStatuses[sessionId] {
+                print("[DiscoveryCreationFlowViewModel] Session status: \(status)")
+                switch status {
+                case .completed(let summary):
+                    // Session completed in background - show the completed discovery
+                    print("[DiscoveryCreationFlowViewModel] Session \(sessionId) already completed, showing result")
+                    analysisState = DiscoveryAnalysisState(
+                        statusMessage: "Discovery complete!",
+                        streamedText: summary.detailDescription ?? "",
+                        isStreaming: false,
+                        isPolling: false,
+                        discoveryIdentifier: summary.id,
+                        metadataTitle: summary.title,
+                        metadataShortDescription: summary.shortDescription,
+                        displayMarkdown: summary.detailDescription ?? "",
+                        discoverySummary: summary
+                    )
+                    confirmationState = preserved.confirmationState
+                    currentMedia = preserved.currentMedia
+                    flowState = .analyzing(analysisState!)
+                    preservedState = nil
+
+                    // User returned after session completed - check if we should show audio modal
+                    Task { [weak self] in
+                        let tracker = FreeCreditsAlertTracker.shared
+                        if await tracker.shouldShowAudioGeneratingModal() {
+                            await tracker.markAudioGeneratingModalShown()
+                            await MainActor.run {
+                                self?.showAudioGeneratingModal = true
+                            }
+                        }
+                    }
+
+                    onStateRestored?(configuration.type)
+                    return
+
+                case .failed(let message):
+                    // Session failed in background - show error
+                    // Still call onStateRestored so MainTabView shows the overlay with the error
+                    debugLog("Session \(sessionId) already failed: \(message)")
+                    error = .analysisFailed(message)
+                    flowState = .error(message: message)
+                    preservedState = nil
+                    onStateRestored?(configuration.type)
+                    return
+
+                case .processing, .queued:
+                    // Session still processing - re-subscribe with fresh state.
+                    // The session manager will replay all accumulated events to rebuild full content.
+                    print("[DiscoveryCreationFlowViewModel] Session \(sessionId) still processing, re-subscribing with fresh state")
+
+                    // Start with fresh analysis state - replayed events will rebuild it
+                    analysisState = DiscoveryAnalysisState()
+                    confirmationState = preserved.confirmationState
+                    currentMedia = preserved.currentMedia
+
+                    // Set up flow state before subscribing so UI is ready
+                    flowState = .analyzing(analysisState!)
+
+                    // Re-subscribe - this will replay all accumulated events
+                    currentSessionId = sessionId
+                    DiscoverySessionManager.shared.subscribe(to: sessionId, subscriber: self)
+                    print("[DiscoveryCreationFlowViewModel] Re-subscribed to session \(sessionId)")
+
+                    // Check if session completed during the race window between status check and subscribe.
+                    // If so, activeSession would be nil and subscribe would have failed silently.
+                    // Re-check status and handle completion if needed.
+                    if let updatedStatus = sessionManager.sessionStatuses[sessionId],
+                       case .completed(let summary) = updatedStatus {
+                        print("[DiscoveryCreationFlowViewModel] Session \(sessionId) completed during re-subscribe race window")
+                        analysisState = DiscoveryAnalysisState(
+                            statusMessage: "Discovery complete!",
+                            streamedText: summary.detailDescription ?? "",
+                            isStreaming: false,
+                            isPolling: false,
+                            discoveryIdentifier: summary.id,
+                            metadataTitle: summary.title,
+                            metadataShortDescription: summary.shortDescription,
+                            displayMarkdown: summary.detailDescription ?? "",
+                            discoverySummary: summary
+                        )
+                        flowState = .analyzing(analysisState!)
+
+                        // Show audio modal if needed
+                        Task { [weak self] in
+                            let tracker = FreeCreditsAlertTracker.shared
+                            if await tracker.shouldShowAudioGeneratingModal() {
+                                await tracker.markAudioGeneratingModalShown()
+                                await MainActor.run {
+                                    self?.showAudioGeneratingModal = true
+                                }
+                            }
+                        }
+
+                        preservedState = nil
+                        onStateRestored?(configuration.type)
+                        return
+                    }
+
+                    // Update flow state after replay to reflect accumulated content
+                    if let updatedState = analysisState {
+                        flowState = .analyzing(updatedState)
+                    }
+
+                    preservedState = nil
+                    onStateRestored?(configuration.type)
+                    return
+                }
+            }
+        }
+
+        // Session ID not found or no status - fall back to preserved state
+        // This handles edge cases where session manager lost track of the session
         analysisState = preserved.analysisState
         confirmationState = preserved.confirmationState
         currentMedia = preserved.currentMedia
         flowState = .analyzing(preserved.analysisState)
 
         preservedState = nil
-        debugLog("Restored preserved streaming state")
+        debugLog("Restored preserved streaming state (fallback - no active session)")
+        onStateRestored?(configuration.type)
     }
 
     /// Clears preserved state (call when user successfully selects new photo)
     private func clearPreservedState() {
+        if preservedState != nil {
+            // User selected a new photo while a discovery was in progress.
+            // They've committed to a second discovery - no need for audio modal on the first.
+            Task {
+                await FreeCreditsAlertTracker.shared.markAudioGeneratingModalShown()
+            }
+        }
         preservedState = nil
     }
 
@@ -304,8 +463,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return
         }
 
+        print("[DiscoveryCreationFlowViewModel] About to call onAnalysisBegan with type: \(configuration.type), callback is \(onAnalysisBegan == nil ? "nil" : "set")")
         onAnalysisBegan?(configuration.type)
-        
+        print("[DiscoveryCreationFlowViewModel] onAnalysisBegan callback completed")
+
         // Save photo to library if enabled (camera captures only)
         if configuration.type == .camera {
             Task { [weak self] in
@@ -348,6 +509,29 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         creditBalance = normalized
     }
 
+    /// Refreshes confirmation state after returning from the credits sheet.
+    /// Updates credit balance and intro mode status which may have changed during purchase.
+    func refreshStateAfterCreditsSheet() async {
+        // Force refresh balance from server - cache may be stale if the purchase's
+        // balance refresh failed or the onBalanceUpdated callback didn't fire
+        do {
+            let freshBalance = try await creditBalanceStore.refresh(force: true)
+            creditBalance = freshBalance
+            debugLog("refreshStateAfterCreditsSheet: balance refreshed to \(freshBalance)")
+        } catch {
+            // Fall back to cached value if server refresh fails
+            if let cached = await creditBalanceStore.getCached() {
+                creditBalance = cached
+                debugLog("refreshStateAfterCreditsSheet: using cached balance \(cached)")
+            }
+        }
+
+        // Re-check intro mode status - user may have exited intro by purchasing
+        let tracker = FreeCreditsAlertTracker.shared
+        isInIntroMode = await tracker.isInIntroMode
+        debugLog("refreshStateAfterCreditsSheet: isInIntroMode = \(isInIntroMode)")
+    }
+
     private func beginFlow(retake: Bool) async {
         error = nil
         analysisTask?.cancel()
@@ -357,14 +541,27 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         creditBalance = nil
         freshLocationForAnalysis = nil
 
+        // Clear stale preserved state on fresh start (not a retake).
+        // When retake=true, user is starting from streaming view and may cancel to return there.
+        // When retake=false, user is starting fresh from tab selection - no state to restore.
+        if !retake {
+            preservedState = nil
+        }
+
+        // Permissions are now requested conditionally:
+        // - Camera/Photo Library: requested when needed (required for functionality)
+        // - Notifications: requested once after purchase, on confirm page
+        // - Location: requested once on second camera use, on confirm page
+
         switch configuration.type {
         case .camera:
             flowState = retake ? .capturingRetake : .requestingPermissions
+
             let granted = await captureService.requestPermission(for: .camera)
             guard granted else {
                 debugLog("Camera permission denied in beginFlow(retake: \(retake))")
-                error = .permissionDenied
-                flowState = .error(message: FlowError.permissionDenied.errorDescription ?? "Permission denied")
+                error = .cameraPermissionDenied
+                flowState = .idle
                 return
             }
             // Do not (re)start continuous tracking here; app-wide tracking handles it.
@@ -411,6 +608,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 debugLog("Invoking captureService.capturePhoto() (retake: \(retake))")
                 let media = try await captureService.capturePhoto()
                 debugLog("captureService.capturePhoto() completed successfully")
+                // Track camera usage for location permission timing (requested on 2nd use)
+                await FreeCreditsAlertTracker.shared.incrementCameraUseCount()
                 clearPreservedState()
                 await prepareConfirmation(with: media)
             } catch {
@@ -431,10 +630,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
         case .upload:
             flowState = retake ? .selectingRetake : .requestingPermissions
+
             let granted = await selectionService.requestPermission()
             guard granted else {
-                error = .permissionDenied
-                flowState = .error(message: FlowError.permissionDenied.errorDescription ?? "Permission denied")
+                error = .photoLibraryPermissionDenied
+                flowState = .idle
                 return
             }
             flowState = retake ? .selectingRetake : .selectingInitial
@@ -458,6 +658,45 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 flowState = .error(message: FlowError.selectionFailed.errorDescription ?? "Selection failed")
             }
         }
+    }
+
+    // MARK: - Conditional Permission Requests
+
+    /// Requests location permission if this is the second+ camera use and permission hasn't been requested yet.
+    /// Called from prepareConfirmation() for camera flow.
+    private func requestLocationPermissionIfNeeded() async {
+        let tracker = FreeCreditsAlertTracker.shared
+        let cameraCount = await tracker.cameraUseCount
+        let hasRequested = await tracker.hasRequestedLocationPermission
+
+        // Request location on 2nd+ camera use, only once
+        guard cameraCount >= 2, !hasRequested else { return }
+
+        // Check if permission is not yet determined (already granted means no need to request)
+        let isGranted = await locationService.isPermissionGranted()
+        guard !isGranted else { return }
+
+        await tracker.markLocationPermissionRequested()
+        // Explicitly request location authorization
+        await locationService.requestLocationAuthorization()
+        // After authorization granted, start tracking
+        await locationService.startTrackingIfNeeded()
+        print("[Permissions] Requesting location permission (camera use #\(cameraCount))")
+    }
+
+    /// Requests notification permission if user has made a purchase and permission hasn't been requested yet.
+    /// Called from prepareConfirmation() after purchase.
+    private func requestNotificationPermissionIfNeeded() async {
+        let tracker = FreeCreditsAlertTracker.shared
+        let hasPurchased = await tracker.hasMadePurchase
+        let hasRequested = await tracker.hasRequestedNotificationPermission
+
+        // Only request after user has made a purchase, and only once
+        guard hasPurchased, !hasRequested else { return }
+
+        await tracker.markNotificationPermissionRequested()
+        _ = try? await pushService.requestPushAuthorizationIfNeeded()
+        print("[Permissions] Requesting notification permission (post-purchase)")
     }
 
     private func apply(permissionGranted granted: Bool) async {
@@ -619,9 +858,16 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         confirmationState = initialConfirmationState
         flowState = .confirming(initialConfirmationState)
         currentMedia = media
-        
+
+        // Check intro mode state - audio toggle is locked ON during intro
+        let tracker = FreeCreditsAlertTracker.shared
+        isInIntroMode = await tracker.isInIntroMode
+
         // Load the default value for generateAudioGuide from preferences
-        if let store = voiceoverPreferencesStore {
+        // During intro mode, force audio ON regardless of user preference
+        if isInIntroMode {
+            generateAudioGuide = true
+        } else if let store = voiceoverPreferencesStore {
             let prefs = await store.load()
             generateAudioGuide = prefs.autoEnabled
         }
@@ -702,23 +948,28 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
 
         async let historyTask = historyRepository.fetchRecentDiscoveries(limit: configuration.recentHistoryLimit)
-        async let pushTask = pushService.requestPushAuthorizationIfNeeded()
         let ipopPreferences = await ipopPreferencesStore?.load()
+
+        // Conditional permission requests on confirm page:
+        // - Location: requested on 2nd+ camera use (once)
+        // - Notifications: requested after purchase (once)
+        if flowType == .camera {
+            await requestLocationPermissionIfNeeded()
+        }
+        await requestNotificationPermissionIfNeeded()
+
+        // Get push token if notifications are already authorized (don't request permission here)
+        do {
+            let token = try await pushService.getPushTokenIfAuthorized()
+            pushToken = token
+        } catch {
+            pushToken = nil
+        }
 
         // Refresh credits if stale; if it fails, keep the cached value.
         do {
             let balance = try await creditBalanceStore.refreshIfStale()
             creditBalance = balance
-            
-            // Check if we should show the "credits exhausted" alert at confirm stage
-            let tracker = FreeCreditsAlertTracker.shared
-            if await tracker.shouldShowCreditsExhaustedAlert(currentBalance: balance) {
-                await tracker.markCreditsExhaustedAlertShown()
-                await MainActor.run {
-                    self.showFreeCreditsExhaustedAtConfirm = true
-                }
-                print("[DiscoveryCreationFlowViewModel] Showing credits exhausted alert at confirm stage")
-            }
         } catch {
             // Keep existing cached value
         }
@@ -734,13 +985,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             )
         } catch {
             confirmationState?.customContext = nil
-        }
-
-        do {
-            let token = try await pushTask
-            pushToken = token
-        } catch {
-            pushToken = nil
         }
 
         // Preserve the previously computed location permission value.
@@ -762,6 +1006,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         // If analysis has already begun, do not bounce the UI back to confirmation.
         if case .confirming = flowState {
             flowState = .confirming(confirmationState!)
+        }
+
+        // Check intro discovery limit AFTER showing confirm stage.
+        // User sees their photo, then we show the credits exhausted modal over it.
+        if await tracker.shouldShowCreditsExhaustedForIntroLimit() {
+            showFreeCreditsExhaustedAtConfirm = true
+            print("[DiscoveryCreationFlowViewModel] Showing credits exhausted modal at confirm stage - intro discovery limit reached")
         }
     }
 
@@ -788,6 +1039,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             await MainActor.run {
                 self.creditBalance = adjusted
             }
+        }
+
+        // Optimistically increment intro discovery count
+        Task {
+            await FreeCreditsAlertTracker.shared.incrementIntroDiscoveryCount()
         }
 
         do {
@@ -914,6 +1170,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
             // Coarse phase: do not republish flowState for each token.
         case let .complete(discoveryId, systemVersion, userVersion, serverCreditBalance):
+            print("[DiscoveryCreationFlowViewModel] Received .complete event for discoveryId: \(discoveryId)")
             analysisState = analysisStateUpdated { state in
                 state.discoveryIdentifier = discoveryId
                 state.isStreaming = false
@@ -926,6 +1183,11 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             cacheDiscoveryImageIfNeeded(for: discoveryId)
             handleSuccessfulCreation(discoveryId: discoveryId, serverCreditBalance: serverCreditBalance)
         case let .error(message, status):
+            // Decrement intro discovery count - edge function returned error, discovery not created
+            Task {
+                await FreeCreditsAlertTracker.shared.decrementIntroDiscoveryCount()
+            }
+
             if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
                 Task { [weak self] in
@@ -1081,9 +1343,13 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     /// Unified success handler for credits and TTS. Called from both real-time streaming and polling recovery.
     private func handleSuccessfulCreation(discoveryId: Int64, serverCreditBalance: Int? = nil) {
+        print("[DiscoveryCreationFlowViewModel] handleSuccessfulCreation called for discoveryId: \(discoveryId)")
         // Sync credits: use server-provided balance if available, otherwise adjust optimistically.
         Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                print("[DiscoveryCreationFlowViewModel] handleSuccessfulCreation: self was nil, exiting early")
+                return
+            }
             let updated: Int?
             if let serverBalance = serverCreditBalance {
                 // Use the authoritative server balance
@@ -1096,23 +1362,24 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             await MainActor.run {
                 self.creditBalance = updated
             }
-            
-        // Check if we should show the "credits exhausted" alert
-            // This triggers when credits reach 0 for the first time
-            let finalBalance = updated ?? serverCreditBalance ?? 0
+
+            // Check if we should show the "audio generating" modal for first discovery
+            // Note: Credits exhausted modal is now only shown at confirm stage based on intro discovery limit
             let tracker = FreeCreditsAlertTracker.shared
-            let shouldShow = await tracker.shouldShowCreditsExhaustedAlert(currentBalance: finalBalance)
-            print("[DiscoveryCreationFlowViewModel] Credits check: balance=\(finalBalance), shouldShowExhausted=\(shouldShow)")
-            
-            if shouldShow {
-                await tracker.markCreditsExhaustedAlertShown()
+            let shouldShowAudioModal = await tracker.shouldShowAudioGeneratingModal()
+            print("[DiscoveryCreationFlowViewModel] shouldShowAudioModal: \(shouldShowAudioModal)")
+            if shouldShowAudioModal {
+                await tracker.markAudioGeneratingModalShown()
                 await MainActor.run {
-                    self.showFreeCreditsExhaustedAtAudioGeneration = true
+                    self.showAudioGeneratingModal = true
+                    print("[DiscoveryCreationFlowViewModel] showAudioGeneratingModal set to true")
                 }
-                print("[DiscoveryCreationFlowViewModel] Showing credits exhausted alert")
+                print("[DiscoveryCreationFlowViewModel] Showing audio generating modal")
+            } else {
+                print("[DiscoveryCreationFlowViewModel] NOT showing audio generating modal - already seen or user not bound")
             }
         }
-        
+
         // Note: Audio generation is now triggered exclusively by sessionDidComplete
         // to avoid race conditions with multiple code paths.
     }

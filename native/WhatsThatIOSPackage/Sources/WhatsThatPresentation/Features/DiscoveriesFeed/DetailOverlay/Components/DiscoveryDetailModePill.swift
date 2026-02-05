@@ -11,6 +11,7 @@ struct DiscoveryDetailModePill: View {
     
     @ObservedObject private var controller: VoiceoverPlaybackController
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.audioServices) private var audioServices
     
     init(
         discovery: DiscoverySummary,
@@ -28,14 +29,20 @@ struct DiscoveryDetailModePill: View {
     
     /// Determines if the pill should be visible based on playback state.
     /// Rules:
+    /// - Hidden in pre-onboarding (no audioServices available)
     /// - Visible only when: discovery.id matches currentDiscovery.id AND player is playing/paused
     /// - Hidden for all other discoveries and when playback is idle, stopped, or failed
     var shouldShow: Bool {
+        // Hide in pre-onboarding (no audioServices available)
+        guard audioServices != nil else {
+            return false
+        }
+
         guard let currentDiscovery = controller.currentDiscovery,
               currentDiscovery.id == discovery.id else {
             return false
         }
-        
+
         switch controller.playbackState {
         case .playing, .paused:
             return true

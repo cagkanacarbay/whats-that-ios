@@ -323,6 +323,8 @@ private final class StubLocationService: DiscoveryLocationService {
 
     func startTrackingIfNeeded() async {}
 
+    func requestLocationAuthorization() async {}
+
     func stopTracking() {}
 
     func currentLocation() async -> DiscoveryLocation? {

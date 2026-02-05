@@ -53,6 +53,9 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
     }
 
     public func startTrackingIfNeeded() async {
+        // NOTE: This method does NOT request authorization. It only starts tracking
+        // if permission is already granted. Use requestLocationAuthorization() to
+        // explicitly request permission (e.g., on 2nd camera use per design doc).
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -60,7 +63,6 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     return
                 }
                 Task { @MainActor in
-                    await self.requestAuthorizationIfNeeded()
                     self.locationManager.desiredAccuracy = self.config.locationDesiredAccuracyMeters
                     self.locationManager.distanceFilter = self.config.locationDistanceFilterMeters
                     #if DEBUG
@@ -71,6 +73,10 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
             }
         }
 
+        // Only start tracking if already authorized
+        let isAuthorized = await isPermissionGranted()
+        guard isAuthorized else { return }
+
         queue.async { [weak self] in
             guard let self, !self.isUpdating else { return }
             self.isUpdating = true
@@ -78,6 +84,19 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
             self.log("startUpdatingLocation() isUpdating=true")
             #endif
             Task { @MainActor in self.locationManager.startUpdatingLocation() }
+        }
+    }
+
+    /// Explicitly request location authorization. Call this only when the design
+    /// specifies permission should be requested (e.g., on 2nd camera use).
+    public func requestLocationAuthorization() async {
+        await MainActor.run {
+            switch locationManager.authorizationStatus {
+            case .notDetermined:
+                locationManager.requestWhenInUseAuthorization()
+            default:
+                break
+            }
         }
     }
 
@@ -93,6 +112,11 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
     }
 
     public func currentLocation() async -> DiscoveryLocation? {
+        // NOTE: This method does NOT request authorization. It returns nil if
+        // permission is not granted or no location is available.
+        let isAuthorized = await isPermissionGranted()
+        guard isAuthorized else { return nil }
+
         return await withCheckedContinuation { (continuation: CheckedContinuation<DiscoveryLocation?, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -110,7 +134,6 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                     #endif
                     self.pendingContinuations[id] = continuation
                     Task { @MainActor in
-                        await self.requestAuthorizationIfNeeded()
                         self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation() pending=\(self.pendingContinuations.count)")
                         self.locationManager.requestLocation()
                     }
@@ -133,14 +156,16 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
 
     public func isPermissionGranted() async -> Bool {
         await MainActor.run {
-            let enabled = CLLocationManager.locationServicesEnabled()
-            self.log("isPermissionGranted? locationServicesEnabled=\(enabled)")
-            switch locationManager.authorizationStatus {
+            // Note: We intentionally avoid calling CLLocationManager.locationServicesEnabled()
+            // here as it can block the main thread. The authorizationStatus check is sufficient
+            // since denied/restricted states cover the case where location services are disabled.
+            let status = locationManager.authorizationStatus
+            switch status {
             case .authorizedAlways, .authorizedWhenInUse:
-                self.log("Permission granted")
+                self.log("Permission granted (status=\(Self.describeAuthorization(status)))")
                 return true
             default:
-                self.log("Permission not granted (status=\(Self.describeAuthorization(locationManager.authorizationStatus)))")
+                self.log("Permission not granted (status=\(Self.describeAuthorization(status)))")
                 return false
             }
         }
@@ -150,6 +175,12 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
         if !requireFresh {
             return await currentLocation()
         }
+
+        // NOTE: This method does NOT request authorization. It returns nil if
+        // permission is not granted.
+        let isAuthorized = await isPermissionGranted()
+        guard isAuthorized else { return nil }
+
         return await withCheckedContinuation { (continuation: CheckedContinuation<DiscoveryLocation?, Never>) in
             queue.async { [weak self] in
                 guard let self else {
@@ -174,7 +205,6 @@ public final class CoreLocationDiscoveryLocationService: NSObject, DiscoveryLoca
                 self.pendingContinuations[id] = continuation
                 // Kick off a request for a fresh one-shot location
                 Task { @MainActor in
-                    await self.requestAuthorizationIfNeeded()
                     self.log("[FF_EVENT] REQUEST id=\(id.uuidString) action=requestLocation() pending=\(self.pendingContinuations.count)")
                     self.locationManager.requestLocation()
                 }
@@ -443,12 +473,18 @@ private final class EphemeralFetcher: NSObject, CLLocationManagerDelegate, @unch
     }
 
     func start() {
-        // If permission undetermined, request it; otherwise request a one-shot fix
+        // NOTE: This fetcher does NOT request authorization. It only works if
+        // permission is already granted. Fails immediately if not authorized.
         switch manager.authorizationStatus {
-        case .notDetermined:
-            manager.requestWhenInUseAuthorization()
-        default:
+        case .authorizedAlways, .authorizedWhenInUse:
             manager.requestLocation()
+        case .notDetermined, .denied, .restricted:
+            // Not authorized - fail immediately
+            finish(nil)
+            return
+        @unknown default:
+            finish(nil)
+            return
         }
 
         // Timeout guard
@@ -471,9 +507,13 @@ private final class EphemeralFetcher: NSObject, CLLocationManagerDelegate, @unch
 
     // MARK: - CLLocationManagerDelegate
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        // Authorization changed after start - if now authorized, request location
         switch status {
         case .authorizedAlways, .authorizedWhenInUse:
             manager.requestLocation()
+        case .denied, .restricted:
+            // Permission denied after start - fail
+            finish(nil)
         default:
             break
         }

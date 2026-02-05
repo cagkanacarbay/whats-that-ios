@@ -20,8 +20,9 @@ struct MainTabView: View {
     }
 
     @State private var selectedTab: Tab
-    @StateObject private var cameraViewModel: DiscoveryCreationFlowViewModel
-    @StateObject private var uploadViewModel: DiscoveryCreationFlowViewModel
+    /// ViewModels are owned by RootContentView as @StateObject, passed here as @ObservedObject
+    @ObservedObject private var cameraViewModel: DiscoveryCreationFlowViewModel
+    @ObservedObject private var uploadViewModel: DiscoveryCreationFlowViewModel
     /// AudioServicesContainer is passed from RootContentView to ensure single shared instance
     @ObservedObject private var audioServices: AudioServicesContainer
     @ObservedObject private var storeObserver: DiscoveryStoreObserver
@@ -33,9 +34,17 @@ struct MainTabView: View {
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
     @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
-    
 
-    
+    // Credits sheet state (opened from various triggers)
+    @State private var showCreditsSheetFromExhausted: Bool = false
+    @State private var creditsExhaustedCreditsViewModel: CreditsViewModel?
+
+    // Free credits exhausted full-screen modal (triggered from either camera or upload viewModel)
+    @State private var showFreeCreditsExhaustedModal: Bool = false
+
+    // Flag to present credits sheet AFTER fullScreenCover dismisses (avoids SwiftUI presentation race)
+    @State private var shouldPresentCreditsAfterDismiss: Bool = false
+
     // Reference to session manager (singleton, not StateObject since it's shared globally)
     private var sessionManager: DiscoverySessionManager { DiscoverySessionManager.shared }
 
@@ -46,6 +55,14 @@ struct MainTabView: View {
     @Binding private var isSettingsPresented: Bool
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let onScreenSafetyChanged: ((Bool) -> Void)?
+
+    // Post-purchase configuration closures
+    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
+    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
+    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
+    private let fetchVoiceSampleURL: ((String) async -> URL?)?
+    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
+    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
 
     init(
         storeObserver: DiscoveryStoreObserver,
@@ -58,7 +75,13 @@ struct MainTabView: View {
         onSettings: (() -> Void)? = nil,
         isSettingsPresented: Binding<Bool> = .constant(false),
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
-        onScreenSafetyChanged: ((Bool) -> Void)? = nil
+        onScreenSafetyChanged: ((Bool) -> Void)? = nil,
+        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
+        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
+        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
+        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
+        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
+        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
@@ -67,11 +90,17 @@ struct MainTabView: View {
         self._isSettingsPresented = isSettingsPresented
         self.makeCreditsViewModel = makeCreditsViewModel
         self.onScreenSafetyChanged = onScreenSafetyChanged
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
-        _cameraViewModel = StateObject(wrappedValue: cameraViewModel)
-        _uploadViewModel = StateObject(wrappedValue: uploadViewModel)
+        _cameraViewModel = ObservedObject(wrappedValue: cameraViewModel)
+        _uploadViewModel = ObservedObject(wrappedValue: uploadViewModel)
         _audioServices = ObservedObject(wrappedValue: audioServices)
-        
+
         // Enforce consistent tab bar background to prevent transparency issues during custom transitions
         Self.configureTabBarAppearance()
     }
@@ -84,6 +113,7 @@ struct MainTabView: View {
 
     
     var body: some View {
+        let _ = print("[MainTabView] body evaluated: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 DiscoveryCreationFlowView(
@@ -91,7 +121,14 @@ struct MainTabView: View {
                     placeholderEmoji: "📷",
                     ctaTitle: "Take a photo to discover",
                     retryTitle: "Try again",
-                    makeCreditsViewModel: makeCreditsViewModel
+                    makeCreditsViewModel: makeCreditsViewModel,
+                    fetchRecentDiscoveries: { storeObserver.discoveries },
+                    loadVoiceoverPreferences: loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: saveVoiceoverPreferences,
+                    fetchVoiceOptions: fetchVoiceOptions,
+                    fetchVoiceSampleURL: fetchVoiceSampleURL,
+                    loadIPoPPreferences: loadIPoPPreferences,
+                    saveIPoPPreferences: saveIPoPPreferences
                 )
                 .tag(Tab.camera)
                 .tabItem {
@@ -126,7 +163,13 @@ struct MainTabView: View {
                     onTextSelected: { discovery in
                         handleAudioGuideTextSelected(discovery)
                     },
-                    makeCreditsViewModel: makeCreditsViewModel
+                    makeCreditsViewModel: makeCreditsViewModel,
+                    loadVoiceoverPreferences: loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: saveVoiceoverPreferences,
+                    fetchVoiceOptions: fetchVoiceOptions,
+                    fetchVoiceSampleURL: fetchVoiceSampleURL,
+                    loadIPoPPreferences: loadIPoPPreferences,
+                    saveIPoPPreferences: saveIPoPPreferences
                 )
                 .tag(Tab.audioGuides)
                 .tabItem {
@@ -138,7 +181,14 @@ struct MainTabView: View {
                     placeholderEmoji: "🖼️",
                     ctaTitle: "Choose a photo from your gallery",
                     retryTitle: "Select again",
-                    makeCreditsViewModel: makeCreditsViewModel
+                    makeCreditsViewModel: makeCreditsViewModel,
+                    fetchRecentDiscoveries: { storeObserver.discoveries },
+                    loadVoiceoverPreferences: loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: saveVoiceoverPreferences,
+                    fetchVoiceOptions: fetchVoiceOptions,
+                    fetchVoiceSampleURL: fetchVoiceSampleURL,
+                    loadIPoPPreferences: loadIPoPPreferences,
+                    saveIPoPPreferences: saveIPoPPreferences
                 )
                 .tag(Tab.upload)
                 .tabItem {
@@ -157,7 +207,34 @@ struct MainTabView: View {
                     placeholderEmoji: overlayTab == .camera ? "📷" : "🖼️",
                     ctaTitle: overlayTab == .camera ? "Take a photo to discover" : "Choose a photo from your gallery",
                     retryTitle: overlayTab == .camera ? "Try again" : "Select again",
-                    makeCreditsViewModel: makeCreditsViewModel
+                    isOverlay: true,
+                    onDiscoverAnother: {
+                        // Handle "Discover Another" from audio generating modal.
+                        // This callback is invoked AFTER the modal is fully dismissed (via onDismiss).
+                        let targetTab: Tab = overlayTab == .camera ? .camera : .upload
+                        let targetViewModel = overlayTab == .camera ? cameraViewModel : uploadViewModel
+
+                        // Unsubscribe preserves state for cancellation restoration.
+                        // If user cancels the new capture, they'll return to this completed discovery.
+                        targetViewModel.unsubscribe()
+
+                        // Switch to the target tab so user sees confirm stage there after capture.
+                        // The onChange handler dispatches handleTabChange async, so retake() runs first.
+                        // By the time handleTabChange runs, flowState is already capturing, so
+                        // canStartFlow() returns false and won't interfere with the retake flow.
+                        selectedTab = targetTab
+
+                        // Start new capture via retake() which keeps preservedState intact.
+                        targetViewModel.retake()
+                    },
+                    makeCreditsViewModel: makeCreditsViewModel,
+                    fetchRecentDiscoveries: { storeObserver.discoveries },
+                    loadVoiceoverPreferences: loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: saveVoiceoverPreferences,
+                    fetchVoiceOptions: fetchVoiceOptions,
+                    fetchVoiceSampleURL: fetchVoiceSampleURL,
+                    loadIPoPPreferences: loadIPoPPreferences,
+                    saveIPoPPreferences: saveIPoPPreferences
                 )
                 .padding(.bottom, overlayViewModel.flowState.phase == .analyzing ? 49 : 0)
                 .transition(.opacity)
@@ -205,6 +282,37 @@ struct MainTabView: View {
             )
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
+        .sheet(isPresented: $showCreditsSheetFromExhausted, onDismiss: {
+            creditsExhaustedCreditsViewModel = nil
+        }) {
+            if let viewModel = creditsExhaustedCreditsViewModel {
+                NavigationStack {
+                    CreditsView(
+                        viewModel: viewModel,
+                        loadVoiceoverPreferences: loadVoiceoverPreferences ?? { VoiceoverPreferences(autoEnabled: false, voiceModelId: "", ttsModel: "s1") },
+                        saveVoiceoverPreferences: saveVoiceoverPreferences ?? { _ in },
+                        fetchVoiceOptions: fetchVoiceOptions ?? { [] },
+                        fetchVoiceSampleURL: fetchVoiceSampleURL ?? { _ in nil },
+                        loadIPoPPreferences: loadIPoPPreferences ?? { nil },
+                        saveIPoPPreferences: saveIPoPPreferences ?? { _ in }
+                    )
+                }
+                .presentationDetents([.fraction(0.8), .large])
+            } else {
+                // Fallback view if credits view model failed to initialize
+                CreditsSheetErrorView(
+                    onRetry: {
+                        if let maker = makeCreditsViewModel {
+                            creditsExhaustedCreditsViewModel = maker()
+                        }
+                    },
+                    onDismiss: {
+                        showCreditsSheetFromExhausted = false
+                    }
+                )
+                .presentationDetents([.fraction(0.5)])
+            }
+        }
         .audioServices(audioServices)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
@@ -220,7 +328,18 @@ struct MainTabView: View {
             uploadViewModel.onPollingDiscoveryReady = { discovery in
                 handlePollingDiscoveryReady(discovery)
             }
-            
+
+            // Handle state restoration when user cancels "Discover Another" (e.g., cancels camera picker)
+            // This restores the overlay and switches back to discoveries tab
+            cameraViewModel.onStateRestored = { _ in
+                activeOverlayTab = .camera
+                selectedTab = .discoveries
+            }
+            uploadViewModel.onStateRestored = { _ in
+                activeOverlayTab = .upload
+                selectedTab = .discoveries
+            }
+
             // Note: Audio generation is now triggered exclusively via sessionManager.onDiscoveryCompleted
             // (configured below) which runs before sessionDidComplete updates UI state.
             
@@ -239,13 +358,13 @@ struct MainTabView: View {
                 // Background discovery failures are silently ignored for now
             }
 
-
             handleTabChange(to: selectedTab, isInitial: true)
         }
         .onDisappear {
             summaryFallbackTask?.cancel()
         }
-        .onChange(of: selectedTab) { _, newValue in
+        .onChange(of: selectedTab) { oldValue, newValue in
+            print("[MainTabView] onChange(selectedTab): \(oldValue) -> \(newValue)")
             // Defer to next runloop to prevent "update multiple times per frame" error
             DispatchQueue.main.async {
                 handleTabChange(to: newValue)
@@ -263,9 +382,61 @@ struct MainTabView: View {
                 updateOverlayVisibility(for: .upload, phase: newPhase)
             }
         }
+        .onChange(of: activeOverlayTab) { oldValue, newValue in
+            print("[MainTabView] onChange(activeOverlayTab): \(String(describing: oldValue)) -> \(String(describing: newValue))")
+        }
+        // Watch for free credits exhausted modal from either viewModel
+        // We present at MainTabView level to ensure visibility regardless of flow state
+        .onChange(of: cameraViewModel.showFreeCreditsExhaustedAtConfirm) { _, show in
+            if show {
+                // Reset viewModel flag immediately to prevent DiscoveryCreationFlowView from also presenting
+                cameraViewModel.showFreeCreditsExhaustedAtConfirm = false
+                showFreeCreditsExhaustedModal = true
+            }
+        }
+        .onChange(of: uploadViewModel.showFreeCreditsExhaustedAtConfirm) { _, show in
+            if show {
+                // Reset viewModel flag immediately to prevent DiscoveryCreationFlowView from also presenting
+                uploadViewModel.showFreeCreditsExhaustedAtConfirm = false
+                showFreeCreditsExhaustedModal = true
+            }
+        }
+        .fullScreenCover(isPresented: $showFreeCreditsExhaustedModal, onDismiss: {
+            // Present credits sheet AFTER fullScreenCover is fully dismissed to avoid SwiftUI race condition
+            if shouldPresentCreditsAfterDismiss {
+                shouldPresentCreditsAfterDismiss = false
+                if let maker = makeCreditsViewModel {
+                    creditsExhaustedCreditsViewModel = maker()
+                    // Small delay to ensure clean presentation after dismiss animation completes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        showCreditsSheetFromExhausted = true
+                    }
+                }
+            }
+        }) {
+            CreditsExhaustedFullScreenView(
+                discoveries: Array(storeObserver.discoveries.prefix(3)),
+                playbackController: audioServices.playbackController,
+                onGetCredits: {
+                    // Set flag to present credits sheet after this fullScreenCover dismisses
+                    shouldPresentCreditsAfterDismiss = true
+                    showFreeCreditsExhaustedModal = false
+                },
+                onDismiss: {
+                    shouldPresentCreditsAfterDismiss = false
+                    showFreeCreditsExhaustedModal = false
+                    // Cancel flows and return to discoveries - user hit intro limit
+                    cameraViewModel.cancelFlow()
+                    uploadViewModel.cancelFlow()
+                    activeOverlayTab = nil
+                    selectedTab = .discoveries
+                }
+            )
+        }
     }
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
+        print("[MainTabView] handleTabChange called: tab=\(tab), isInitial=\(isInitial), activeOverlayTab=\(String(describing: activeOverlayTab))")
         // Track screen safety for compliance overlay deferral
         // Discoveries and Audio Guides are "safe" screens (not mid-action)
         // Camera and Upload are "unsafe" (user may be capturing/selecting)
@@ -384,6 +555,8 @@ struct MainTabView: View {
     }
 
     private func handleAnalysisBegan(_ type: DiscoveryCreationFlowType) {
+        print("[MainTabView] handleAnalysisBegan called with type: \(type)")
+        print("[MainTabView] BEFORE: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
         switch type {
         case .camera:
             activeOverlayTab = .camera
@@ -391,6 +564,7 @@ struct MainTabView: View {
             activeOverlayTab = .upload
         }
         selectedTab = .discoveries
+        print("[MainTabView] AFTER: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
     }
 
     private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
@@ -442,8 +616,13 @@ struct MainTabView: View {
     }
 
     private func updateOverlayVisibility(for tab: Tab, phase: DiscoveryCreationPhase) {
-        guard activeOverlayTab == tab else { return }
+        print("[MainTabView] updateOverlayVisibility: tab=\(tab), phase=\(phase), activeOverlayTab=\(String(describing: activeOverlayTab))")
+        guard activeOverlayTab == tab else {
+            print("[MainTabView] updateOverlayVisibility: guard failed, activeOverlayTab != tab")
+            return
+        }
         if !shouldShowOverlay(for: phase) {
+            print("[MainTabView] updateOverlayVisibility: clearing activeOverlayTab")
             activeOverlayTab = nil
             // Screen becomes safe when overlay dismissed on discoveries/audioGuides
             if selectedTab == .discoveries || selectedTab == .audioGuides {
@@ -503,13 +682,81 @@ struct MainTabView: View {
     private static func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
         appearance.configureWithDefaultBackground()
-        
+
         // This effectively disables the 'break-through' transparency when scrolling to the edge,
         // ensuring the tab bar always has its standard background material.
         // This is necessary because our custom sheet transitions can confuse the system's
         // automatic bar visibility logic.
         UITabBar.appearance().scrollEdgeAppearance = appearance
         UITabBar.appearance().standardAppearance = appearance
+    }
+
+    private func presentCreditsSheetFromExhausted() {
+        guard let factory = makeCreditsViewModel else { return }
+        creditsExhaustedCreditsViewModel = factory()
+        showCreditsSheetFromExhausted = true
+    }
+}
+
+// MARK: - Credits Sheet Error View
+
+/// Fallback view shown when the credits sheet fails to load properly
+private struct CreditsSheetErrorView: View {
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: BrandTheme.Palette {
+        BrandTheme.palette(for: colorScheme)
+    }
+
+    var body: some View {
+        VStack(spacing: BrandSpacing.large) {
+            Spacer()
+
+            VStack(spacing: BrandSpacing.medium) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 40))
+                    .foregroundStyle(palette.textSecondary)
+
+                Text("Something went wrong")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(palette.textPrimary)
+
+                Text("We couldn't load the credits page. Please try again.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, BrandSpacing.large)
+            }
+
+            Spacer()
+
+            VStack(spacing: BrandSpacing.small) {
+                Button(action: onRetry) {
+                    Text("Try Again")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(
+                    Capsule()
+                        .fill(palette.primaryAction)
+                )
+
+                Button(action: onDismiss) {
+                    Text("Close")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(palette.textSecondary)
+                }
+            }
+            .padding(.horizontal, BrandSpacing.large)
+            .padding(.bottom, BrandSpacing.xLarge)
+        }
+        .background(palette.background.ignoresSafeArea())
     }
 }
 

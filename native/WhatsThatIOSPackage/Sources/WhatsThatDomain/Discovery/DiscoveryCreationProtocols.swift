@@ -20,6 +20,9 @@ public protocol DiscoveryLocationService: Sendable {
     func currentLocationIfRecent(maxAge: TimeInterval, maxAccuracyMeters: Double) async -> DiscoveryLocation?
     /// Returns app-level location permission status.
     func isPermissionGranted() async -> Bool
+    /// Explicitly request location authorization. Call this only when design specifies
+    /// permission should be requested (e.g., on 2nd camera use per design doc).
+    func requestLocationAuthorization() async
     /// Optionally request a fresh location fix, avoiding immediate last-known returns when true.
     func currentLocation(requireFresh: Bool) async -> DiscoveryLocation?
     /// Requests a fresh, high-accuracy fix using a short-lived, dedicated CLLocationManager.
@@ -38,6 +41,7 @@ public protocol DiscoveryLocationService: Sendable {
 
 public extension DiscoveryLocationService {
     func isPermissionGranted() async -> Bool { false }
+    func requestLocationAuthorization() async {}
     func currentLocationIfRecent(maxAge _: TimeInterval, maxAccuracyMeters _: Double) async -> DiscoveryLocation? { nil }
     func currentLocation(requireFresh: Bool) async -> DiscoveryLocation? {
         await currentLocation()
@@ -58,6 +62,12 @@ public protocol DiscoveryHistoryRepository: Sendable {
 
 public protocol DiscoveryPushService: Sendable {
     func requestPushAuthorizationIfNeeded() async throws -> String?
+    /// Returns the push token if notifications are already authorized, without requesting permission.
+    func getPushTokenIfAuthorized() async throws -> String?
+}
+
+public extension DiscoveryPushService {
+    func getPushTokenIfAuthorized() async throws -> String? { nil }
 }
 
 public struct DiscoveryAnalysisPayload: Sendable, Equatable {

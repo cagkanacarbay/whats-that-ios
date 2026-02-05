@@ -8,6 +8,7 @@ struct DiscoveryCardImageView: View {
     let width: CGFloat
     let height: CGFloat
     @State private var didCacheSnapshot = false
+    @State private var animateShimmer = false
 
     var body: some View {
         DiscoveryCachedImage(
@@ -53,11 +54,36 @@ struct DiscoveryCardImageView: View {
                 endPoint: .bottomTrailing
             )
 
+            // Shimmer overlay
+            LinearGradient(
+                colors: [
+                    Color.gray.opacity(0.1),
+                    Color.gray.opacity(0.3),
+                    Color.gray.opacity(0.1)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .mask {
+                Rectangle()
+                    .fill(Color.white.opacity(animateShimmer ? 1 : 0))
+                    .blur(radius: 40)
+                    .offset(x: animateShimmer ? width : -width)
+            }
+            .animation(
+                .easeInOut(duration: 1.2)
+                    .repeatForever(autoreverses: false),
+                value: animateShimmer
+            )
+
             Image("BrandLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 44, height: 44)
                 .opacity(0.25)
+        }
+        .onAppear {
+            animateShimmer = true
         }
     }
 

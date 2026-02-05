@@ -178,14 +178,22 @@ public final class DiscoverySessionManager: ObservableObject {
     
     /// Subscribe to an active session to receive events.
     /// If already subscribed, replaces the existing subscriber.
+    /// Replays all accumulated events to the new subscriber to catch them up.
     public func subscribe(to sessionId: UUID, subscriber: DiscoverySessionSubscriber) {
         guard var session = activeSession, session.id == sessionId else {
             print("[DiscoverySessionManager] Cannot subscribe - session \(sessionId) not active")
             return
         }
+
+        // Replay accumulated events to catch up the new subscriber
+        let eventsToReplay = session.accumulatedEvents
+        print("[DiscoverySessionManager] Subscribed to session \(sessionId), replaying \(eventsToReplay.count) accumulated events")
+        for event in eventsToReplay {
+            subscriber.handleSessionEvent(event)
+        }
+
         session.subscriber = subscriber
         activeSession = session
-        print("[DiscoverySessionManager] Subscribed to session \(sessionId)")
     }
     
     /// Unsubscribe from a session. Stream continues, but events are no longer forwarded.
@@ -332,15 +340,20 @@ public final class DiscoverySessionManager: ObservableObject {
     }
     
     /// Deliver an event to the subscriber if attached, otherwise consume silently.
+    /// Always accumulates events for replay when a new subscriber joins mid-stream.
     @MainActor
     private func deliverEvent(_ event: DiscoveryAnalysisEvent, for sessionId: UUID) {
-        guard let session = activeSession, session.id == sessionId else { return }
-        
+        guard var session = activeSession, session.id == sessionId else { return }
+
+        // Accumulate event for potential replay to late subscribers
+        session.accumulatedEvents.append(event)
+        activeSession = session
+
         if let subscriber = session.subscriber {
             // Subscriber attached → forward event
             subscriber.handleSessionEvent(event)
         }
-        // If no subscriber, we silently consume the event.
+        // If no subscriber, event is accumulated but not forwarded.
         // Completion/error handling happens in executeAnalysis regardless.
     }
     
@@ -367,10 +380,12 @@ public final class DiscoverySessionManager: ObservableObject {
     @MainActor
     private func handleStreamInterruption(request: PendingDiscoveryRequest) async {
         print("[DiscoverySessionManager] Handling stream interruption for session \(request.id)")
-        
-        // If subscriber is attached, notify them so they can show polling UI
-        // The ViewModel may have its own polling logic
-        if let subscriber = activeSession?.subscriber {
+
+        // Check if this interruption is for the currently active session
+        let isActiveSession = activeSession?.id == request.id
+
+        // If subscriber is attached AND this is the active session, notify them so they can show polling UI
+        if isActiveSession, let subscriber = activeSession?.subscriber {
             // Forward the stream interrupted error to the subscriber
             // The subscriber (ViewModel) will handle showing polling UI
             let interruptedError = DiscoveryAnalysisError.streamInterrupted
@@ -380,8 +395,8 @@ public final class DiscoverySessionManager: ObservableObject {
             processNextIfAvailable()
             return
         }
-        
-        // No subscriber - handle polling in the background
+
+        // No subscriber (or not active session) - handle polling in the background
         do {
             let summary = try await pollForMostRecentDiscovery()
             handleCompletion(request: request, summary: summary, discoveryId: summary.id)
@@ -417,21 +432,26 @@ public final class DiscoverySessionManager: ObservableObject {
     @MainActor
     private func handleCompletion(request: PendingDiscoveryRequest, summary: DiscoverySummary, discoveryId: Int64) {
         print("[DiscoverySessionManager] Session \(request.id) completed: \(summary.title)")
-        
-        // Check if subscriber is attached (before we clear it)
-        let hadSubscriber = activeSession?.subscriber != nil
-        
+
+        // Check if this completion is for the currently active session
+        // This is important when multiple sessions run concurrently (e.g., user taps "Discover More")
+        let isActiveSession = activeSession?.id == request.id
+        let hadSubscriber = isActiveSession && activeSession?.subscriber != nil
+
         // Clear session state
         sessionStatuses[request.id] = .completed(summary)
-        
+
         // IMPORTANT: Call onDiscoveryCompleted FIRST to trigger audio generation
         // This populates assetStates with .processing BEFORE sessionDidComplete updates the UI
         onDiscoveryCompleted?(summary, request.generateAudioGuide)
-        
-        // THEN notify subscriber to update UI state (which will now see .processing in assetStates)
-        activeSession?.subscriber?.sessionDidComplete(discoveryId: discoveryId, summary: summary)
-        activeSession = nil
-        
+
+        // THEN notify subscriber to update UI state - but ONLY if this was the active session
+        // Otherwise we'd notify the wrong subscriber (for a different session)
+        if isActiveSession {
+            activeSession?.subscriber?.sessionDidComplete(discoveryId: discoveryId, summary: summary)
+            activeSession = nil
+        }
+
         // Only show toast if there was NO subscriber (background completion)
         // If subscriber was attached, the ViewModel handles the UI flow
         if !hadSubscriber {
@@ -441,7 +461,7 @@ public final class DiscoverySessionManager: ObservableObject {
             )
             pendingCompletionToasts.append(toast)
         }
-        
+
         // Process next in queue
         processNextIfAvailable()
     }
@@ -450,16 +470,22 @@ public final class DiscoverySessionManager: ObservableObject {
     private func handleFailure(request: PendingDiscoveryRequest, error: Error) {
         let message = error.localizedDescription
         print("[DiscoverySessionManager] Session \(request.id) failed: \(message)")
-        
-        // Notify subscriber if still attached
-        activeSession?.subscriber?.sessionDidFail(error: error)
-        
+
+        // Check if this failure is for the currently active session
+        // This is important when multiple sessions run concurrently (e.g., user taps "Discover More")
+        let isActiveSession = activeSession?.id == request.id
+
+        // Notify subscriber if still attached - but ONLY if this was the active session
+        if isActiveSession {
+            activeSession?.subscriber?.sessionDidFail(error: error)
+            activeSession = nil
+        }
+
         sessionStatuses[request.id] = .failed(message)
-        activeSession = nil
-        
+
         // Notify listener
         onDiscoveryFailed?(request.id, message)
-        
+
         // Process next in queue
         processNextIfAvailable()
     }
@@ -474,4 +500,7 @@ private struct ActiveDiscoverySession {
     let task: Task<Void, Never>
     /// Optional subscriber receiving forwarded events. Weak reference to avoid retain cycles.
     weak var subscriber: DiscoverySessionSubscriber?
+    /// Accumulated events for replay when a new subscriber joins mid-stream.
+    /// This allows users who unsubscribe and re-subscribe to catch up on missed events.
+    var accumulatedEvents: [DiscoveryAnalysisEvent] = []
 }

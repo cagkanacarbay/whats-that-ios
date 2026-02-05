@@ -2,16 +2,16 @@ import Foundation
 import WhatsThatDomain
 
 public actor UserDefaultsComplianceLocalStore: ComplianceLocalStore {
-    private let userDefaults: UserDefaults
+    // UserDefaults.standard is thread-safe per Apple documentation
+    private nonisolated(unsafe) let userDefaults: UserDefaults = .standard
     private let appUpdateReminderKey = "com.whatsthat.app_update_reminder_state"
     private let maintenanceCacheKey = "com.whatsthat.cached_maintenance_state"
 
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    // Encoder/decoder are Sendable, so nonisolated is sufficient
+    private nonisolated let encoder: JSONEncoder
+    private nonisolated let decoder: JSONDecoder
 
-    public init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-
+    public init() {
         // Configure encoder/decoder for date handling
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

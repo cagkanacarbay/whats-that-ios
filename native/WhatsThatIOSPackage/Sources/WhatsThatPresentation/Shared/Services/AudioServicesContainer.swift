@@ -43,10 +43,10 @@ public final class AudioServicesContainer: ObservableObject {
     public let playbackController: VoiceoverPlaybackController
     
     // MARK: - Toast State
-    
+
     /// Queue of toasts to show when generation completes (stacked card effect)
     @Published public var pendingGenerationToasts: [GenerationCompleteToast] = []
-    
+
     /// Convenience property for the current (frontmost) toast
     public var pendingGenerationToast: GenerationCompleteToast? {
         pendingGenerationToasts.first
@@ -80,7 +80,8 @@ public final class AudioServicesContainer: ObservableObject {
         self.playbackController = VoiceoverPlaybackController(
             repository: voiceoverRepository,
             voiceoverCache: fileCache,
-            preferencesStore: preferencesStore
+            preferencesStore: preferencesStore,
+            creditBalanceStore: creditBalanceStore
         )
         
         // Wire up stores to controller
@@ -95,14 +96,6 @@ public final class AudioServicesContainer: ObservableObject {
         // Wire up generation complete callback to show toast
         playbackController.onGenerationComplete = { [weak self] discovery in
             self?.showGenerationCompleteToast(for: discovery)
-        }
-        
-        // Wire up credit balance sync callback
-        playbackController.onCreditBalanceUpdated = { [weak self] serverBalance in
-            guard let creditStore = self?.creditBalanceStore else { return }
-            Task {
-                _ = await creditStore.set(serverBalance)
-            }
         }
     }
     

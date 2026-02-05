@@ -23,7 +23,11 @@ public struct RootContentView: View {
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     /// Single shared AudioServicesContainer instance created once and passed to MainTabView
     @StateObject private var audioServicesContainer: AudioServicesContainer
+    /// Stable viewModel instances for discovery creation flows - created once to prevent callback staleness
+    @StateObject private var cameraCreationViewModel: DiscoveryCreationFlowViewModel
+    @StateObject private var uploadCreationViewModel: DiscoveryCreationFlowViewModel
     @StateObject private var storeObserver: DiscoveryStoreObserver
+    @StateObject private var postPurchaseConfigProvider: PostPurchaseConfigProvider
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchCreditBalance: () async -> Result<Int, Error>
     private let clearAppStoreLocal: () async -> Result<Void, Error>
@@ -41,6 +45,8 @@ public struct RootContentView: View {
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
     private let complianceUseCase: ComplianceUseCase
     private let resolveIntroState: () async -> Void
+    private let sampleDiscoveryService: SampleDiscoveryService?
+    private let makeOnboardingVoiceoverController: (() -> VoiceoverPlaybackController)?
     #if DEBUG
     private let setCreditBalance: (Int) async -> Void
     #endif
@@ -72,7 +78,9 @@ public struct RootContentView: View {
         voiceoverPreferencesStore: VoiceoverPreferencesStore,
         complianceUseCase: ComplianceUseCase,
         setCreditBalance: @escaping (Int) async -> Void = { _ in },
-        resolveIntroState: @escaping () async -> Void = {}
+        resolveIntroState: @escaping () async -> Void = {},
+        sampleDiscoveryService: SampleDiscoveryService? = nil,
+        makeOnboardingVoiceoverController: (() -> VoiceoverPlaybackController)? = nil
     ) {
         #if DEBUG
         self.setCreditBalance = setCreditBalance
@@ -86,7 +94,19 @@ public struct RootContentView: View {
             // Create a placeholder that will never be used (non-iOS)
             fatalError("AudioServicesContainer factory is required on iOS")
         }
+        // Create discovery creation viewModels once as StateObject to ensure stable instances
+        // This prevents callback staleness when MainTabView is re-rendered
+        _cameraCreationViewModel = StateObject(wrappedValue: makeCreationViewModel(.camera))
+        _uploadCreationViewModel = StateObject(wrappedValue: makeCreationViewModel(.upload))
         _storeObserver = StateObject(wrappedValue: storeObserver)
+        _postPurchaseConfigProvider = StateObject(wrappedValue: PostPurchaseConfigProvider(
+            loadVoiceoverPreferences: loadVoiceoverPreferences,
+            saveVoiceoverPreferences: saveVoiceoverPreferences,
+            fetchVoiceOptions: fetchVoiceOptions,
+            fetchVoiceSampleURL: fetchVoiceSampleURL,
+            loadIPoPPreferences: loadIPoPPreferences,
+            saveIPoPPreferences: saveIPoPPreferences
+        ))
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchCreditBalance = fetchCreditBalance
         self.clearAppStoreLocal = clearAppStoreLocal
@@ -104,6 +124,8 @@ public struct RootContentView: View {
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
         self.complianceUseCase = complianceUseCase
         self.resolveIntroState = resolveIntroState
+        self.sampleDiscoveryService = sampleDiscoveryService
+        self.makeOnboardingVoiceoverController = makeOnboardingVoiceoverController
 
         // Compose clearAllUserData with observer reset to clear all UI state on sign-out
         let observerToReset = storeObserver
@@ -138,6 +160,7 @@ public struct RootContentView: View {
         }
         .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         .animation(.easeInOut, value: viewModel.flowState)
+        .environment(\.postPurchaseConfig, postPurchaseConfigProvider)
         .sheet(isPresented: $isSettingsPresented, onDismiss: {
             settingsSheetDetent = .fraction(0.8)
         }) {
@@ -163,7 +186,13 @@ public struct RootContentView: View {
                     return AnyView(
                         CreditsView(
                             viewModel: viewModel,
-                            backButtonTitle: "Settings"
+                            backButtonTitle: "Settings",
+                            loadVoiceoverPreferences: loadVoiceoverPreferences,
+                            saveVoiceoverPreferences: saveVoiceoverPreferences,
+                            fetchVoiceOptions: fetchVoiceOptions,
+                            fetchVoiceSampleURL: fetchVoiceSampleURL,
+                            loadIPoPPreferences: loadIPoPPreferences,
+                            saveIPoPPreferences: saveIPoPPreferences
                         )
                     )
                 },
@@ -289,6 +318,10 @@ public struct RootContentView: View {
                 switch previous {
                 case .main, .postOnboarding:
                     authStartMode = .signIn
+                case .preOnboarding:
+                    // Keep the authStartMode that was set by the button callback
+                    // (signIn if user tapped "Sign in", signUp if user tapped "Create Your Own")
+                    break
                 default:
                     authStartMode = .signUp
                 }
@@ -403,9 +436,7 @@ public struct RootContentView: View {
             ProgressView()
                 .progressViewStyle(.circular)
         case .preOnboarding:
-            PreOnboardingCarousel {
-                _ = Task { await viewModel.completePreOnboarding() }
-            }
+            preOnboardingView
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         case .authentication:
             AuthenticationFlowView(
@@ -484,6 +515,7 @@ public struct RootContentView: View {
                     mainTabDestination = .upload
                     _ = Task { await viewModel.completePostOnboarding() }
                 },
+                isReturningUser: viewModel.isReturningOnboardingUser,
                 loadVoiceoverPreferences: loadVoiceoverPreferences,
                 saveVoiceoverPreferences: saveVoiceoverPreferences,
                 fetchVoiceOptions: fetchVoiceOptions,
@@ -496,8 +528,8 @@ public struct RootContentView: View {
             MainTabView(
                 storeObserver: storeObserver,
                 deletionUseCase: deletionUseCase,
-                cameraViewModel: makeCreationViewModel(.camera),
-                uploadViewModel: makeCreationViewModel(.upload),
+                cameraViewModel: cameraCreationViewModel,
+                uploadViewModel: uploadCreationViewModel,
                 audioServices: audioServicesContainer,
                 initialTab: mainTabDestination,
                 onSignOut: {
@@ -510,11 +542,42 @@ public struct RootContentView: View {
                 makeCreditsViewModel: makeCreditsViewModel,
                 onScreenSafetyChanged: { isSafe in
                     currentScreenIsSafe = isSafe
-                }
+                },
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL,
+                loadIPoPPreferences: loadIPoPPreferences,
+                saveIPoPPreferences: saveIPoPPreferences
             )
             .onAppear {
                 mainTabDestination = .discoveries
             }
+        }
+    }
+
+    @ViewBuilder
+    private var preOnboardingView: some View {
+        if let service = sampleDiscoveryService, let makeController = makeOnboardingVoiceoverController {
+            PreOnboardingCarousel(
+                discoveryService: service,
+                makeVoiceoverController: makeController,
+                onContinue: {
+                    authStartMode = .signUp
+                    _ = Task { await viewModel.completePreOnboarding() }
+                },
+                onSignIn: {
+                    authStartMode = .signIn
+                    _ = Task { await viewModel.completePreOnboarding() }
+                }
+            )
+            .id("preOnboardingDiscoveries") // Stable identity to prevent view recreation
+        } else {
+            // Fallback to legacy carousel when discovery service is not available
+            PreOnboardingCarousel {
+                _ = Task { await viewModel.completePreOnboarding() }
+            }
+            .id("preOnboardingLegacy")
         }
     }
 

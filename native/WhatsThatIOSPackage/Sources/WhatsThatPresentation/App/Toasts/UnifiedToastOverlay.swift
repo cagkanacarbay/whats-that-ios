@@ -78,6 +78,9 @@ struct UnifiedToastOverlay: View {
                 return .ready
             case .processing:
                 return .generating
+            case .failed:
+                // Generation failed - show retry button
+                return .notGenerated
             default:
                 return wasGenerating ? .generating : .notGenerated
             }

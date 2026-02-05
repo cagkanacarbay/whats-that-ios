@@ -54,6 +54,14 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
                 return
             }
 
+            // Verify presenter is in a valid state to present.
+            // If the presenter is being dismissed or has no window, presentation will fail.
+            if presenter.isBeingDismissed || presenter.isMovingFromParent || presenter.viewIfLoaded?.window == nil {
+                continuation.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
+                self.continuation = nil
+                return
+            }
+
             presenter.present(picker, animated: true)
         }
     }

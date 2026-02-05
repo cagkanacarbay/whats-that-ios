@@ -134,12 +134,12 @@ struct DiscoveryDetailView: View {
                 isClosing: layout.isClosing,
                 showTopControls: layout.showTopControls,
                 onClose: onClose,
-                onShowOptions: handleOptionsTapped,
+                onShowOptions: onShowOptions != nil ? handleOptionsTapped : nil,
                 isOptionsEnabled: !isDeleting,
                 onShowImage: onShowImage,
                 onScrollViewContentOffsetChange: onScrollViewContentOffsetChange,
                 scrollOffset: $scrollOffset,
-                onShare: { presentShareSheet() },
+                onShare: onShowOptions != nil ? { presentShareSheet() } : nil,
                 onShowMap: discovery.location != nil ? { openLocationIfAvailable() } : nil,
                 onOpenAudioGuide: onOpenAudioGuide
             )
@@ -409,6 +409,16 @@ private struct DiscoveryDetailContentView: View {
     // offset = headerOffset - pullDownOffset, keeping the overlay pinned.
     private var overlayYOffset: CGFloat { headerOffset - pullDownOffset }
 
+    /// Whether the pre-onboarding mini player would be visible (used for bottom filler when audioServices is nil)
+    private var isPreOnboardingMiniPlayerVisible: Bool {
+        switch voiceoverController.playbackState {
+        case .playing, .paused, .preparing:
+            return voiceoverController.currentDiscovery != nil
+        default:
+            return false
+        }
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             GeometryReader { proxy in
@@ -457,7 +467,7 @@ private struct DiscoveryDetailContentView: View {
                 if isChromeReady && !isClosing {
 
                     VStack(alignment: .leading, spacing: 0) {
-                        
+
                         // Audio Controls replacing the old voiceover button
                         if let audioServices {
                             DiscoveryAudioControls(
@@ -466,6 +476,14 @@ private struct DiscoveryDetailContentView: View {
                                 scrollOffset: $audioControlsScrollOffset
                             )
                             .padding(.bottom, BrandSpacing.medium)
+                            .animation(.easeOut(duration: 0.15), value: audioControlsScrollOffset)
+                        } else {
+                            // Fallback for pre-onboarding without full AudioServicesContainer
+                            PreOnboardingAudioControls(
+                                discovery: discovery,
+                                voiceoverController: voiceoverController,
+                                scrollOffset: $audioControlsScrollOffset
+                            )
                             .animation(.easeOut(duration: 0.15), value: audioControlsScrollOffset)
                         }
                         
@@ -493,6 +511,13 @@ private struct DiscoveryDetailContentView: View {
                         Color(backgroundColor)
                             .opacity(backgroundOpacity)
                             .frame(height: audioServices.miniPlayerPresence.effectiveInset + BrandSpacing.xLarge)
+                            .frame(maxWidth: .infinity)
+                            .opacity(contentOpacity)
+                    } else if audioServices == nil, isPreOnboardingMiniPlayerVisible {
+                        // Pre-onboarding mini player filler (audioServices is nil in pre-onboarding)
+                        Color(backgroundColor)
+                            .opacity(backgroundOpacity)
+                            .frame(height: 110 + BrandSpacing.xLarge) // 110 = mini player artwork diameter
                             .frame(maxWidth: .infinity)
                             .opacity(contentOpacity)
                     }

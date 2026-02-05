@@ -9,9 +9,11 @@
 | Decision | Choice |
 |----------|--------|
 | Post-onboarding welcome copy | No credits mention. "You've been exploring. Now it's your turn." |
-| Permissions approach | Primer screen before system prompts, bundled per path |
-| Location permission | Camera path only (gallery gets EXIF) |
-| Notification permission | Both paths, before first discovery |
+| Permissions approach | **No primer.** Only request must-have permissions during intro (camera/gallery). Location and notifications deferred. |
+| Camera permission | Asked first time user opens camera (required for functionality) |
+| Photo Library permission | Asked first time user opens gallery (required for functionality) |
+| Location permission | Asked on **second camera use**, on confirm page (after taking photo) — once only |
+| Notification permission | Asked **after purchase**, on confirm page — once only |
 | Audio generating modal | Show when first discovery completes |
 | Celebration modal | Skip — focus on "Discover More" momentum |
 | Credits exhausted | Full-screen conversion view (not alert) |
@@ -70,35 +72,19 @@ WELCOME SCREEN
         ↓
         ├── CAMERA PATH ────────────────────────────────────┐
         │                                                   │
-        │   PERMISSIONS PRIMER MODAL                        │
-        │   "A few quick permissions"                       │
-        │   • Location — for richer stories                 │
-        │   • Notifications — know when ready               │
-        │   • Camera — to take photos                       │
-        │   [Let's Go] [Skip]                               │
-        │                                                   │
-        │   ↓ (if Let's Go)                                 │
-        │   Location system prompt                          │
+        │   Camera system prompt (required)                 │
         │   ↓                                               │
-        │   Notification system prompt                      │
-        │   ↓                                               │
-        │   Camera system prompt (when picker opens)        │
+        │   User takes photo                                │
         │                                                   │
         ├── GALLERY PATH ───────────────────────────────────┤
         │                                                   │
-        │   PERMISSIONS PRIMER MODAL                        │
-        │   "A few quick permissions"                       │
-        │   • Notifications — know when ready               │
-        │   • Photo Library — to select photos              │
-        │   [Let's Go] [Skip]                               │
-        │                                                   │
-        │   ↓ (if Let's Go)                                 │
-        │   Notification system prompt                      │
+        │   Photo Library prompt (required)                 │
         │   ↓                                               │
-        │   Photo Library prompt (when picker opens)        │
+        │   User selects photo                              │
         │                                                   │
         ↓
 CONFIRMATION SCREEN
+(On 2nd+ camera use: Location permission prompt — once only)
 [Confirm]
         ↓
 FIRST DISCOVERY STREAMS (~8-10s)
@@ -123,6 +109,9 @@ CREDITS EXHAUSTED FULL-SCREEN
 [Unlock 100 Discoveries]
         ↓
 PURCHASE
+        ↓
+CONFIRMATION SCREEN (post-purchase)
+(Notification permission prompt — once only)
         ↓
 POST-PURCHASE CONFIGURATION
 Voice selection + IPOP preferences
@@ -166,96 +155,58 @@ CONTINUE EXPLORING
 
 ---
 
-## Phase 2: Permissions Primer
+## Phase 2: Permissions (Simplified — No Primer)
 
-### Camera Path Primer
+**Decision:** No permissions primer modal. We only request permissions when needed:
 
-**Trigger:** User taps "Take a Photo" for the first time
+### During Intro Mode (First 3 Discoveries)
 
-```
-┌─────────────────────────────────────┐
-│                                     │
-│   "A few quick permissions"         │
-│                                     │
-│   We need a couple things to give   │
-│   you the best experience:          │
-│                                     │
-│   📍 Location                       │
-│   Stories about exactly where       │
-│   you're standing                   │
-│                                     │
-│   🔔 Notifications                  │
-│   Know when your discovery          │
-│   is ready                          │
-│                                     │
-│   📷 Camera                         │
-│   Take photos of anything curious   │
-│                                     │
-│   ┌─────────────────────────────┐   │
-│   │    Let's Go                 │   │
-│   └─────────────────────────────┘   │
-│                                     │
-│         Skip for now                │
-│                                     │
-└─────────────────────────────────────┘
-```
+Only **must-have** permissions are requested:
 
-**Flow after "Let's Go":**
-1. `CLLocationManager.requestWhenInUseAuthorization()` → Location system prompt
-2. `UNUserNotificationCenter.requestAuthorization()` → Notification system prompt
-3. Camera UI opens → Camera system prompt appears
+| Permission | When Requested | Notes |
+|------------|----------------|-------|
+| Camera | First time user opens camera | Required for functionality |
+| Photo Library | First time user opens gallery | Required for functionality |
+| Location | **Not requested** | Deferred to second camera use |
+| Notifications | **Not requested** | Deferred to after purchase |
 
-**If "Skip for now":**
-- Skip location and notification prompts
-- Camera UI still opens (camera prompt still appears — required for functionality)
+### After Intro Mode (Post-Purchase)
 
-### Gallery Path Primer
+| Permission | When Requested | Notes |
+|------------|----------------|-------|
+| Notifications | On confirm page, once | After user purchases, first time they land on confirm page |
+| Location | On confirm page, second camera use, once | After user takes a photo on their 2nd camera use |
 
-**Trigger:** User taps "Use Gallery" for the first time
+### Implementation
 
-```
-┌─────────────────────────────────────┐
-│                                     │
-│   "A few quick permissions"         │
-│                                     │
-│   We need a couple things to give   │
-│   you the best experience:          │
-│                                     │
-│   🔔 Notifications                  │
-│   Know when your discovery          │
-│   is ready                          │
-│                                     │
-│   🖼️ Photo Library                  │
-│   Select photos to discover         │
-│                                     │
-│   ┌─────────────────────────────┐   │
-│   │    Let's Go                 │   │
-│   └─────────────────────────────┘   │
-│                                     │
-│         Skip for now                │
-│                                     │
-└─────────────────────────────────────┘
+Tracked in `FreeCreditsAlertTracker`:
+- `cameraUseCount: Int` — Incremented after each successful camera capture
+- `hasRequestedLocationPermission: Bool` — True after location permission requested
+- `hasRequestedNotificationPermission: Bool` — True after notification permission requested
+
+**Location request logic:**
+```swift
+// In prepareConfirmation(), for camera flow only:
+if cameraUseCount >= 2 && !hasRequestedLocationPermission {
+    await locationService.startTrackingIfNeeded() // triggers permission prompt
+    markLocationPermissionRequested()
+}
 ```
 
-**Flow after "Let's Go":**
-1. `UNUserNotificationCenter.requestAuthorization()` → Notification system prompt
-2. Photo picker opens → Photo library prompt appears (if needed)
+**Notification request logic:**
+```swift
+// In prepareConfirmation():
+if !isInIntroMode && !hasRequestedNotificationPermission {
+    await pushService.requestPushAuthorizationIfNeeded()
+    markNotificationPermissionRequested()
+}
+```
 
-**No location needed:** Gallery photos have EXIF location data
-
-### Gallery First, Then Camera Later (Common Path)
-
-**Scenario:** User goes Gallery path first, then later taps Camera tab. This is a common flow, not an edge case.
-
-**Solution:** Track primer state per path:
-- `hasSeenCameraPrimer: Bool` (UserDefaults)
-- `hasSeenGalleryPrimer: Bool` (UserDefaults)
-
-When they tap Camera after going Gallery first:
-- Show simplified location-only primer (see "Final Decisions" section)
-- Notifications already handled (or skipped) during Gallery flow
-
-**Implementation note:** Check `UNUserNotificationCenter.current().notificationSettings()` to determine if notifications were already requested/granted.
+**Why this approach:**
+- Reduces friction during intro (user only sees camera/gallery permission)
+- Location permission asked after user has experienced value (2nd discovery)
+- Notifications asked after user has purchased (invested in the app)
+- Each optional permission asked exactly once
 
 ---
 
@@ -345,7 +296,6 @@ Existing system works well. No changes needed. User sees:
 │   What you get:                     │
 │   • 100 discoveries                 │
 │   • Generate audio guides           │
-│   • Ask follow-up questions         │
 │   • Credits never expire            │
 │                                     │
 │         See all packs               │
@@ -432,47 +382,25 @@ Existing system works well. No changes needed. User sees:
 
 User sees the full streaming experience (title, short description, narrative appearing). After stream completes, modal appears. This lets the "wow" moment land before we guide them to create another.
 
-### 2. Permissions Primer — "Skip for now" Behavior
+### 2. Permissions — Simplified Approach (No Primer)
 
-**Decision:** If they skip, we don't nag. No permissions are requested.
+**Decision:** No permissions primer modal. Only request must-have permissions during intro.
 
-- Camera/gallery prompts still appear (required for functionality)
-- Location and notifications are NOT requested during onboarding
-- User can enable permissions later via Settings
+- Camera/gallery prompts appear when needed (required for functionality)
+- Location: Requested on **second camera use**, on confirm page (once only)
+- Notifications: Requested **after purchase**, on confirm page (once only)
+- User can manage all permissions in Settings
 
-**Settings Integration:**
-- Add permission controls to Settings screen
-- If permission not yet requested: Show toggle that triggers the system prompt
-- If permission denied: Show option that opens System Settings so user can enable
+**Why no primer:**
+- Reduces friction during first 3 discoveries
+- User experiences value before being asked for optional permissions
+- Simpler UX — no intermediate modal before system prompts
 
-### 3. Gallery-First Then Camera (Common Path)
+### 3. Settings Integration
 
-**Decision:** Show simplified location-only primer.
-
-This is NOT an edge case — many users will go Gallery first. When they later tap Camera:
-
-```
-┌─────────────────────────────────────┐
-│                                     │
-│   📍 "Enable location for           │
-│       richer stories"               │
-│                                     │
-│   We can tell you about exactly     │
-│   where you're standing — not       │
-│   just what you're looking at.      │
-│                                     │
-│   ┌─────────────────────────────┐   │
-│   │    Enable Location          │   │
-│   └─────────────────────────────┘   │
-│                                     │
-│         Not Now                     │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-**Flow:**
-- "Enable Location" → Location system prompt → Camera opens
-- "Not Now" → Camera opens (no location prompt)
+- Permissions section in Settings (already implemented)
+- If permission not yet requested: Tap triggers system prompt
+- If permission denied: Tap opens System Settings
 
 ---
 
@@ -518,33 +446,31 @@ This is NOT an edge case — many users will go Gallery first. When they later t
 
 ## Implementation Checklist
 
-### New Components to Build
+### New Components Built
 
-- [ ] `PermissionsPrimerView` — The modal explaining permissions (camera path vs gallery path variants)
-- [ ] `LocationOnlyPrimerView` — Simplified primer for camera-after-gallery flow
-- [ ] `PermissionsPrimerCoordinator` — Tracks which primers have been shown, checks permission states
-- [ ] `AudioGeneratingModalView` — First-discovery audio wait guidance
-- [ ] `CreditsExhaustedFullScreenView` — Replaces current alert
-- [ ] `PostPurchaseConfigurationFlow` — Voice + IPOP after purchase
-- [ ] `SettingsPermissionsSection` — New section in Settings for permission management
+- [x] `AudioGeneratingModalView` — First-discovery audio wait guidance
+- [x] `CreditsExhaustedFullScreenView` — Replaces current alert
+- [x] `PostPurchaseConfigurationFlow` — Voice + IPOP after purchase
+- [x] `VoiceSelectionSlideView` — Voice selection slide
+- [x] `IPOPPreferencesSlideView` — IPOP preferences slide
+- [x] Settings permissions section — All 4 permissions manageable in Settings
 
-### Files to Modify
+### Files Modified
 
-- [ ] `PostOnboardingCarousel.swift` — Update welcome copy
-- [ ] `DiscoveryCreationFlowViewModel.swift` — Integrate primer flow
-- [ ] `DiscoveryCreationFlowView.swift` — Add primer modal presentation
-- [ ] `DiscoveryStreamingStageView.swift` — Add audio generating modal (after stream completes)
-- [ ] `FreeCreditsAlertTracker.swift` — Track first-discovery modal state
-- [ ] `SettingsView.swift` — Add permissions section
-- [ ] `SettingsViewModel.swift` — Add permission state checking and actions
+- [x] `PostOnboardingCarousel.swift` — Updated welcome copy ("You've been exploring. Now it's your turn.")
+- [x] `DiscoveryCreationFlowViewModel.swift` — Conditional permission requests (location on 2nd camera, notifications post-purchase)
+- [x] `DiscoveryCreationFlowView.swift` — Audio generating modal and credits exhausted fullscreen
+- [x] `FreeCreditsAlertTracker.swift` — Track camera use count, permission request flags, intro state
+- [x] `SettingsView.swift` — Permissions section added
 
-### State to Track (UserDefaults)
+### State Tracked (UserDefaults via FreeCreditsAlertTracker)
 
-- `hasSeenCameraPrimer: Bool`
-- `hasSeenGalleryPrimer: Bool`
-- `hasSeenAudioGeneratingModal: Bool`
-- `hasSeenCreditsExhaustedScreen: Bool`
-- `hasCompletedPostPurchaseConfig: Bool`
+- `cameraUseCount: Int` — Number of camera captures
+- `hasRequestedLocationPermission: Bool` — Location permission requested (on 2nd camera use)
+- `hasRequestedNotificationPermission: Bool` — Notification permission requested (post-purchase)
+- `hasSeenAudioGeneratingModal: Bool` — First discovery modal shown
+- `hasShownCreditsExhausted: Bool` — Credits exhausted screen shown (ends intro mode)
+- `hasCompletedPostPurchaseConfig: Bool` — Post-purchase config completed
 
 ### Permission State Checking
 

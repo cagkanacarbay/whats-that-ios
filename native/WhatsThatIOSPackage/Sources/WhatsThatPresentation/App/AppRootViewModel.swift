@@ -13,6 +13,10 @@ public final class AppRootViewModel: ObservableObject {
     @Published public private(set) var complianceNonBlockingState: ComplianceNonBlockingState?
     @Published public private(set) var pendingLegalAcceptance: Bool = false
 
+    /// True if user previously saw post-onboarding but hasn't created their first discovery yet.
+    /// Used to show "Welcome back" instead of "Now it's your turn".
+    @Published public private(set) var isReturningOnboardingUser: Bool = false
+
     private let authUseCase: AuthUseCase
     private let onboardingUseCase: OnboardingUseCase
     private let flowResolver: AppFlowResolver
@@ -29,6 +33,10 @@ public final class AppRootViewModel: ObservableObject {
     /// Tracks if user started signup but is waiting for email verification.
     /// When they verify, we'll record their terms acceptance.
     private var pendingNewSignupVerification: Bool = false
+
+    /// Set to true when user clicks through post-onboarding this session.
+    /// Prevents re-showing post-onboarding until next app launch (even if they still have 0 discoveries).
+    private var hasProceededPastPostOnboardingThisSession: Bool = false
 
     public init(
         authUseCase: AuthUseCase,
@@ -75,6 +83,9 @@ public final class AppRootViewModel: ObservableObject {
     public func completePostOnboarding() async {
         await onboardingUseCase.markPostOnboardingComplete()
         currentFlags.hasCompletedPostOnboarding = true
+        // Mark that user has proceeded past post-onboarding this session.
+        // Prevents re-showing post-onboarding until next app launch.
+        hasProceededPastPostOnboardingThisSession = true
         updateFlow(session: latestSession)
     }
 
@@ -150,7 +161,7 @@ public final class AppRootViewModel: ObservableObject {
 
         do {
             let session = try await authUseCase.signInWithGoogle()
-            updateFlow(session: session)
+            updateFlow(session: session, isOAuthSignIn: true)
         } catch let error as AuthError {
             throw error
         } catch {
@@ -166,7 +177,7 @@ public final class AppRootViewModel: ObservableObject {
 
         do {
             let session = try await authUseCase.signInWithApple()
-            updateFlow(session: session)
+            updateFlow(session: session, isOAuthSignIn: true)
         } catch let error as AuthError {
             throw error
         } catch {
@@ -280,8 +291,8 @@ public final class AppRootViewModel: ObservableObject {
         updateFlow(session: session)
     }
 
-    private func updateFlow(session: AuthSession, isNewSignup: Bool = false) {
-        print("[UpdateFlow] Called with isNewSignup=\(isNewSignup), session=\(session)")
+    private func updateFlow(session: AuthSession, isNewSignup: Bool = false, isOAuthSignIn: Bool = false) {
+        print("[UpdateFlow] Called with isNewSignup=\(isNewSignup), isOAuthSignIn=\(isOAuthSignIn), session=\(session)")
         latestSession = session
 
         // For signed-in users, we need to bind stores BEFORE resolving flow state
@@ -304,13 +315,32 @@ public final class AppRootViewModel: ObservableObject {
                 // 4. Now load flags with correct user binding
                 let flags = await onboardingUseCase.flags()
 
-                // 5. Resolve flow state with correct user flags
+                // 5. Check if user is a "returning onboarding user" (saw post-onboarding but never created a discovery)
+                // Skip this check if user has already proceeded past post-onboarding this session
+                let introDiscoveryCount = await FreeCreditsAlertTracker.shared.introDiscoveryCount
+                let isInIntroMode = await FreeCreditsAlertTracker.shared.isInIntroMode
+                let hasProceeded = self.hasProceededPastPostOnboardingThisSession
+                let isReturningOnboardingUser = !hasProceeded
+                    && flags.hasCompletedPostOnboarding
+                    && introDiscoveryCount == 0
+                    && isInIntroMode
+
+                // 6. Resolve flow state with correct user flags
+                // If returning onboarding user, override to show post-onboarding again
                 await MainActor.run {
                     self.currentFlags = flags
-                    self.flowState = self.flowResolver.resolve(session: session, flags: flags)
+                    self.isReturningOnboardingUser = isReturningOnboardingUser
+
+                    if isReturningOnboardingUser {
+                        // User saw post-onboarding before but didn't create a discovery
+                        // Show it again with "Welcome back" messaging
+                        self.flowState = .postOnboarding(user)
+                    } else {
+                        self.flowState = self.flowResolver.resolve(session: session, flags: flags)
+                    }
                 }
 
-                // 6. For new signups, record terms acceptance BEFORE checking compliance
+                // 7. For new signups, record terms acceptance BEFORE checking compliance
                 // This ensures the user doesn't see a terms modal immediately after signup
                 // (they already agreed on the signup form)
                 // Check both isNewSignup (immediate auth) and pendingNewSignupVerification (email verification flow)
@@ -322,11 +352,16 @@ public final class AppRootViewModel: ObservableObject {
                         self.pendingNewSignupVerification = false
                     }
                     await self.recordTermsAcceptanceForNewUser()
+                } else if isOAuthSignIn {
+                    // For OAuth sign-ins, we don't know if they're new or returning
+                    // Check if they have any prior acceptance records and record if not
+                    print("[UpdateFlow] OAuth sign-in - checking if new user needs terms recorded")
+                    await self.recordTermsForNewOAuthUserIfNeeded()
                 } else {
                     print("[UpdateFlow] Skipping terms recording (returning user)")
                 }
 
-                // 7. Check compliance after user is authenticated
+                // 8. Check compliance after user is authenticated
                 await self.checkCompliance()
             }
         } else {
@@ -337,6 +372,7 @@ public final class AppRootViewModel: ObservableObject {
             complianceBlockingState = nil
             complianceNonBlockingState = nil
             pendingLegalAcceptance = false
+            isReturningOnboardingUser = false
         }
     }
 
@@ -353,6 +389,33 @@ public final class AppRootViewModel: ObservableObject {
         } catch {
             // Failure is acceptable - user will see modal on first safe screen
             print("[ViewModel] Failed to record terms acceptance for new user: \(error)")
+        }
+    }
+
+    /// Records terms acceptance for OAuth users who are signing up for the first time.
+    /// Only records if the user has no prior acceptance records (truly new user).
+    /// For returning OAuth users, this is a no-op - compliance check will handle updated terms.
+    private func recordTermsForNewOAuthUserIfNeeded() async {
+        do {
+            let config = try await complianceUseCase.fetchConfig(forceFresh: true)
+
+            // Check if user has any prior acceptance records
+            // A truly new OAuth user will have nil for both
+            guard let userStatus = config.userStatus,
+                  userStatus.acceptedTosVersion == nil && userStatus.acceptedPrivacyVersion == nil else {
+                print("[ViewModel] OAuth user already has acceptance records, skipping auto-accept")
+                return
+            }
+
+            // New OAuth user - record acceptance (they agreed by completing OAuth signup)
+            _ = try await complianceUseCase.acceptTerms(
+                tosVersion: config.tos.version,
+                privacyVersion: config.privacy.version
+            )
+            print("[ViewModel] Recorded terms acceptance for new OAuth user - tos=\(config.tos.version), privacy=\(config.privacy.version)")
+        } catch {
+            // Failure is acceptable - user will see modal on first safe screen
+            print("[ViewModel] Failed to record OAuth user terms: \(error)")
         }
     }
 

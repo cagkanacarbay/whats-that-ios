@@ -60,6 +60,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private let voiceoverCache: VoiceoverFileCache
     private let urlSession: URLSession
     private let preferencesStore: VoiceoverPreferencesStore?
+    private let creditBalanceStore: CreditBalanceStore?
     private let audioSession: AVAudioSession
     private let player: AVPlayer
     private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
@@ -88,9 +89,6 @@ public final class VoiceoverPlaybackController: ObservableObject {
     
     /// Called when voiceover generation completes successfully (for toast notification)
     public var onGenerationComplete: ((DiscoverySummary) -> Void)?
-    
-    /// Called when server returns updated credit balance after voiceover request
-    public var onCreditBalanceUpdated: ((Int) -> Void)?
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -101,6 +99,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
         ),
         voiceoverCache: VoiceoverFileCache = .shared,
         preferencesStore: VoiceoverPreferencesStore? = nil,
+        creditBalanceStore: CreditBalanceStore? = nil,
         audioSession: AVAudioSession = .sharedInstance(),
         player: AVPlayer = AVPlayer(),
         urlSession: URLSession = .shared,
@@ -112,6 +111,7 @@ public final class VoiceoverPlaybackController: ObservableObject {
         self.voiceoverCache = voiceoverCache
         self.activePreferences = preferences
         self.preferencesStore = preferencesStore
+        self.creditBalanceStore = creditBalanceStore
         self.audioSession = audioSession
         self.player = player
         self.urlSession = urlSession
@@ -397,6 +397,10 @@ public extension VoiceoverPlaybackController {
             markPending(discovery.id)
             startPollingIfNeeded()
 
+            // Optimistically decrement credit balance before making the request
+            // If the request fails, we'll refresh to get the correct balance (handles refunds)
+            await self.creditBalanceStore?.adjust(by: -1)
+
             log.debug("[requestVoiceover] CALLING repository.requestVoiceover for id=\(discovery.id)")
             let asset = await self.repository.requestVoiceover(
                 for: discovery.id,
@@ -419,18 +423,15 @@ public extension VoiceoverPlaybackController {
 
             if normalized.status == .ready, let _ = normalized.audioURL {
                 clearPending(discovery.id)
-                // Sync credit balance if server provided updated value
-                if let serverBalance = normalized.creditBalance {
-                    await MainActor.run {
-                        self.onCreditBalanceUpdated?(serverBalance)
-                    }
-                }
+                // Optimistic decrement was correct - no need to update credit balance
                 // Notify that generation completed (for toast) - don't affect playback state
                 await MainActor.run {
                     self.onGenerationComplete?(discovery)
                 }
             } else if normalized.status == .failed {
                 clearPending(discovery.id)
+                // Generation failed - refresh credit balance from server (handles refunds)
+                _ = try? await self.creditBalanceStore?.refresh(force: true)
                 // Only set error message, don't affect playback state
                 await MainActor.run {
                     self.errorMessage = normalized.errorReason

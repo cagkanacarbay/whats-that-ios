@@ -13,6 +13,11 @@ struct DiscoveryCardView: View {
 
     private let cardCornerRadius: CGFloat = BrandCornerRadius.large
 
+    /// Whether this card appeared recently enough to show the intro spinner.
+    @State private var showIntroSpinner = false
+    @State private var isSpinning = false
+    @State private var lastFrame: CGRect = .zero
+
     init(
         discovery: DiscoverySummary,
         width: CGFloat,
@@ -31,9 +36,7 @@ struct DiscoveryCardView: View {
 
     var body: some View {
         Button {
-            guard !isDeleting else { return }
-            // Frame is captured via the background reader
-            // If for some reason we don't have it yet (rare), fallback to zero
+            guard !isDeleting, !showIntroSpinner else { return }
             onSelect(discovery, imageURL, self.lastFrame)
         } label: {
             ZStack(alignment: .bottom) {
@@ -43,11 +46,15 @@ struct DiscoveryCardView: View {
                     width: width,
                     height: height
                 )
-                .opacity(isDeleting ? 0.5 : 1.0)
-                
-                DiscoveryCardChrome(discovery: discovery)
-                    .opacity(isDeleting ? 0.3 : 1.0)
-                
+                .opacity(isDeleting ? 0.5 : (showIntroSpinner ? 0 : 1.0))
+
+                if showIntroSpinner {
+                    introSpinnerOverlay
+                } else {
+                    DiscoveryCardChrome(discovery: discovery)
+                        .opacity(isDeleting ? 0.3 : 1.0)
+                }
+
                 if isDeleting {
                     DeletingOverlayView()
                 }
@@ -73,9 +80,67 @@ struct DiscoveryCardView: View {
         .opacity(isHidden ? 0 : 1)
         .disabled(isDeleting)
         .animation(.easeInOut(duration: 0.25), value: isDeleting)
+        .onAppear {
+            // Show intro spinner for discoveries created in the last 15 seconds
+            let age = Date().timeIntervalSince(discovery.capturedAt)
+            if age < 15 {
+                showIntroSpinner = true
+                isSpinning = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        showIntroSpinner = false
+                    }
+                }
+            }
+        }
     }
-    
-    @State private var lastFrame: CGRect = .zero
+
+    // MARK: - Intro Spinner
+
+    private var introSpinnerOverlay: some View {
+        ZStack {
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(hex: "#20293A"),
+                    Color(hex: "#141927")
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: 0.7)
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(colors: [
+                                BrandColors.spinner.opacity(0.1),
+                                BrandColors.spinner
+                            ]),
+                            center: .center,
+                            startAngle: .degrees(0),
+                            endAngle: .degrees(360)
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .frame(width: 50, height: 50)
+                    .rotationEffect(.degrees(isSpinning ? 360 : 0))
+                    .animation(
+                        .linear(duration: 1.2).repeatForever(autoreverses: false),
+                        value: isSpinning
+                    )
+
+                Image("LaunchLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
+            }
+        }
+        .transition(.opacity)
+    }
+
+    // MARK: - Helpers
 
     private var imageURL: URL? {
         guard let path = discovery.imagePath else { return nil }

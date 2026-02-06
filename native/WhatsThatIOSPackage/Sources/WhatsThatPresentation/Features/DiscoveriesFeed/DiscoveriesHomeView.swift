@@ -174,6 +174,7 @@ struct DiscoveriesHomeView: View {
                 refreshHeaderView(metrics: metrics)
 
                 inProgressContent
+                    .animation(.easeInOut(duration: 0.35), value: sessionManager.inProgressItems.isEmpty)
 
                 DiscoveriesGridView(
                     storeObserver: storeObserver,
@@ -290,26 +291,8 @@ struct DiscoveriesHomeView: View {
                 }
             )
             .padding(.horizontal, gridHorizontalPadding + 8)
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
-
-        #if DEBUG
-        if let firstDiscovery = storeObserver.discoveries.first {
-            Button {
-                sessionManager.debugAddFakeInProgressItem(from: firstDiscovery)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Add fake in-progress")
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(BrandColors.spinner)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 12)
-                .background(.ultraThinMaterial, in: Capsule())
-            }
-            .padding(.bottom, 8)
-        }
-        #endif
     }
 
     private func handleInProgressItemTapped(_ item: InProgressItem) {

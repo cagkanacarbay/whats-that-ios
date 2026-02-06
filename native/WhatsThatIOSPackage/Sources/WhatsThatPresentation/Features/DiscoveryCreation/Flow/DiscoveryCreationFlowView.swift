@@ -378,8 +378,10 @@ struct DiscoveryCreationFlowView: View {
                 generateAudioGuide: $viewModel.generateAudioGuide,
                 isAudioToggleLocked: viewModel.isInIntroMode
             )
+            .transition(.opacity)
         case .analyzing:
             streamingStage
+                .transition(.opacity)
         }
     }
 

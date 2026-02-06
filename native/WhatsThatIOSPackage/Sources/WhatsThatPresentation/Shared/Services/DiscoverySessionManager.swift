@@ -574,61 +574,6 @@ public final class DiscoverySessionManager: ObservableObject {
         }
     }
 
-    // MARK: - Debug
-
-    #if DEBUG
-    /// Injects a fake in-progress item using the given discovery's image.
-    /// Transitions to completed after ~11 seconds, then auto-removes after 2.5s.
-    public func debugAddFakeInProgressItem(from discovery: DiscoverySummary) {
-        guard let imagePath = discovery.imagePath,
-              let url = URL(string: imagePath) else { return }
-
-        let sessionId = UUID()
-
-        // Download thumbnail data in background, then add the item
-        Task { @MainActor [weak self] in
-            let thumbnailData: Data
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                thumbnailData = data
-            } catch {
-                // Fallback: 1x1 gray pixel
-                thumbnailData = Data()
-            }
-
-            let media = DiscoveryCapturedMedia(
-                data: thumbnailData,
-                contentType: "image/jpeg",
-                pixelWidth: 400,
-                pixelHeight: 480,
-                createdAt: Date(),
-                location: nil
-            )
-
-            let item = InProgressItem(
-                id: sessionId,
-                thumbnailData: thumbnailData,
-                media: media,
-                flowType: .camera,
-                title: nil,
-                status: .processing,
-                startedAt: Date()
-            )
-            self?.inProgressItems.append(item)
-
-            // Simulate completion after ~11 seconds
-            try? await Task.sleep(nanoseconds: 11_000_000_000)
-            self?.updateInProgressItem(sessionId: sessionId) { item in
-                item.status = .completed(discovery)
-                item.title = discovery.title
-            }
-
-            // Auto-remove after 2.5 seconds
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            self?.removeInProgressItem(sessionId)
-        }
-    }
-    #endif
 }
 
 // MARK: - Active Session

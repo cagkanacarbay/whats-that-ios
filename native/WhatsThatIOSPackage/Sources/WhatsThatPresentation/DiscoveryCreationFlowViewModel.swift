@@ -485,13 +485,17 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private func startAnalysisSession(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
         defer { analysisTask = nil }
 
-        // Set initial analysis state and flow
+        // Set initial analysis state and flow.
+        // Use withAnimation so the confirming → analyzing view swap crossfades
+        // instead of flashing the bare background for a frame.
         let initialState = DiscoveryAnalysisState(
             statusMessage: "Preparing analysis…",
             streamedText: "",
             isStreaming: true
         )
-        flowState = .analyzing(initialState)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            flowState = .analyzing(initialState)
+        }
 
         // Optimistically decrement credits
         optimisticallyDecrementCredits()

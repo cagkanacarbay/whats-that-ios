@@ -95,5 +95,6 @@ struct DiscoveriesGridView: View {
             }
         }
         .frame(width: availableWidth, alignment: .leading)
+        .animation(.easeInOut(duration: 0.35), value: storeObserver.discoveries.map(\.id))
     }
 }

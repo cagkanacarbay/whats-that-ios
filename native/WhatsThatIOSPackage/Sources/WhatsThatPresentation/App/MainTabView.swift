@@ -202,9 +202,20 @@ struct MainTabView: View {
         .onDisappear {
             coordinator.cleanup()
         }
-        .onChange(of: selectedTab) { _, newValue in
-            // Defer to next runloop to prevent "update multiple times per frame" error
-            DispatchQueue.main.async {
+        .onChange(of: selectedTab) { oldValue, newValue in
+            if newValue == .camera || newValue == .upload {
+                // Camera/Gallery are pure triggers — revert to the previous tab
+                // immediately so the TabTriggerPlaceholder is never rendered.
+                let flowType: DiscoveryCreationFlowType = newValue == .camera ? .camera : .upload
+                let safeTab = (oldValue == .camera || oldValue == .upload) ? .discoveries : oldValue
+                selectedTab = safeTab
+                // Defer modal presentation to next runloop: tryPresentFlow mutates
+                // @Published activeFlowType, and publishing changes inside onChange
+                // triggers "Publishing changes from within view updates" warnings.
+                DispatchQueue.main.async {
+                    coordinator.tryPresentFlow(type: flowType)
+                }
+            } else {
                 handleTabChange(to: newValue)
             }
         }

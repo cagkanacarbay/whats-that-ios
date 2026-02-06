@@ -224,7 +224,7 @@ Both bugs vanish because the split presentation paths no longer exist.
 
 5. **Background completion via SessionManager.** If the user dismisses during analysis, the session continues. Toast notification (already exists) tells them when it's done. The in-progress item is visible on the Discoveries tab.
 
-6. **"Discover More" offers both entry points.** From the streaming/complete view, the user gets two options: "Take a Photo" (opens camera picker) and "Upload Another" (opens photo picker). This starts a new creation flow directly — no need to dismiss and navigate to a tab. The current discovery continues via SessionManager in the background. Implementation: dismiss the current modal, present the appropriate picker as a new fullScreenCover. The previous session keeps running and appears in the Discoveries queue.
+6. **"Discover More" stays within the modal.** The ViewModel's `discoverMore(type:)` method opens the camera/photo picker over the streaming view — no modal dismiss needed. The streaming view stays mounted and receiving events. If the user cancels the picker, they're right back where they were. If they take a photo, the ViewModel unsubscribes from the old session and transitions to confirmation. The audio generating modal (first discovery) offers "Take a Photo" + "Upload Another"; the streaming view's button re-triggers the same flow type. See `discover-more-cancel-behavior.md` for full design.
 
 7. **Multiple concurrent sessions.** SessionManager tracks all active sessions. Users can queue several discoveries. Each appears in the Discoveries tab's in-progress section.
 
@@ -375,27 +375,9 @@ This eliminates the MainTabView interception and is the primary mechanism that f
 
 ### Gap 2: "Discover More" from Streaming/Audio Modal
 
-**Problem:** Can't present a new `fullScreenCover` while dismissing the current one.
+**Problem:** ~~Can't present a new `fullScreenCover` while dismissing the current one.~~
 
-**Solution:** The coordinator handles sequencing. When "Discover More" is tapped:
-
-1. User chooses "Take a Photo" or "Upload Another"
-2. Audio modal dismisses
-3. `onDismiss` calls `onRequestNewDiscovery(type:)` with the chosen type
-4. The coordinator (the view presenting the fullScreenCover) dismisses the current modal
-5. After dismiss animation, presents the new picker flow
-
-```swift
-// Coordinator-level:
-func handleNewDiscoveryRequest(type: DiscoveryCreationFlowType) {
-    activeCreationFlowType = nil
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-        self.activeCreationFlowType = type
-    }
-}
-```
-
-The previous session continues via SessionManager and appears in the Discoveries queue.
+**Updated (2026-02-06):** This gap is resolved by the in-modal picker approach (Phase 2.2). "Discover More" no longer goes through the parent coordinator — the ViewModel's `discoverMore(type:)` method opens the picker over the streaming view within the same modal. No dismiss/re-present needed. See `discover-more-cancel-behavior.md` for details.
 
 ### Gap 3: Post-Onboarding Welcome → Direct Camera Launch
 
@@ -658,7 +640,9 @@ ZStack(alignment: .bottom) {
 
 ### Phase 2: Simplify "Discover Another"
 
-**Goal:** Replace the 10-step state machine with dismiss + re-present.
+**Goal:** Replace the 10-step state machine. "Discover More" stays within the same modal — no dismiss/re-present cycle.
+
+> **Design decision (2026-02-06):** "Discover More" uses the in-modal picker approach. The streaming view never unmounts. See `discover-more-cancel-behavior.md` for full analysis of alternatives.
 
 #### 2.1 Remove state preservation from ViewModel
 
@@ -671,87 +655,166 @@ Delete from `DiscoveryCreationFlowViewModel`:
 
 Simplify `unsubscribe()` to just detach from session (no state saving).
 
-#### 2.2 Redesign "Discover More" with dual options
+**Status: DONE (Phase 2 already completed this)**
 
-In `DiscoveryStreamingStageView`, the "Discover More" button expands to two options:
-- "Take a Photo" → `onRequestNewDiscovery(.camera)`
-- "Upload Another" → `onRequestNewDiscovery(.upload)`
+#### 2.2 Add `discoverMore(type:)` to ViewModel
 
-In `AudioGeneratingModalView`, same dual options:
+Instead of dismissing the modal and re-presenting, the ViewModel handles "Discover More" internally. The system camera/photo picker naturally presents over the streaming view — the streaming view stays mounted and receiving session events behind the picker.
 
 ```swift
-AudioGeneratingModalView(
-    onCreateAnotherCamera: {
-        viewModel.showAudioGeneratingModal = false
-        pendingNewDiscoveryType = .camera
-    },
-    onCreateAnotherUpload: {
-        viewModel.showAudioGeneratingModal = false
-        pendingNewDiscoveryType = .upload
-    },
-    onReadThisDiscovery: {
-        viewModel.showAudioGeneratingModal = false
+func discoverMore(type: DiscoveryCreationFlowType) {
+    Task {
+        do {
+            let media: DiscoveryCapturedMedia
+            switch type {
+            case .camera:
+                guard await captureService.requestPermission(for: .camera) else {
+                    error = .cameraPermissionDenied
+                    return  // Streaming view stays, error alert shows over it
+                }
+                media = try await captureService.capturePhoto()
+            case .upload:
+                guard await selectionService.requestPermission() else {
+                    error = .photoLibraryPermissionDenied
+                    return
+                }
+                media = try await selectionService.selectPhoto()
+            }
+            // User committed to new photo — detach from old session
+            if let sessionId = currentSessionId {
+                DiscoverySessionManager.shared.unsubscribe(from: sessionId)
+                currentSessionId = nil
+            }
+            analysisState = nil
+            confirmationState = nil
+            await prepareConfirmation(with: media)
+        } catch {
+            if DiscoveryFlowCancellationError.isCancellation(error) {
+                // User cancelled picker — streaming view is still showing, nothing to do
+                return
+            }
+            self.error = .captureFailed
+        }
     }
-)
+}
 ```
 
-On audio modal dismiss, fire `onRequestNewDiscovery(type:)` which the coordinator handles by dismissing the current modal and presenting a new one.
+**Key behavior:**
+- **Cancel picker** → return silently, streaming view unchanged, session events still flowing
+- **Take photo** → unsubscribe from old session, clear analysis state, transition to `.confirming` with new photo. Old session continues in background.
+- **Permission denied** → set `error` (alert shows over streaming view), don't change flowState
 
-#### 2.3 What about "restore previous discovery"?
+#### 2.3 Rewire "Discover More" entry points
 
-The ability to return to a completed discovery's streaming view after cancelling a new capture is eliminated. This is acceptable:
-- Discovery is saved in the backend
-- It appears in the Discoveries tab immediately
-- Session continues in background
-- Phase 6 (queue) lets users return to any in-progress session
+**Streaming view's "Discover More" button:**
+```swift
+// Before (goes through MainTabView dismiss/re-present):
+onNewDiscovery: {
+    onRequestNewDiscovery?(viewModel.flowType)
+}
+
+// After (stays in modal):
+onNewDiscovery: {
+    viewModel.discoverMore(type: viewModel.flowType)
+}
+```
+
+**Audio generating modal path:**
+```swift
+// Before (goes through MainTabView):
+.sheet(isPresented: $viewModel.showAudioGeneratingModal, onDismiss: {
+    if let type = pendingNewDiscoveryType {
+        pendingNewDiscoveryType = nil
+        onRequestNewDiscovery?(type)
+    }
+})
+
+// After (stays in modal):
+.sheet(isPresented: $viewModel.showAudioGeneratingModal, onDismiss: {
+    if let type = pendingNewDiscoveryType {
+        pendingNewDiscoveryType = nil
+        viewModel.discoverMore(type: type)
+    }
+})
+```
+
+Audio modal still has dual options ("Take a Photo" + "Upload Another") — already implemented.
+
+#### 2.4 Remove parent coordination for "Discover More"
+
+- Remove `onRequestNewDiscovery` callback from `DiscoveryCreationFlowView`
+- Remove `handleNewDiscoveryRequest()` from MainTabView
+- `pendingCreationFlowAfterDismiss` / `isDismissingModal` infrastructure stays in MainTabView (still needed for tab taps during dismiss animations)
+
+#### 2.5 Cancel at confirmation after "Discover More"
+
+Once the user takes a new photo, the streaming view is replaced by the confirmation screen (flowState transitions from `.analyzing` to `.confirming`). The old session (A) is unsubscribed and running in the background.
+
+If the user cancels at confirmation: `cancelFlow()` + `dismissModal()` → Discoveries tab. Session A finishes in the background and appears in the feed. The user cannot return to session A's streaming view from here — but they made an affirmative choice (took a new photo), so this is acceptable.
 
 #### What Phase 2 Achieves
 
-- 10-step state machine → 3 steps (dismiss → pick → present)
+- 10-step state machine → eliminated entirely
 - No `PreservedStreamingState`
 - No `restorePreservedStateIfAvailable()`
 - No `onStateRestored` callback
+- No dismiss/re-present cycle for "Discover More"
+- No `onRequestNewDiscovery` callback or `handleNewDiscoveryRequest()` in MainTabView
+- Cancel picker → back to streaming view (not kicked to Discoveries tab)
 - Simpler `unsubscribe()` (just detach)
 
 ---
 
 ### Phase 3: Convert Closures to Publishers
 
+**Status: DONE (2026-02-06)**
+
 **Goal:** Eliminate stale-closure risk entirely.
 
 #### 3.1 Add published properties to ViewModel
 
+Removed 5 closure-based callbacks (`onDiscoveryCreated`, `onDiscoverySummaryReady`, `onAnalysisBegan`, `analysisBeganPublisher`, `onPollingDiscoveryReady`). Replaced with two `@Published` properties:
+
 ```swift
-// Replaces onDiscoveryCreated, onDiscoverySummaryReady, onPollingDiscoveryReady:
 @Published private(set) var completedDiscovery: DiscoverySummary?
+@Published private(set) var createdDiscoveryId: Int64?
 ```
 
-`analysisBeganPublisher` and `onAnalysisBegan` are already eliminated in Phase 1 (modal is already presented when analysis starts).
+- `createdDiscoveryId` — set when `.complete` stream event arrives (triggers fallback timer in MainTabView)
+- `completedDiscovery` — set when session completes with summary or polling finds discovery (triggers store upsert)
+- Both reset to nil in `beginFlow()` and `transitionToNewDiscovery()` to prevent stale values on re-subscription
 
 #### 3.2 Replace .onAppear closures with .onReceive
 
 ```swift
+.onReceive(cameraViewModel.$createdDiscoveryId.compactMap { $0 }) { discoveryId in
+    handleDiscoveryCreated(discoveryId)
+}
 .onReceive(cameraViewModel.$completedDiscovery.compactMap { $0 }) { summary in
-    Task {
-        await storeObserver.upsert(summary)
-        await audioServices.discoveryStore.upsert(summary)
-    }
+    handleCompletedDiscovery(summary)
 }
 ```
 
-#### 3.3 Delete all closure assignments from MainTabView.onAppear
+#### 3.3 Unified handler
 
-Remove `onDiscoveryCreated`, `onDiscoverySummaryReady`, `onPollingDiscoveryReady`, `onStateRestored` assignments.
+`handleDiscoverySummaryReady` and `handlePollingDiscoveryReady` merged into single `handleCompletedDiscovery` (both upsert to store + cancel fallback timer).
+
+#### 3.4 Dead code removed
+
+`onAnalysisBegan` and `analysisBeganPublisher` were dead code since Phase 1 (no subscribers remained in MainTabView). Removed entirely.
 
 #### What Phase 3 Achieves
 
-- Zero closure-based callbacks
+- Zero closure-based callbacks on ViewModel
 - No stale-closure risk
-- Declarative data flow via Combine
+- Declarative data flow via Combine `.onReceive`
+- Session manager callbacks (`onDiscoveryCompleted`, `onDiscoveryFailed`) remain in `.onAppear` — these are on the singleton, not the ViewModel
 
 ---
 
 ### Phase 4: Extract Coordinator
+
+**Status: DONE (2026-02-06)**
 
 **Goal:** MainTabView becomes pure tab routing (~100-150 lines).
 
@@ -814,79 +877,245 @@ struct MainTabView: View {
 
 #### What Phase 4 Achieves
 
-- MainTabView: ~100-150 lines
-- All creation flow logic in coordinator
-- Clean dependency injection via `CreationFlowDependencies`
-- Testable coordinator
+- MainTabView: ~284 lines (body is ~155 lines of tab routing + overlays + modifiers)
+- All creation flow state and logic in `CreationFlowCoordinator` (~170 lines)
+- Coordinator owns: ViewModels, modal presentation state (activeFlowType, dismiss guards), discovery completion tracking (fallback timer, store upsert), session manager configuration, and all creation-flow dependency closures
+- MainTabView init reduced from 18 params to 9 (creation-flow closures removed)
+- `CreationFlowDependencies` struct was not needed — coordinator holds closures directly, AudioGuidesPageView accesses them via `coordinator.makeCreditsViewModel` etc.
+- RootContentView creates coordinator as `@StateObject`, replacing two separate VM StateObjects
 
 ---
 
 ### Phase 5: Break Up ViewModel
 
-**Goal:** Split the 1700-line ViewModel into focused components.
+**Status: DONE (2026-02-06)**
 
-| Component | Responsibility | ~Lines |
-|-----------|---------------|--------|
-| `PhotoCaptureCoordinator` | Permissions, camera/picker, image encoding | ~200 |
-| `DiscoveryConfirmationViewModel` | Location, credits, nearby places, intro mode | ~400 |
-| `DiscoveryStreamingViewModel` | Session subscription, event handling, polling | ~300 |
-| `DiscoveryCreationFlowCoordinator` | Orchestrates the above, manages flow state | ~200 |
+**Goal:** Split the ~1560-line ViewModel into focused helpers using internal delegation. The VM remains the single `@ObservableObject` surface — no view changes needed.
 
-**Migration strategy:** Extract incrementally:
-1. `PhotoCaptureCoordinator` first (cleanest boundary)
-2. `DiscoveryStreamingViewModel` second (second cleanest)
-3. `DiscoveryConfirmationViewModel` third (most intertwined)
-4. Rename remaining ViewModel to coordinator
+| Component | Responsibility | Target Lines | Actual Lines |
+|-----------|---------------|-------------|-------------|
+| `PhotoCaptureCoordinator` | Permissions, camera/picker coordination | ~150 | 103 |
+| `StreamingSessionHandler` | Session subscription, event handling, polling, photo save | ~350 | 491 |
+| `ConfirmationStateBuilder` | Location, credits, nearby places, intro mode, history context | ~350 | 392 |
+| `DiscoveryCreationFlowViewModel` (slimmed) | Orchestrates the above, manages flow state, @Published surface | ~350-400 | 668 |
 
-Each extraction can be a separate PR, tested independently.
+**VM at 668 lines vs 350-400 target:** The remaining logic is legitimate orchestration that cannot be extracted further — ephemeral location bridging capture→confirmation→analysis, payload building, state machine transitions gluing the 3 coordinators, and cross-cutting concerns. All extractable logic has been moved.
+
+**Communication patterns:**
+- PhotoCaptureCoordinator → VM: return values (`CaptureResult` enum)
+- StreamingSessionHandler → VM: `@Published analysisState` (Combine) + `StreamingSessionDelegate` protocol (8 discrete event callbacks)
+- ConfirmationStateBuilder → VM: return values (`ConfirmationResult`) + 1 callback (`onConfirmationUpdated`)
+
+**What was done:**
+1. Extracted all three in a single pass: PhotoCaptureCoordinator first, StreamingSessionHandler second, ConfirmationStateBuilder third
+2. Removed dead dependencies: `creditsRepository` and `analysisClient` from VM init, `StubAnalysisClient` from tests
+3. 33 new focused tests: 7 PhotoCapture + 13 StreamingHandler + 13 ConfirmationBuilder
+4. All existing tests pass unchanged (pre-existing `testBeginAnalysisStreamsAndCompletes` failure unrelated)
+5. No view files changed — VM remains the single `@ObservableObject` surface
+
+See `phase-5-viewmodel-decomposition.md` for full implementation plan.
 
 ---
 
-### Phase 6: Discovery Queue on Discoveries Tab
+### Phase 6: In-Progress Discoveries on Discoveries Tab
 
-**Goal:** Show in-progress discoveries on the Discoveries tab.
+**Goal:** Show all processing discoveries on the Discoveries tab. Tap any to reconnect via the exact same creation flow modal.
 
-**Prerequisites:** Phases 1-4 complete, `DiscoverySessionManager` exposes active sessions.
+**Prerequisites:** Phases 1-2 complete (modal architecture + `discoverMore()`).
 
-#### 6.1 Expose active sessions
+#### 6.1 Refactor SessionManager: single-slot → dictionary
+
+The current `activeSession: ActiveDiscoverySession?` is a single slot. When a second session starts, it **overwrites** the first — the first session's Task keeps running but events are silently dropped (no accumulation, no forwarding). This must change to support parallel sessions.
 
 ```swift
-// In DiscoverySessionManager:
-@Published private(set) var activeSessions: [UUID: ActiveSessionInfo] = [:]
+// Current (broken for multi-session):
+private var activeSession: ActiveDiscoverySession?
 
-struct ActiveSessionInfo: Identifiable {
-    let id: UUID
-    let thumbnailData: Data?
-    let title: String?
-    let status: DiscoverySessionStatus
-    let startedAt: Date
+// After:
+private var activeSessions: [UUID: ActiveDiscoverySession] = [:]
+```
+
+Every method changes from `guard activeSession?.id == sessionId` to `guard var session = activeSessions[sessionId]`:
+
+| Method | Change |
+|--------|--------|
+| `startProcessing()` | `activeSessions[id] = session` instead of `activeSession = session` |
+| `deliverEvent(for:)` | `activeSessions[sessionId]` lookup |
+| `subscribe(to:)` | dictionary lookup |
+| `unsubscribe(from:)` | dictionary lookup |
+| `handleCompletion()` | `activeSessions.removeValue(forKey:)` |
+| `handleFailure()` | same pattern |
+| `cancelSession()` | dictionary lookup + remove |
+
+**Concurrency limit:** Up to 3 concurrent sessions process in parallel (edge function handles concurrency). Additional requests go into `pendingQueue` and start when a slot opens. This bounds memory from accumulated events + thumbnails.
+
+```swift
+private let maxConcurrentSessions = 3
+
+public func startSession(...) -> UUID {
+    let request = PendingDiscoveryRequest(...)
+    if activeSessions.count >= maxConcurrentSessions {
+        pendingQueue.append(request)
+        sessionStatuses[request.id] = .queued
+    } else {
+        sessionStatuses[request.id] = .processing
+        startProcessing(request, subscriber: subscriber)
+    }
+    return request.id
 }
 ```
 
-#### 6.2 Add "In Progress" section to DiscoveriesHomeView
+**Effort:** ~50 lines changed. No new logic — data structure swap.
+
+#### 6.2 Expose in-progress display data
 
 ```swift
-if !sessionManager.activeSessions.isEmpty {
+// In DiscoverySessionManager:
+@Published private(set) var inProgressItems: [InProgressItem] = []
+
+public struct InProgressItem: Identifiable {
+    public let id: UUID
+    public let thumbnailData: Data       // from PendingDiscoveryRequest.media.data
+    public let media: DiscoveryCapturedMedia  // full media for attachToSession()
+    public let flowType: DiscoveryCreationFlowType
+    public let title: String?            // from metadata event (if received)
+    public let status: DiscoverySessionStatus
+    public let startedAt: Date
+}
+```
+
+Updated whenever a session starts, receives a `.metadata` event, or completes. Completed sessions stay in the list briefly (with `.completed(summary)` status) until the Discoveries list refreshes and the item appears there.
+
+**Effort:** ~30 lines.
+
+#### 6.3 Add "In Progress" section to Discoveries tab
+
+A section at the top of the Discoveries list showing each in-progress session:
+- Thumbnail (captured photo)
+- Spinner overlay while processing, "Queued" badge if waiting
+- Title if metadata has arrived, otherwise "Discovering…"
+- Tapping opens the creation flow modal (see 6.4)
+
+When a session completes:
+- Status changes to `.completed(summary)`
+- Discoveries list refreshes in the background to include the new discovery
+- The in-progress item can remain at the top as a "completed" item with the title
+- Tapping opens the normal discovery detail view (not the streaming view)
+- Once the discoveries list is refreshed and the item appears, remove from `inProgressItems`
+- No animated transition between in-progress and completed — just refresh
+
+```swift
+// On Discoveries tab:
+if !sessionManager.inProgressItems.isEmpty {
     Section("In Progress") {
-        ForEach(sessionManager.activeSessions.values.sorted(by: { $0.startedAt > $1.startedAt })) { session in
-            InProgressDiscoveryRow(session: session)
-                .onTapGesture { selectedSession = session }
+        ForEach(sessionManager.inProgressItems) { item in
+            InProgressDiscoveryRow(item: item)
+                .onTapGesture { handleInProgressTap(item) }
         }
+    }
+}
+
+func handleInProgressTap(_ item: InProgressItem) {
+    switch item.status {
+    case .completed(let summary):
+        // Open normal discovery detail view
+        selectedDiscovery = summary
+    case .processing, .queued:
+        // Reconnect via the same creation flow modal (see 6.4)
+        reconnectToSession(item)
+    case .failed:
+        // Show error or retry option
+        break
     }
 }
 ```
 
-#### 6.3 Tapping opens streaming modal for that session
+**Effort:** ~120 lines.
+
+#### 6.4 Tap to reconnect: reuse the exact same modal
+
+Tapping an in-progress (still processing) session opens the **exact same** `DiscoveryCreationFlowView` modal used during creation. Not a lightweight version — the real thing. This means the user gets all functionality: streaming view, "Discover More", audio controls, credits, X to dismiss.
+
+**How it works:**
+
+1. Add `attachToSession()` method to ViewModel (~25 lines):
 
 ```swift
-.fullScreenCover(item: $selectedSession) { session in
-    DiscoveryStreamingReconnectView(sessionId: session.id)
+func attachToSession(sessionId: UUID, media: DiscoveryCapturedMedia) {
+    // Set up state for streaming view
+    let initialState = DiscoveryAnalysisState(
+        statusMessage: "Reconnecting…",
+        streamedText: "",
+        isStreaming: true
+    )
+    analysisState = initialState
+    currentMedia = media
+
+    // Streaming view reads image from confirmationState
+    confirmationState = DiscoveryConfirmationState(
+        media: media,
+        displayImageData: media.data,
+        creditBalance: nil,
+        location: media.location,
+        locationDescription: nil,
+        isLocationPermissionGranted: false,
+        isResolvingLocation: false,
+        customContext: nil,
+        nearbyPlaces: nil,
+        nearbyPlacesContext: nil
+    )
+
+    flowState = .analyzing(initialState)
+
+    // Subscribe — session manager replays accumulated events
+    // Events flow through handleSessionEvent() → handle(event:)
+    // which updates analysisState via the existing code path
+    currentSessionId = sessionId
+    DiscoverySessionManager.shared.subscribe(to: sessionId, subscriber: self)
 }
 ```
 
-#### 6.4 Refactor SessionManager for multi-session
+2. Present from Discoveries tab via `activeCreationFlowType`:
 
-Refactor `activeSession` single-slot into the `activeSessions` dictionary. Each session tracks its own subscriber, state, and completion status.
+```swift
+func reconnectToSession(_ item: InProgressItem) {
+    let viewModel = item.flowType == .camera ? cameraViewModel : uploadViewModel
+    viewModel.attachToSession(sessionId: item.id, media: item.media)
+    activeCreationFlowType = item.flowType
+}
+```
+
+3. The `.task` modifier sees `flowState.phase == .analyzing` (not `.idle`) and **does not call `startFlow()`**. The modal just renders the streaming view with replayed state.
+
+**Everything works automatically from there:**
+- **X button** → `unsubscribe()` + dismiss → back to Discoveries. Session continues.
+- **"Discover More"** → `viewModel.discoverMore(type:)` → picker over streaming view. Cancel returns to streaming. Full experience.
+- **Session completes** → `handleSessionEvent` receives `.complete` → streaming view shows finished discovery. Audio modal may show if it's the first discovery.
+- **Auto-dismiss** → `hasEnteredActivePhase` is set on `.onAppear` (phase is `.analyzing`). Works correctly.
+
+**Effort:** ~25 lines for `attachToSession()` + ~15 lines for the tap handler.
+
+#### 6.5 Memory management
+
+Each active session holds in memory:
+- `accumulatedEvents` — streaming tokens, metadata, status messages (~10-50 KB per session)
+- `PendingDiscoveryRequest.media` — the captured photo (~2-5 MB per session)
+
+With max 3 concurrent: ~6-15 MB total. Acceptable.
+
+When a session completes and the discoveries list has refreshed:
+- Remove from `activeSessions` dictionary
+- Remove from `inProgressItems`
+- `accumulatedEvents` and media data are freed
+- Queued sessions (4th+) start processing as slots open
+
+#### What Phase 6 Achieves
+
+- All processing discoveries visible on the Discoveries tab
+- Tap any in-progress session to reconnect via the same modal (full streaming view, "Discover More", audio controls)
+- Tap completed sessions to open normal discovery detail
+- Up to 3 concurrent sessions, rest queued
+- Session manager properly tracks all sessions independently (no more single-slot overwrite bug)
 
 ---
 
@@ -895,13 +1124,13 @@ Refactor `activeSession` single-slot into the `activeSessions` dictionary. Each 
 | Phase | Effort | Risk | Impact |
 |-------|--------|------|--------|
 | 1: Modal presentation | Medium | Medium | Eliminates overlay, dual views, isOverlay, both credits bugs |
-| 2: Simplify "Discover Another" | Small | Low | Eliminates 10-step state machine |
+| 2: In-modal "Discover More" | Small | Low | Eliminates dismiss/re-present, cancel returns to streaming |
 | 3: Convert closures to publishers | Small | Low | Eliminates stale-closure risk |
 | 4: Extract coordinator | Medium | Low | MainTabView → ~150 lines |
 | 5: Break up ViewModel | Large | Medium | 1700-line ViewModel → 4 focused components |
-| 6: Discovery queue | Medium | Low | New feature, builds on new architecture |
+| 6: In-progress discoveries | Medium | Low | Multi-session support, reconnect via same modal |
 
-**Recommended grouping:** Phases 1-3 are tightly coupled and can be done in a single PR. Phase 4 in a separate PR. Phase 5 as 3-4 incremental PRs. Phase 6 when ready for the feature.
+**Recommended grouping:** Phases 1-2 are tightly coupled and should be done together. Phase 3 in the same or next PR. Phase 4 in a separate PR. Phase 5 as 3-4 incremental PRs. Phase 6 can be done any time after Phase 2 (needs `discoverMore()` + multi-session refactor).
 
 ---
 
@@ -915,9 +1144,15 @@ Refactor `activeSession` single-slot into the `activeSessions` dictionary. Each 
 
 4. **"Discover More" — dual options only on audio modal.** The audio generating modal (first discovery) offers two options: "Take a Photo" and "Upload Another". The streaming view's "Discover More" button remains a single action that re-triggers the same flow type (camera → camera, upload → upload). This keeps the streaming view simple and avoids adding UI complexity for a marginal benefit — the user already chose their preferred capture method.
 
-5. **Tab bar during analysis: Accept fullScreenCover.** User can dismiss the modal to browse, and re-open any in-progress discovery from the Discoveries queue.
+5. **Tab bar during analysis: Accept fullScreenCover.** User can dismiss the modal to browse, and re-open any in-progress discovery from the Discoveries tab.
 
 6. **Credits refresh bug: Resolved by architecture, plus defensive fix.** The root cause (Path B — MainTabView presenting credits separately) is eliminated by Phase 1. Additionally, `syncCreditBalance()` should also update `isInIntroMode` as a belt-and-suspenders fix.
+
+7. **"Discover More" stays in-modal (2026-02-06).** The ViewModel's `discoverMore(type:)` opens the picker over the streaming view. No dismiss/re-present. Cancel returns to streaming. See `discover-more-cancel-behavior.md`.
+
+8. **Session manager: parallel, not queued (2026-02-06).** Edge functions process requests concurrently. Up to 3 sessions run in parallel on the client. 4th+ are queued until a slot opens. The `activeSession` single-slot is replaced with `activeSessions` dictionary.
+
+9. **Reconnect uses the same modal, not a lightweight view (2026-02-06).** Tapping an in-progress session on the Discoveries tab opens the exact same `DiscoveryCreationFlowView` modal via `attachToSession()`. Full functionality: streaming, "Discover More", audio, credits. No separate reconnect view needed.
 
 ---
 

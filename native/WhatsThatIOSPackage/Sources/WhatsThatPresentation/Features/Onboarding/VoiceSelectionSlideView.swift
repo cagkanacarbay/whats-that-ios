@@ -8,6 +8,7 @@ struct VoiceSelectionSlideView: View {
 
     let onContinue: () -> Void
     let onSkip: () -> Void
+    let onBack: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -16,11 +17,12 @@ struct VoiceSelectionSlideView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                Spacer()
 
-            // Title
-            Text("Who tells your stories?")
+                // Title
+                Text("Who tells your stories?")
                 .font(.adaptiveSystem(size: 26, weight: .bold))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(palette.textPrimary)
@@ -65,6 +67,21 @@ struct VoiceSelectionSlideView: View {
             }
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.xLarge)
+            }
+            .background(palette.background)
+
+            // Back button
+            Button {
+                viewModel.stop()
+                onBack()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(palette.textSecondary)
+                    .frame(width: 44, height: 44)
+            }
+            .padding(.top, BrandSpacing.medium)
+            .padding(.leading, BrandSpacing.medium)
         }
         .background(palette.background)
     }
@@ -79,6 +96,7 @@ struct VoiceSelectionSlideView: View {
             fetchVoiceSampleURL: { _ in nil }
         ),
         onContinue: {},
-        onSkip: {}
+        onSkip: {},
+        onBack: {}
     )
 }

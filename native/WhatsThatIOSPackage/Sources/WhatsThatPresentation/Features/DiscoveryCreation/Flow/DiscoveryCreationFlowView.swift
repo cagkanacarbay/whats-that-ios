@@ -48,9 +48,6 @@ struct DiscoveryCreationFlowView: View {
     }
 
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
-    /// Called when user wants to start a new discovery from the audio generating modal or streaming view.
-    /// The parent (MainTabView) handles dismissing the current modal and presenting a new one.
-    private let onRequestNewDiscovery: ((DiscoveryCreationFlowType) -> Void)?
     /// Called when user dismisses the creation flow (X button, cancel, etc.)
     private let onDismiss: (() -> Void)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
@@ -78,11 +75,16 @@ struct DiscoveryCreationFlowView: View {
     /// Tracks whether the flow has progressed past the initial idle state.
     /// Prevents auto-dismiss when the modal opens with an idle ViewModel (e.g. "Discover More" re-present).
     @State private var hasEnteredActivePhase = false
+    /// Guards against duplicate dismiss calls. unsubscribe()/cancelFlow() set flowState
+    /// to .cancelled → .idle, which triggers the auto-dismiss onChange handler. If the caller
+    /// also calls onDismiss() directly (e.g. X button), without this guard onDismiss fires
+    /// multiple times — the stale async calls can set isDismissingModal=true after the dismiss
+    /// completes, blocking the next flow presentation.
+    @State private var hasDismissed = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
-        onRequestNewDiscovery: ((DiscoveryCreationFlowType) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
         fetchRecentDiscoveries: (() -> [DiscoverySummary])? = nil,
@@ -95,7 +97,6 @@ struct DiscoveryCreationFlowView: View {
         saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         _viewModel = ObservedObject(initialValue: viewModel)
-        self.onRequestNewDiscovery = onRequestNewDiscovery
         self.onDismiss = onDismiss
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchRecentDiscoveries = fetchRecentDiscoveries
@@ -131,7 +132,7 @@ struct DiscoveryCreationFlowView: View {
                         Spacer()
                         MiniPlayerView {
                             // Tap mini player during modal -> dismiss modal and navigate to Audio Guides
-                            onDismiss?()
+                            dismissModal()
                         }
                         .padding(.horizontal, 16)
                     }
@@ -145,11 +146,12 @@ struct DiscoveryCreationFlowView: View {
                     miniPlayerPresence: audioServices.miniPlayerPresence,
                     onViewDiscovery: { _ in
                         // Dismiss modal — MainTabView will navigate to the discovery
-                        onDismiss?()
+                        dismissModal()
                     },
                     onGenerateAudio: { summary in
                         audioServices.playbackController.requestVoiceover(for: summary)
-                    }
+                    },
+                    isInModal: true
                 )
             }
         }
@@ -218,7 +220,7 @@ struct DiscoveryCreationFlowView: View {
                 if shouldDismiss {
                     // Defer to prevent "update multiple times per frame"
                     DispatchQueue.main.async {
-                        onDismiss?()
+                        dismissModal()
                     }
                 }
             }
@@ -276,16 +278,16 @@ struct DiscoveryCreationFlowView: View {
                     // Handle "Create Another" action AFTER sheet is fully dismissed.
                     if let type = pendingNewDiscoveryType {
                         pendingNewDiscoveryType = nil
-                        onRequestNewDiscovery?(type)
+                        viewModel.discoverMore(type: type)
                     }
                 }
             ) {
                 AudioGeneratingModalView(
-                    onCreateAnother: {
+                    flowType: viewModel.flowType,
+                    onRequestNewDiscovery: { type in
                         // Dismiss modal first, then trigger action in onDismiss.
-                        // Re-trigger the same flow type the user was using.
                         viewModel.showAudioGeneratingModal = false
-                        pendingNewDiscoveryType = viewModel.flowType
+                        pendingNewDiscoveryType = type
                     },
                     onReadThisDiscovery: {
                         viewModel.showAudioGeneratingModal = false
@@ -321,7 +323,7 @@ struct DiscoveryCreationFlowView: View {
                         viewModel.showFreeCreditsExhaustedAtConfirm = false
                         // Cancel the creation flow and dismiss the modal
                         viewModel.cancelFlow()
-                        onDismiss?()
+                        dismissModal()
                     }
                 )
             }
@@ -368,7 +370,7 @@ struct DiscoveryCreationFlowView: View {
                 onContinue: { viewModel.beginAnalysis() },
                 onCancel: {
                     viewModel.cancelFlow()
-                    onDismiss?()
+                    dismissModal()
                 },
                 onRequestCredits: makeCreditsHandler,
                 onShowLocationPermissions: { showLocationPermissionsAlert() },
@@ -390,14 +392,22 @@ struct DiscoveryCreationFlowView: View {
             onCancel: {
                 // Transfer to background instead of cancelling - discovery continues processing
                 viewModel.unsubscribe()
-                onDismiss?()
+                dismissModal()
             },
             onNewDiscovery: {
-                // Re-trigger the same flow type via the parent coordinator
-                onRequestNewDiscovery?(viewModel.flowType)
+                viewModel.discoverMore(type: viewModel.flowType)
             },
             makeCreditsViewModel: makeCreditsViewModel
         )
+    }
+
+    /// Idempotent dismiss — only the first call goes through.
+    /// Prevents stale async onChange(of: phase) callbacks from firing onDismiss
+    /// multiple times, which would corrupt isDismissingModal state in MainTabView.
+    private func dismissModal() {
+        guard !hasDismissed else { return }
+        hasDismissed = true
+        onDismiss?()
     }
 
     private var makeCreditsHandler: (() -> Void)? {

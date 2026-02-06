@@ -27,6 +27,9 @@ struct DiscoveriesHomeView: View {
     private let onQuickCamera: (() -> Void)?
     private let onQuickUpload: (() -> Void)?
     private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
+    private let onReconnectSession: ((InProgressItem) -> Void)?
+
+    @ObservedObject private var sessionManager = DiscoverySessionManager.shared
 
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
@@ -66,7 +69,8 @@ struct DiscoveriesHomeView: View {
         isSettingsSelected: Bool = false,
         onQuickCamera: (() -> Void)? = nil,
         onQuickUpload: (() -> Void)? = nil,
-        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil
+        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil,
+        onReconnectSession: ((InProgressItem) -> Void)? = nil
     ) {
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
@@ -81,6 +85,7 @@ struct DiscoveriesHomeView: View {
         self.onQuickCamera = onQuickCamera
         self.onQuickUpload = onQuickUpload
         self.onOpenAudioGuide = onOpenAudioGuide
+        self.onReconnectSession = onReconnectSession
         _detailCoordinator = StateObject(
             wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
         )
@@ -167,7 +172,9 @@ struct DiscoveriesHomeView: View {
         ScrollView {
             VStack(spacing: 0) {
                 refreshHeaderView(metrics: metrics)
-                
+
+                inProgressContent
+
                 DiscoveriesGridView(
                     storeObserver: storeObserver,
                     availableWidth: contentWidth,
@@ -270,6 +277,54 @@ struct DiscoveriesHomeView: View {
         }
     }
     
+    @ViewBuilder
+    private var inProgressContent: some View {
+        if !sessionManager.inProgressItems.isEmpty {
+            InProgressSection(
+                items: sessionManager.inProgressItems,
+                onTap: { item in
+                    handleInProgressItemTapped(item)
+                },
+                onDismissFailure: { item in
+                    DiscoverySessionManager.shared.dismissFailedSession(item.id)
+                }
+            )
+            .padding(.horizontal, gridHorizontalPadding + 8)
+        }
+
+        #if DEBUG
+        if let firstDiscovery = storeObserver.discoveries.first {
+            Button {
+                sessionManager.debugAddFakeInProgressItem(from: firstDiscovery)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add fake in-progress")
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(BrandColors.spinner)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding(.bottom, 8)
+        }
+        #endif
+    }
+
+    private func handleInProgressItemTapped(_ item: InProgressItem) {
+        switch item.status {
+        case .completed(let summary):
+            handleDiscoverySelection(
+                discovery: summary,
+                imageURL: imageURL(for: summary),
+                startFrame: fallbackStartFrame()
+            )
+        case .processing, .queued, .failed:
+            onReconnectSession?(item)
+        }
+    }
+
     @ViewBuilder
     private var detailOverlayContent: some View {
         let detailSnapshot = detailCoordinator.snapshot
@@ -625,11 +680,7 @@ struct DiscoveriesHomeView: View {
     }
 
     private func refreshIndicator(opacity: Double) -> some View {
-        ProgressView()
-            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
-            .progressViewStyle(.circular)
-            .controlSize(.large)
-            .scaleEffect(1.1, anchor: .center)
+        BrandedRefreshSpinner()
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Refreshing discoveries")
@@ -715,5 +766,43 @@ private extension String {
     var nonEmptyOrNil: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - Branded Refresh Spinner
+
+/// Small version of the branded logo + spinning ring, used as the pull-to-refresh indicator.
+private struct BrandedRefreshSpinner: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            BrandColors.spinner.opacity(0.1),
+                            BrandColors.spinner
+                        ]),
+                        center: .center,
+                        startAngle: .degrees(0),
+                        endAngle: .degrees(360)
+                    ),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .frame(width: 60, height: 60)
+                .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                .animation(
+                    .linear(duration: 1.2).repeatForever(autoreverses: false),
+                    value: isAnimating
+                )
+
+            Image("LaunchLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 36, height: 36)
+        }
+        .onAppear { isAnimating = true }
     }
 }

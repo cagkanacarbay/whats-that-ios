@@ -64,27 +64,31 @@ struct PostPurchaseConfigurationFlow: View {
             .padding(.top, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.medium)
 
-            // Content
-            Group {
-                switch currentSlide {
-                case .thankYou:
-                    ThankYouSlideView(
-                        creditAmount: creditAmount,
-                        onContinue: { moveToVoice() }
-                    )
-                case .voice:
-                    VoiceSelectionSlideView(
-                        viewModel: voicePickerViewModel,
-                        onContinue: { moveToIPOP() },
-                        onSkip: { moveToIPOP() }
-                    )
-                case .ipop:
-                    IPOPPreferencesSlideView(
-                        viewModel: ipopViewModel,
-                        onContinue: { finishConfiguration() }
-                    )
-                }
+            // Content (swipeable pages)
+            TabView(selection: $currentSlide) {
+                ThankYouSlideView(
+                    creditAmount: creditAmount,
+                    onContinue: { moveToVoice() }
+                )
+                .tag(Slide.thankYou)
+
+                VoiceSelectionSlideView(
+                    viewModel: voicePickerViewModel,
+                    onContinue: { moveToIPOP() },
+                    onSkip: { moveToIPOP() },
+                    onBack: { moveToThankYou() }
+                )
+                .tag(Slide.voice)
+
+                IPOPPreferencesSlideView(
+                    viewModel: ipopViewModel,
+                    onContinue: { finishConfiguration() },
+                    onBack: { moveToVoice() }
+                )
+                .tag(Slide.ipop)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(.easeInOut(duration: 0.3), value: currentSlide)
         }
         .background(palette.background)
         .task {
@@ -98,6 +102,12 @@ struct PostPurchaseConfigurationFlow: View {
         Circle()
             .fill(isActive ? BrandColors.Light.tabSelected : palette.textSecondary.opacity(0.3))
             .frame(width: 8, height: 8)
+    }
+
+    private func moveToThankYou() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            currentSlide = .thankYou
+        }
     }
 
     private func moveToVoice() {

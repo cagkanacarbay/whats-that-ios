@@ -174,20 +174,24 @@ private struct ObservableDiscoveryHighlightCard: View {
                         }
                     }
                 }
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 // Always show play/pause button; spinner when preparing
                 if isPreparing {
                     // Generating spinner
                     ZStack {
                         Circle()
-                            .fill(.black.opacity(0.3))
-                            .frame(width: 32, height: 32)
+                            .fill(.black.opacity(0.5))
+                            .frame(width: 48, height: 48)
+
+                        Circle()
+                            .strokeBorder(BrandColors.logo.opacity(0.3), lineWidth: 2)
+                            .frame(width: 48, height: 48)
 
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.logo))
-                            .scaleEffect(0.7)
+                            .scaleEffect(1.0)
                     }
                 } else {
                     // Play/pause button
@@ -196,19 +200,23 @@ private struct ObservableDiscoveryHighlightCard: View {
                     } label: {
                         ZStack {
                             Circle()
-                                .fill(.black.opacity(0.3))
-                                .frame(width: 32, height: 32)
+                                .fill(.black.opacity(0.5))
+                                .frame(width: 48, height: 48)
+
+                            Circle()
+                                .strokeBorder(BrandColors.logo.opacity(0.3), lineWidth: 2)
+                                .frame(width: 48, height: 48)
 
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 18, weight: .bold))
                                 .foregroundStyle(BrandColors.logo)
-                                .offset(x: isPlaying ? 0 : 1)
+                                .offset(x: isPlaying ? 0 : 1.5)
                         }
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 80, height: 80)
 
             // Title and first sentence of description
             VStack(alignment: .leading, spacing: 4) {

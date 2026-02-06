@@ -23,9 +23,8 @@ public struct RootContentView: View {
     private let makeCreationViewModel: (DiscoveryCreationFlowType) -> DiscoveryCreationFlowViewModel
     /// Single shared AudioServicesContainer instance created once and passed to MainTabView
     @StateObject private var audioServicesContainer: AudioServicesContainer
-    /// Stable viewModel instances for discovery creation flows - created once to prevent callback staleness
-    @StateObject private var cameraCreationViewModel: DiscoveryCreationFlowViewModel
-    @StateObject private var uploadCreationViewModel: DiscoveryCreationFlowViewModel
+    /// Coordinates the discovery creation flow lifecycle (owns ViewModels, modal state, completion tracking)
+    @StateObject private var creationFlowCoordinator: CreationFlowCoordinator
     @StateObject private var storeObserver: DiscoveryStoreObserver
     @StateObject private var postPurchaseConfigProvider: PostPurchaseConfigProvider
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
@@ -88,17 +87,32 @@ public struct RootContentView: View {
         self.deletionUseCase = deletionUseCase
         self.makeCreationViewModel = makeCreationViewModel
         // Create AudioServicesContainer once here as StateObject to ensure single instance
+        let audioServicesInstance: AudioServicesContainer
         if let factory = makeAudioServicesContainer {
-            _audioServicesContainer = StateObject(wrappedValue: factory())
+            audioServicesInstance = factory()
+            _audioServicesContainer = StateObject(wrappedValue: audioServicesInstance)
         } else {
-            // Create a placeholder that will never be used (non-iOS)
             fatalError("AudioServicesContainer factory is required on iOS")
         }
-        // Create discovery creation viewModels once as StateObject to ensure stable instances
-        // This prevents callback staleness when MainTabView is re-rendered
-        _cameraCreationViewModel = StateObject(wrappedValue: makeCreationViewModel(.camera))
-        _uploadCreationViewModel = StateObject(wrappedValue: makeCreationViewModel(.upload))
         _storeObserver = StateObject(wrappedValue: storeObserver)
+        // Create coordinator with stable VM instances and all creation-flow dependencies.
+        // The coordinator owns the ViewModels (previously separate StateObjects) and
+        // manages modal presentation, discovery completion tracking, and session manager config.
+        let cameraVM = makeCreationViewModel(.camera)
+        let uploadVM = makeCreationViewModel(.upload)
+        _creationFlowCoordinator = StateObject(wrappedValue: CreationFlowCoordinator(
+            cameraViewModel: cameraVM,
+            uploadViewModel: uploadVM,
+            audioServices: audioServicesInstance,
+            storeObserver: storeObserver,
+            makeCreditsViewModel: makeCreditsViewModel,
+            loadVoiceoverPreferences: loadVoiceoverPreferences,
+            saveVoiceoverPreferences: saveVoiceoverPreferences,
+            fetchVoiceOptions: fetchVoiceOptions,
+            fetchVoiceSampleURL: fetchVoiceSampleURL,
+            loadIPoPPreferences: loadIPoPPreferences,
+            saveIPoPPreferences: saveIPoPPreferences
+        ))
         _postPurchaseConfigProvider = StateObject(wrappedValue: PostPurchaseConfigProvider(
             loadVoiceoverPreferences: loadVoiceoverPreferences,
             saveVoiceoverPreferences: saveVoiceoverPreferences,
@@ -526,10 +540,9 @@ public struct RootContentView: View {
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         case .main:
             MainTabView(
+                coordinator: creationFlowCoordinator,
                 storeObserver: storeObserver,
                 deletionUseCase: deletionUseCase,
-                cameraViewModel: cameraCreationViewModel,
-                uploadViewModel: uploadCreationViewModel,
                 audioServices: audioServicesContainer,
                 initialTab: mainTabDestination,
                 onSignOut: {
@@ -539,16 +552,9 @@ public struct RootContentView: View {
                     isSettingsPresented = true
                 },
                 isSettingsPresented: $isSettingsPresented,
-                makeCreditsViewModel: makeCreditsViewModel,
                 onScreenSafetyChanged: { isSafe in
                     currentScreenIsSafe = isSafe
-                },
-                loadVoiceoverPreferences: loadVoiceoverPreferences,
-                saveVoiceoverPreferences: saveVoiceoverPreferences,
-                fetchVoiceOptions: fetchVoiceOptions,
-                fetchVoiceSampleURL: fetchVoiceSampleURL,
-                loadIPoPPreferences: loadIPoPPreferences,
-                saveIPoPPreferences: saveIPoPPreferences
+                }
             )
             .onAppear {
                 mainTabDestination = .discoveries

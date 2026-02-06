@@ -1,15 +1,21 @@
 import SwiftUI
+import WhatsThatDomain
 import WhatsThatShared
 
 /// Modal shown after first discovery stream completes, explaining audio generation.
 struct AudioGeneratingModalView: View {
-    let onCreateAnother: () -> Void
+    let flowType: DiscoveryCreationFlowType
+    let onRequestNewDiscovery: (DiscoveryCreationFlowType) -> Void
     let onReadThisDiscovery: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: BrandTheme.Palette {
         BrandTheme.palette(for: colorScheme)
+    }
+
+    private var creationPalette: DiscoveryCreationPalette {
+        DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
     var body: some View {
@@ -41,8 +47,40 @@ struct AudioGeneratingModalView: View {
 
             // Buttons
             VStack(spacing: BrandSpacing.small) {
-                BrandPrimaryButton(title: "Discover Another") {
-                    onCreateAnother()
+                HStack(spacing: BrandSpacing.small) {
+                    // Secondary action (left)
+                    Button(action: secondaryAction) {
+                        Text(secondaryTitle)
+                            .font(.adaptiveSystem(size: 17, weight: .semibold, scaleFactor: 1.3))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: DiscoveryCreationViewConstants.controlHeight)
+                            .contentShape(Rectangle())
+                            .foregroundStyle(creationPalette.overlayButtonForeground)
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(creationPalette.secondaryAction)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(creationPalette.overlayButtonBorder, lineWidth: 1)
+                    }
+
+                    // Primary action (right)
+                    Button(action: primaryAction) {
+                        Text(primaryTitle)
+                            .font(.adaptiveSystem(size: 17, weight: .semibold, scaleFactor: 1.3))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: DiscoveryCreationViewConstants.controlHeight)
+                            .contentShape(Rectangle())
+                            .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(creationPalette.primaryAction)
+                    )
                 }
 
                 Button {
@@ -58,6 +96,44 @@ struct AudioGeneratingModalView: View {
             .padding(.bottom, BrandSpacing.xLarge)
         }
         .background(palette.background)
+    }
+
+    // MARK: - Button Configuration
+
+    private var primaryTitle: String {
+        switch flowType {
+        case .camera:
+            return "Take Another Photo"
+        case .upload:
+            return "Upload Another"
+        }
+    }
+
+    private var secondaryTitle: String {
+        switch flowType {
+        case .camera:
+            return "Upload"
+        case .upload:
+            return "Take a Photo"
+        }
+    }
+
+    private var primaryAction: () -> Void {
+        switch flowType {
+        case .camera:
+            return { onRequestNewDiscovery(.camera) }
+        case .upload:
+            return { onRequestNewDiscovery(.upload) }
+        }
+    }
+
+    private var secondaryAction: () -> Void {
+        switch flowType {
+        case .camera:
+            return { onRequestNewDiscovery(.upload) }
+        case .upload:
+            return { onRequestNewDiscovery(.camera) }
+        }
     }
 
     @ViewBuilder
@@ -107,9 +183,18 @@ private struct SpinningRing: View {
     }
 }
 
-#Preview {
+#Preview("Camera Flow") {
     AudioGeneratingModalView(
-        onCreateAnother: {},
+        flowType: .camera,
+        onRequestNewDiscovery: { _ in },
+        onReadThisDiscovery: {}
+    )
+}
+
+#Preview("Upload Flow") {
+    AudioGeneratingModalView(
+        flowType: .upload,
+        onRequestNewDiscovery: { _ in },
         onReadThisDiscovery: {}
     )
 }

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import os
 import WhatsThatDomain
@@ -20,96 +21,49 @@ struct MainTabView: View {
     }
 
     @State private var selectedTab: Tab
-    /// ViewModels are owned by RootContentView as @StateObject, passed here as @ObservedObject
-    @ObservedObject private var cameraViewModel: DiscoveryCreationFlowViewModel
-    @ObservedObject private var uploadViewModel: DiscoveryCreationFlowViewModel
-    /// AudioServicesContainer is passed from RootContentView to ensure single shared instance
+    @ObservedObject private var coordinator: CreationFlowCoordinator
     @ObservedObject private var audioServices: AudioServicesContainer
     @ObservedObject private var storeObserver: DiscoveryStoreObserver
     @State private var pendingDiscoveryId: Int64?
-    @State private var awaitingSummaryId: Int64?
-    @State private var summaryFallbackTask: Task<Void, Never>?
     @State private var audioGuidesMode: AudioGuidesDisplayMode = .hero
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
     @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
 
-    // Modal presentation state for creation flow (replaces overlay ZStack)
-    @State private var activeCreationFlowType: DiscoveryCreationFlowType?
-    // Pending flow type for "Discover More" or tab tap during dismiss animation
-    @State private var pendingCreationFlowAfterDismiss: DiscoveryCreationFlowType?
-    // True between activeCreationFlowType=nil and fullScreenCover's onDismiss callback.
-    // Prevents setting a new activeCreationFlowType during the dismiss animation,
-    // which SwiftUI silently drops (leaving the state stuck).
-    @State private var isDismissingModal = false
-
-    // Reference to session manager (singleton, not StateObject since it's shared globally)
-    private var sessionManager: DiscoverySessionManager { DiscoverySessionManager.shared }
-
     private let deletionUseCase: DiscoveryDeletionUseCase
     private let onSignOut: () -> Void
     private let onSettings: (() -> Void)?
-    /// Binding indicating whether the settings sheet is currently presented
     @Binding private var isSettingsPresented: Bool
-    private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let onScreenSafetyChanged: ((Bool) -> Void)?
 
-    // Post-purchase configuration closures
-    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
-    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
-    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
-    private let fetchVoiceSampleURL: ((String) async -> URL?)?
-    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
-    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
-
     init(
+        coordinator: CreationFlowCoordinator,
         storeObserver: DiscoveryStoreObserver,
         deletionUseCase: DiscoveryDeletionUseCase,
-        cameraViewModel: DiscoveryCreationFlowViewModel,
-        uploadViewModel: DiscoveryCreationFlowViewModel,
         audioServices: AudioServicesContainer,
         initialTab: MainTabDestination = .discoveries,
         onSignOut: @escaping () -> Void,
         onSettings: (() -> Void)? = nil,
         isSettingsPresented: Binding<Bool> = .constant(false),
-        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
-        onScreenSafetyChanged: ((Bool) -> Void)? = nil,
-        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
-        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
-        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
-        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
-        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
-        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
+        onScreenSafetyChanged: ((Bool) -> Void)? = nil
     ) {
+        self._coordinator = ObservedObject(wrappedValue: coordinator)
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
+        self._audioServices = ObservedObject(wrappedValue: audioServices)
         self.deletionUseCase = deletionUseCase
         self.onSignOut = onSignOut
         self.onSettings = onSettings
         self._isSettingsPresented = isSettingsPresented
-        self.makeCreditsViewModel = makeCreditsViewModel
         self.onScreenSafetyChanged = onScreenSafetyChanged
-        self.loadVoiceoverPreferences = loadVoiceoverPreferences
-        self.saveVoiceoverPreferences = saveVoiceoverPreferences
-        self.fetchVoiceOptions = fetchVoiceOptions
-        self.fetchVoiceSampleURL = fetchVoiceSampleURL
-        self.loadIPoPPreferences = loadIPoPPreferences
-        self.saveIPoPPreferences = saveIPoPPreferences
         _selectedTab = State(initialValue: Self.tab(for: initialTab))
-        _cameraViewModel = ObservedObject(wrappedValue: cameraViewModel)
-        _uploadViewModel = ObservedObject(wrappedValue: uploadViewModel)
-        _audioServices = ObservedObject(wrappedValue: audioServices)
 
-        // Enforce consistent tab bar background to prevent transparency issues during custom transitions
         Self.configureTabBarAppearance()
     }
 
-    // Convenience accessor
     private var voiceoverController: VoiceoverPlaybackController {
         audioServices.playbackController
     }
-    
 
-    
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
@@ -135,6 +89,9 @@ struct MainTabView: View {
                     onQuickUpload: { selectedTab = .upload },
                     onOpenAudioGuide: { discovery in
                         handleDiscoveryAudioPillTapped(discovery)
+                    },
+                    onReconnectSession: { item in
+                        coordinator.reconnectToSession(item)
                     }
                 )
                 .tag(Tab.discoveries)
@@ -148,13 +105,13 @@ struct MainTabView: View {
                     onTextSelected: { discovery in
                         handleAudioGuideTextSelected(discovery)
                     },
-                    makeCreditsViewModel: makeCreditsViewModel,
-                    loadVoiceoverPreferences: loadVoiceoverPreferences,
-                    saveVoiceoverPreferences: saveVoiceoverPreferences,
-                    fetchVoiceOptions: fetchVoiceOptions,
-                    fetchVoiceSampleURL: fetchVoiceSampleURL,
-                    loadIPoPPreferences: loadIPoPPreferences,
-                    saveIPoPPreferences: saveIPoPPreferences
+                    makeCreditsViewModel: coordinator.makeCreditsViewModel,
+                    loadVoiceoverPreferences: coordinator.loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: coordinator.saveVoiceoverPreferences,
+                    fetchVoiceOptions: coordinator.fetchVoiceOptions,
+                    fetchVoiceSampleURL: coordinator.fetchVoiceSampleURL,
+                    loadIPoPPreferences: coordinator.loadIPoPPreferences,
+                    saveIPoPPreferences: coordinator.saveIPoPPreferences
                 )
                 .tag(Tab.audioGuides)
                 .tabItem {
@@ -207,52 +164,26 @@ struct MainTabView: View {
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
         .audioServices(audioServices)
-        // Creation flow presented as a fullScreenCover modal
-        .fullScreenCover(item: $activeCreationFlowType, onDismiss: {
-            // Dismiss animation is complete — safe to present again
-            isDismissingModal = false
-            // Check if there's a pending request (from "Discover More" or tab tap during dismiss)
-            if let pendingType = pendingCreationFlowAfterDismiss {
-                pendingCreationFlowAfterDismiss = nil
-                // Don't call startFlow() here — the modal's .task will call it once
-                // the view is actually on screen, ensuring the photo picker / camera
-                // presents on the correct view controller.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    // Present instantly (no slide-up animation)
-                    var transaction = Transaction(animation: .none)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        activeCreationFlowType = pendingType
-                    }
-                }
-            }
-            // selectedTab is already .discoveries — set by the onDismiss closure
-            // inside DiscoveryCreationFlowView before activeCreationFlowType was nil'd.
-            // Don't override it here as it can race with user tab selection.
+        // Creation flow presented as a fullScreenCover modal (driven by coordinator)
+        .fullScreenCover(item: $coordinator.activeFlowType, onDismiss: {
+            coordinator.handleModalDismissCompleted()
         }) { flowType in
-            let viewModel = flowType == .camera ? cameraViewModel : uploadViewModel
+            let viewModel = coordinator.viewModel(for: flowType)
             DiscoveryCreationFlowView(
                 viewModel: viewModel,
-                onRequestNewDiscovery: { type in handleNewDiscoveryRequest(type: type) },
                 onDismiss: {
                     selectedTab = .discoveries
-                    isDismissingModal = true
-                    // Dismiss instantly (no slide-down animation)
-                    var transaction = Transaction(animation: .none)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        activeCreationFlowType = nil
-                    }
+                    coordinator.dismissFlow()
                 },
-                makeCreditsViewModel: makeCreditsViewModel,
+                makeCreditsViewModel: coordinator.makeCreditsViewModel,
                 fetchRecentDiscoveries: { storeObserver.discoveries },
-                audioServices: audioServices,
-                loadVoiceoverPreferences: loadVoiceoverPreferences,
-                saveVoiceoverPreferences: saveVoiceoverPreferences,
-                fetchVoiceOptions: fetchVoiceOptions,
-                fetchVoiceSampleURL: fetchVoiceSampleURL,
-                loadIPoPPreferences: loadIPoPPreferences,
-                saveIPoPPreferences: saveIPoPPreferences
+                audioServices: coordinator.audioServices,
+                loadVoiceoverPreferences: coordinator.loadVoiceoverPreferences,
+                saveVoiceoverPreferences: coordinator.saveVoiceoverPreferences,
+                fetchVoiceOptions: coordinator.fetchVoiceOptions,
+                fetchVoiceSampleURL: coordinator.fetchVoiceSampleURL,
+                loadIPoPPreferences: coordinator.loadIPoPPreferences,
+                saveIPoPPreferences: coordinator.saveIPoPPreferences
             )
             .task {
                 // Start the flow once the modal is on screen. This ensures the
@@ -265,37 +196,11 @@ struct MainTabView: View {
             }
         }
         .onAppear {
-            cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
-            uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
-            cameraViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
-            uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
-
-            cameraViewModel.onPollingDiscoveryReady = { discovery in
-                handlePollingDiscoveryReady(discovery)
-            }
-            uploadViewModel.onPollingDiscoveryReady = { discovery in
-                handlePollingDiscoveryReady(discovery)
-            }
-
-            // Configure session manager callbacks for background discovery completion
-            sessionManager.onDiscoveryCompleted = { [weak audioServices, weak storeObserver] summary, generateAudio in
-                // Refresh discovery list to include new discovery
-                Task { @MainActor in
-                    await storeObserver?.upsert(summary)
-                }
-                // Trigger audio generation if user requested it
-                if generateAudio {
-                    audioServices?.playbackController.requestVoiceover(for: summary)
-                }
-            }
-            sessionManager.onDiscoveryFailed = { _, _ in
-                // Background discovery failures are silently ignored for now
-            }
-
+            coordinator.configureSessionManager()
             handleTabChange(to: selectedTab, isInitial: true)
         }
         .onDisappear {
-            summaryFallbackTask?.cancel()
+            coordinator.cleanup()
         }
         .onChange(of: selectedTab) { _, newValue in
             // Defer to next runloop to prevent "update multiple times per frame" error
@@ -303,7 +208,22 @@ struct MainTabView: View {
                 handleTabChange(to: newValue)
             }
         }
+        // Observe ViewModel published properties via coordinator's VMs.
+        .onReceive(coordinator.cameraViewModel.$createdDiscoveryId.compactMap { $0 }) { discoveryId in
+            coordinator.handleDiscoveryCreated(discoveryId)
+        }
+        .onReceive(coordinator.uploadViewModel.$createdDiscoveryId.compactMap { $0 }) { discoveryId in
+            coordinator.handleDiscoveryCreated(discoveryId)
+        }
+        .onReceive(coordinator.cameraViewModel.$completedDiscovery.compactMap { $0 }) { summary in
+            coordinator.handleCompletedDiscovery(summary)
+        }
+        .onReceive(coordinator.uploadViewModel.$completedDiscovery.compactMap { $0 }) { summary in
+            coordinator.handleCompletedDiscovery(summary)
+        }
     }
+
+    // MARK: - Tab Change
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
         // Track screen safety for compliance overlay deferral
@@ -313,27 +233,11 @@ struct MainTabView: View {
         // Camera/Gallery tabs are pure triggers — present the creation flow modal
         if tab == .camera || tab == .upload {
             let flowType: DiscoveryCreationFlowType = tab == .camera ? .camera : .upload
-            // Don't start a new flow if a modal is already active
-            guard activeCreationFlowType == nil else { return }
-            // If a dismiss animation is in progress, queue the request.
-            // Setting activeCreationFlowType during the animation causes SwiftUI to
-            // silently drop the presentation, leaving the state stuck.
-            if isDismissingModal {
-                pendingCreationFlowAfterDismiss = flowType
-                return
-            }
-            // Don't call startFlow() here — the modal's .task will call it once
-            // the fullScreenCover is on screen. Calling it here races with the
-            // fullScreenCover presentation: the camera/photo picker tries to present
-            // on the root VC before the modal is ready, blocking the modal presentation.
-            // Present instantly (no slide-up animation)
-            var transaction = Transaction(animation: .none)
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                activeCreationFlowType = flowType
-            }
+            coordinator.tryPresentFlow(type: flowType)
         }
     }
+
+    // MARK: - Audio Guides Navigation
 
     private func handleAudioGuideTextSelected(_ summary: DiscoverySummary?) {
         let logger = Logger(subsystem: "WhatsThat.AudioGuides", category: "MainTab")
@@ -358,72 +262,14 @@ struct MainTabView: View {
         selectedTab = .audioGuides
     }
 
-
-
-
-    private func handleDiscoveryCreated(_ discoveryId: Int64) {
-        // Do not pre-select the discovery from the feed; keep the modal active during creation.
-        awaitingSummaryId = discoveryId
-        summaryFallbackTask?.cancel()
-        summaryFallbackTask = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                if awaitingSummaryId == discoveryId {
-                    // Trigger a reload since we didn't get the summary callback
-                    Task { await storeObserver.reload() }
-                }
-            }
-        }
-    }
-
-    private func handleDiscoverySummaryReady(_ summary: DiscoverySummary) {
-        summaryFallbackTask?.cancel()
-        awaitingSummaryId = nil
-        // Upsert the created summary into the store - this will automatically update the feed
-        Task {
-            await storeObserver.upsert(summary)
-            // Also update the audio services store for immediate Audio Guides access
-            await audioServices.discoveryStore.upsert(summary)
-        }
-    }
-
-    private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
-        // Upsert the discovery so it appears in the Discoveries tab
-        // The ViewModel handles populating the streaming view with discovery data
-        // User will dismiss the streaming view via normal flow (X button or swipe)
-        Task {
-            await storeObserver.upsert(discovery)
-            await audioServices.discoveryStore.upsert(discovery)
-        }
-    }
-
-    /// Handles "Discover More" request from within the creation flow modal.
-    /// Stores the pending type, unsubscribes the current flow, and dismisses.
-    /// The fullScreenCover's onDismiss callback picks up the pending type and re-presents.
-    private func handleNewDiscoveryRequest(type: DiscoveryCreationFlowType) {
-        let currentViewModel = activeCreationFlowType == .some(.camera) ? cameraViewModel : uploadViewModel
-        currentViewModel.unsubscribe()
-        pendingCreationFlowAfterDismiss = type
-        isDismissingModal = true
-        // Dismiss instantly (no slide-down animation)
-        var transaction = Transaction(animation: .none)
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            activeCreationFlowType = nil
-        }
-    }
+    // MARK: - Helpers
 
     private static func tab(for destination: MainTabDestination) -> Tab {
         switch destination {
-        case .camera:
-            return .camera
-        case .discoveries:
-            return .discoveries
-        case .upload:
-            return .upload
-        case .audioGuides:
-            return .audioGuides
+        case .camera: return .camera
+        case .discoveries: return .discoveries
+        case .upload: return .upload
+        case .audioGuides: return .audioGuides
         }
     }
 
@@ -438,7 +284,6 @@ struct MainTabView: View {
         UITabBar.appearance().scrollEdgeAppearance = appearance
         UITabBar.appearance().standardAppearance = appearance
     }
-
 }
 
 // MARK: - Tab Trigger Placeholder
@@ -483,4 +328,3 @@ private struct TabTriggerPlaceholder: View {
         .onAppear { isAnimating = true }
     }
 }
-

@@ -10,21 +10,31 @@ struct UnifiedToastOverlay: View {
     @ObservedObject var sessionManager = DiscoverySessionManager.shared
     let onViewDiscovery: (Int64) -> Void
     let onGenerateAudio: (DiscoverySummary) -> Void
-    
+    /// When true, padding excludes tab bar height (used inside fullScreenCover modals).
+    var isInModal: Bool = false
+
     @Environment(\.colorScheme) private var colorScheme
-    
+
     // MARK: - Layout Constants
-    
+
     private var miniPlayerHeight: CGFloat {
         UIDevice.isIPad ? 168 : 110
     }
-    
+
     private var miniPlayerBottomPadding: CGFloat {
-        UIDevice.isIPad ? 20 + 8 : 49 + 2
+        if isInModal {
+            // Modal mini player uses 4pt bottom padding (no tab bar)
+            return UIDevice.isIPad ? 20 + 8 : 4 + 2
+        }
+        return UIDevice.isIPad ? 20 + 8 : 49 + 2
     }
-    
+
     private var tabBarOffset: CGFloat {
-        UIDevice.isIPad ? 24 : 49 + 8
+        if isInModal {
+            // No tab bar in modal — just a small bottom margin
+            return UIDevice.isIPad ? 24 : 8
+        }
+        return UIDevice.isIPad ? 24 : 49 + 8
     }
     
     private let toastMiniPlayerGap: CGFloat = 8

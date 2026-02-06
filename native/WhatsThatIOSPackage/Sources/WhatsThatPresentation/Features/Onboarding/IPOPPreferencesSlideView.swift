@@ -6,6 +6,7 @@ struct IPOPPreferencesSlideView: View {
     @ObservedObject var viewModel: IPoPPreferencesViewModel
 
     let onContinue: () -> Void
+    let onBack: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -14,11 +15,12 @@ struct IPOPPreferencesSlideView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                Spacer()
 
-            // Title
-            Text("What makes a story great for you?")
+                // Title
+                Text("What makes a story great for you?")
                 .font(.adaptiveSystem(size: 26, weight: .bold))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(palette.textPrimary)
@@ -45,6 +47,20 @@ struct IPOPPreferencesSlideView: View {
             }
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.xLarge)
+            }
+            .background(palette.background)
+
+            // Back button
+            Button {
+                onBack()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(palette.textSecondary)
+                    .frame(width: 44, height: 44)
+            }
+            .padding(.top, BrandSpacing.medium)
+            .padding(.leading, BrandSpacing.medium)
         }
         .background(palette.background)
     }
@@ -56,6 +72,7 @@ struct IPOPPreferencesSlideView: View {
             loadPreferences: { nil },
             savePreferences: { _ in }
         ),
-        onContinue: {}
+        onContinue: {},
+        onBack: {}
     )
 }

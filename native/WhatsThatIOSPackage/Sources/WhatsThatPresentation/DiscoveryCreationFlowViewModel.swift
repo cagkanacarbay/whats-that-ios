@@ -87,50 +87,27 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     /// Whether the user is in intro mode (audio toggle should be locked ON).
     @Published private(set) var isInIntroMode: Bool = true
 
-    var onDiscoveryCreated: ((Int64) -> Void)?
-    var onDiscoverySummaryReady: ((DiscoverySummary) -> Void)?
-    var onAnalysisBegan: ((DiscoveryCreationFlowType) -> Void)?
-    let analysisBeganPublisher = PassthroughSubject<DiscoveryCreationFlowType, Never>()
+    /// The most recently completed discovery summary. Set when streaming completes
+    /// or when polling finds the completed discovery. Observed by MainTabView via .onReceive.
+    @Published private(set) var completedDiscovery: DiscoverySummary?
 
-    /// Called when polling finds the completed discovery. Parent should upsert discovery to store.
-    var onPollingDiscoveryReady: ((DiscoverySummary) -> Void)?
+    /// Set when the .complete stream event arrives with the discovery ID.
+    /// Observed by MainTabView to start the summary fallback timer.
+    @Published private(set) var createdDiscoveryId: Int64?
 
-    /// Called when preserved state is restored after user cancels a retake (e.g., cancels camera picker after "Discover Another").
-    /// MainTabView uses this to restore the overlay and tab selection.
-    var onStateRestored: ((DiscoveryCreationFlowType) -> Void)?
-    
     // Note: Audio generation is now triggered exclusively via DiscoverySessionManager.onDiscoveryCompleted
     // (configured in MainTabView) rather than through a ViewModel callback.
 
     private let configuration: Configuration
-    private let captureService: DiscoveryCaptureService
-    private let selectionService: DiscoverySelectionService
-    private let historyRepository: DiscoveryHistoryRepository
-    private let creditsRepository: DiscoveryCreditsRepository
+    private let photoCaptureCoordinator: PhotoCaptureCoordinator
+    private let streamingHandler: StreamingSessionHandler
+    private let confirmationBuilder: ConfirmationStateBuilder
     private let creditBalanceStore: CreditBalanceStore
-    private let analysisClient: DiscoveryAnalysisClient
     private let imageEncoder: DiscoveryImageEncodingService
-    private let pushService: DiscoveryPushService
     private let locationService: DiscoveryLocationService
-    private let voiceoverRepository: (any DiscoveryVoiceoverRepository)?
-    private let voiceoverPreferencesStore: VoiceoverPreferencesStore?
-    private let ipopPreferencesStore: IPoPPreferencesStore?
-    private let photoSavePreferencesStore: PhotoSavePreferencesStore?
-    private let photoLibrarySaveService: (any PhotoLibrarySaveServiceProtocol)?
-    private let analysisParser = DiscoveryAnalysisParser()
+    private var cancellables = Set<AnyCancellable>()
     #if DEBUG
     private let debugLoggingEnabled = true
-    
-    // MARK: - Debug Flags for Testing Polling
-    
-    /// Set to true to simulate polling always failing (never finds discovery)
-    /// This tests the polling timeout error flow
-    /// CHANGE TO false WHEN DONE TESTING
-    static var debugPollingAlwaysFails: Bool = false
-    
-    /// Set to true to use short polling intervals (5s total instead of ~79s)
-    /// CHANGE TO false WHEN DONE TESTING
-    static var debugUseShortPollingIntervals: Bool = false
     #else
     private let debugLoggingEnabled = false
     #endif
@@ -141,34 +118,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     private var ephemeralFreshTask: Task<Void, Never>?
     private var ephemeralFreshInFlight = false
 
-    /// Preserved state for restoration when photo selection is cancelled
-    private struct PreservedStreamingState {
-        let analysisState: DiscoveryAnalysisState
-        let confirmationState: DiscoveryConfirmationState?
-        let currentMedia: DiscoveryCapturedMedia?
-        let sessionId: UUID?
-    }
-
-    private var preservedState: PreservedStreamingState?
-
-    // Background polling support
-    private var pendingMedia: DiscoveryCapturedMedia?
-    private var analysisStartTime: Date?
-    private var pollingTask: Task<Void, Never>?
-    
-    /// Session ID for tracking the current discovery session in the session manager.
-    private var currentSessionId: UUID?
-
-    /// Returns polling intervals - short for debugging, normal for production
-    private var pollingIntervals: [TimeInterval] {
-        #if DEBUG
-        if Self.debugUseShortPollingIntervals {
-            return [1, 1, 1, 1, 1]  // 5s total for quick testing
-        }
-        #endif
-        return [1, 2, 4, 8, 16, 16, 16, 16]  // ~79s total
-    }
-
     var flowType: DiscoveryCreationFlowType {
         configuration.type
     }
@@ -178,33 +127,51 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         captureService: DiscoveryCaptureService,
         selectionService: DiscoverySelectionService,
         historyRepository: DiscoveryHistoryRepository,
-        creditsRepository: DiscoveryCreditsRepository,
         creditBalanceStore: CreditBalanceStore,
-        analysisClient: DiscoveryAnalysisClient,
         imageEncoder: DiscoveryImageEncodingService,
         pushService: DiscoveryPushService,
         locationService: DiscoveryLocationService,
-        voiceoverRepository: (any DiscoveryVoiceoverRepository)? = nil,
         voiceoverPreferencesStore: VoiceoverPreferencesStore? = nil,
         ipopPreferencesStore: IPoPPreferencesStore? = nil,
         photoSavePreferencesStore: PhotoSavePreferencesStore? = nil,
         photoLibrarySaveService: (any PhotoLibrarySaveServiceProtocol)? = nil
     ) {
         self.configuration = configuration
-        self.captureService = captureService
-        self.selectionService = selectionService
-        self.historyRepository = historyRepository
-        self.creditsRepository = creditsRepository
+        self.photoCaptureCoordinator = PhotoCaptureCoordinator(
+            captureService: captureService,
+            selectionService: selectionService
+        )
+        self.streamingHandler = StreamingSessionHandler(
+            historyRepository: historyRepository,
+            creditBalanceStore: creditBalanceStore,
+            photoSavePreferencesStore: photoSavePreferencesStore,
+            photoLibrarySaveService: photoLibrarySaveService
+        )
+        self.confirmationBuilder = ConfirmationStateBuilder(
+            locationService: locationService,
+            creditBalanceStore: creditBalanceStore,
+            historyRepository: historyRepository,
+            pushService: pushService,
+            voiceoverPreferencesStore: voiceoverPreferencesStore,
+            ipopPreferencesStore: ipopPreferencesStore
+        )
         self.creditBalanceStore = creditBalanceStore
-        self.analysisClient = analysisClient
         self.imageEncoder = imageEncoder
-        self.pushService = pushService
         self.locationService = locationService
-        self.voiceoverRepository = voiceoverRepository
-        self.voiceoverPreferencesStore = voiceoverPreferencesStore
-        self.ipopPreferencesStore = ipopPreferencesStore
-        self.photoSavePreferencesStore = photoSavePreferencesStore
-        self.photoLibrarySaveService = photoLibrarySaveService
+
+        // Wire streaming handler
+        streamingHandler.delegate = self
+        streamingHandler.$analysisState
+            .sink { [weak self] state in self?.analysisState = state }
+            .store(in: &cancellables)
+
+        // Wire confirmation builder
+        confirmationBuilder.onConfirmationUpdated = { [weak self] state in
+            self?.confirmationState = state
+            if case .confirming = self?.flowState {
+                self?.flowState = .confirming(state)
+            }
+        }
     }
 
     func startFlow(retake: Bool = false) {
@@ -233,48 +200,28 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         ephemeralFreshTask?.cancel()
         ephemeralFreshTask = nil
         ephemeralFreshInFlight = false
-        pollingTask?.cancel()
-        pollingTask = nil
-        preservedState = nil
+        streamingHandler.cancel()
+        confirmationBuilder.cancel()
 
         // Update flowState FIRST to remove the active view from hierarchy
         flowState = .cancelled
 
         // Then clear the state data
         confirmationState = nil
-        analysisState = nil
         currentMedia = nil
         freshLocationForAnalysis = nil
-        pendingMedia = nil
-        analysisStartTime = nil
         error = nil
 
         // Finally reset to idle
         flowState = .idle
     }
-    
+
     /// Unsubscribe from the current session and clean up local state.
     /// The session continues running in the background - only event forwarding stops.
-    /// Call this when the overlay closes mid-stream.
+    /// Call this when the modal closes mid-stream.
     func unsubscribe() {
         debugLog("unsubscribe()")
-
-        // Preserve state if we're in analyzing phase with content
-        // Include session ID so we can re-subscribe if user cancels new discovery
-        if let analysisState = self.analysisState {
-            preservedState = PreservedStreamingState(
-                analysisState: analysisState,
-                confirmationState: self.confirmationState,
-                currentMedia: self.currentMedia,
-                sessionId: currentSessionId
-            )
-        }
-
-        // Unsubscribe from session manager (stream continues in background)
-        if let sessionId = currentSessionId {
-            DiscoverySessionManager.shared.unsubscribe(from: sessionId)
-            currentSessionId = nil
-        }
+        streamingHandler.unsubscribe()
 
         // Cancel local tasks that are no longer needed
         analysisTask?.cancel()
@@ -282,171 +229,92 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         ephemeralFreshTask?.cancel()
         ephemeralFreshTask = nil
         ephemeralFreshInFlight = false
-        pollingTask?.cancel()
-        pollingTask = nil
 
         // Update flowState FIRST to remove the active view from hierarchy
         flowState = .cancelled
 
         // Then clear the state data
         confirmationState = nil
-        analysisState = nil
         currentMedia = nil
         freshLocationForAnalysis = nil
-        pendingMedia = nil
-        analysisStartTime = nil
         error = nil
 
         // Finally reset to idle
         flowState = .idle
     }
 
-    /// Restores preserved streaming state after cancelled photo selection
-    private func restorePreservedStateIfAvailable() {
-        guard let preserved = preservedState else { return }
-        debugLog("restorePreservedStateIfAvailable called")
-
-        // Check if the session has already completed while we were away
-        if let sessionId = preserved.sessionId {
-            let sessionManager = DiscoverySessionManager.shared
-            debugLog("Checking session status for \(sessionId)")
-            if let status = sessionManager.sessionStatuses[sessionId] {
-                debugLog("Session status: \(status)")
-                switch status {
-                case .completed(let summary):
-                    // Session completed in background - show the completed discovery
-                    debugLog("Session \(sessionId) already completed, showing result")
-                    analysisState = DiscoveryAnalysisState(
-                        statusMessage: "Discovery complete!",
-                        streamedText: summary.detailDescription ?? "",
-                        isStreaming: false,
-                        isPolling: false,
-                        discoveryIdentifier: summary.id,
-                        metadataTitle: summary.title,
-                        metadataShortDescription: summary.shortDescription,
-                        displayMarkdown: summary.detailDescription ?? "",
-                        discoverySummary: summary
-                    )
-                    confirmationState = preserved.confirmationState
-                    currentMedia = preserved.currentMedia
-                    flowState = .analyzing(analysisState!)
-                    preservedState = nil
-
-                    // User returned after session completed - check if we should show audio modal
-                    Task { [weak self] in
-                        let tracker = FreeCreditsAlertTracker.shared
-                        if await tracker.shouldShowAudioGeneratingModal() {
-                            await tracker.markAudioGeneratingModalShown()
-                            await MainActor.run {
-                                self?.showAudioGeneratingModal = true
-                            }
-                        }
-                    }
-
-                    onStateRestored?(configuration.type)
-                    return
-
-                case .failed(let message):
-                    // Session failed in background - show error
-                    // Still call onStateRestored so MainTabView shows the overlay with the error
-                    debugLog("Session \(sessionId) already failed: \(message)")
-                    error = .analysisFailed(message)
-                    flowState = .error(message: message)
-                    preservedState = nil
-                    onStateRestored?(configuration.type)
-                    return
-
-                case .processing, .queued:
-                    // Session still processing - re-subscribe with fresh state.
-                    // The session manager will replay all accumulated events to rebuild full content.
-                    debugLog("Session \(sessionId) still processing, re-subscribing with fresh state")
-
-                    // Start with fresh analysis state - replayed events will rebuild it
-                    analysisState = DiscoveryAnalysisState()
-                    confirmationState = preserved.confirmationState
-                    currentMedia = preserved.currentMedia
-
-                    // Set up flow state before subscribing so UI is ready
-                    flowState = .analyzing(analysisState!)
-
-                    // Re-subscribe - this will replay all accumulated events
-                    currentSessionId = sessionId
-                    DiscoverySessionManager.shared.subscribe(to: sessionId, subscriber: self)
-                    debugLog("Re-subscribed to session \(sessionId)")
-
-                    // Check if session completed during the race window between status check and subscribe.
-                    // If so, activeSession would be nil and subscribe would have failed silently.
-                    // Re-check status and handle completion if needed.
-                    if let updatedStatus = sessionManager.sessionStatuses[sessionId],
-                       case .completed(let summary) = updatedStatus {
-                        debugLog("Session \(sessionId) completed during re-subscribe race window")
-                        analysisState = DiscoveryAnalysisState(
-                            statusMessage: "Discovery complete!",
-                            streamedText: summary.detailDescription ?? "",
-                            isStreaming: false,
-                            isPolling: false,
-                            discoveryIdentifier: summary.id,
-                            metadataTitle: summary.title,
-                            metadataShortDescription: summary.shortDescription,
-                            displayMarkdown: summary.detailDescription ?? "",
-                            discoverySummary: summary
-                        )
-                        flowState = .analyzing(analysisState!)
-
-                        // Show audio modal if needed
-                        Task { [weak self] in
-                            let tracker = FreeCreditsAlertTracker.shared
-                            if await tracker.shouldShowAudioGeneratingModal() {
-                                await tracker.markAudioGeneratingModalShown()
-                                await MainActor.run {
-                                    self?.showAudioGeneratingModal = true
-                                }
-                            }
-                        }
-
-                        preservedState = nil
-                        onStateRestored?(configuration.type)
-                        return
-                    }
-
-                    // Update flow state after replay to reflect accumulated content
-                    if let updatedState = analysisState {
-                        flowState = .analyzing(updatedState)
-                    }
-
-                    preservedState = nil
-                    onStateRestored?(configuration.type)
-                    return
-                }
-            }
-        }
-
-        // Session ID not found or no status - fall back to preserved state
-        // This handles edge cases where session manager lost track of the session
-        analysisState = preserved.analysisState
-        confirmationState = preserved.confirmationState
-        currentMedia = preserved.currentMedia
-        flowState = .analyzing(preserved.analysisState)
-
-        preservedState = nil
-        debugLog("Restored preserved streaming state (fallback - no active session)")
-        onStateRestored?(configuration.type)
-    }
-
-    /// Clears preserved state (call when user successfully selects new photo)
-    private func clearPreservedState() {
-        if preservedState != nil {
-            // User selected a new photo while a discovery was in progress.
-            // They've committed to a second discovery - no need for audio modal on the first.
-            Task {
-                await FreeCreditsAlertTracker.shared.markAudioGeneratingModalShown()
-            }
-        }
-        preservedState = nil
-    }
-
     func retake() {
         startFlow(retake: true)
+    }
+
+    /// Reconnects to an in-progress session from the Discoveries tab.
+    /// Sets up UI state for the streaming view, then delegates to the handler
+    /// which subscribes and receives replayed events.
+    func attachToSession(sessionId: UUID, media: DiscoveryCapturedMedia) {
+        debugLog("attachToSession(\(sessionId))")
+        error = nil
+        confirmationState = DiscoveryConfirmationState(
+            media: media,
+            displayImageData: media.data,
+            isLocationPermissionGranted: false
+        )
+        currentMedia = media
+
+        let initialState = DiscoveryAnalysisState(
+            statusMessage: "Reconnecting…",
+            streamedText: "",
+            isStreaming: true
+        )
+        analysisState = initialState
+        flowState = .analyzing(initialState)
+
+        // Delegate to handler — events flow through existing handleSessionEvent path
+        streamingHandler.attachToExistingSession(sessionId: sessionId, media: media)
+    }
+
+    /// Presents the camera or photo picker over the current streaming view.
+    /// On cancel, returns silently — the streaming view stays unchanged.
+    /// On success, unsubscribes from the old session and transitions to confirmation.
+    func discoverMore(type: DiscoveryCreationFlowType) {
+        debugLog("discoverMore(type: \(type))")
+
+        Task { [weak self] in
+            guard let self else { return }
+            guard let result = await self.photoCaptureCoordinator.captureForDiscoverMore(type: type) else { return }
+            switch result {
+            case .captured(let media):
+                await self.transitionToNewDiscovery(with: media)
+            case .cancelled:
+                self.debugLog("discoverMore: picker cancelled — returning to streaming view")
+            case .permissionDenied(let type):
+                self.error = type == .camera ? .cameraPermissionDenied : .photoLibraryPermissionDenied
+            case .failed(let type):
+                self.error = type == .camera ? .captureFailed : .selectionFailed
+            }
+        }
+    }
+
+    /// Cleans up the current session and transitions to confirmation with a new photo.
+    /// Called from discoverMore after a successful capture/selection.
+    private func transitionToNewDiscovery(with media: DiscoveryCapturedMedia) async {
+        debugLog("transitionToNewDiscovery: unsubscribing from old session")
+
+        // Unsubscribe from old session (continues in background)
+        streamingHandler.unsubscribe()
+
+        // Clear old state
+        confirmationState = nil
+        analysisTask?.cancel()
+        analysisTask = nil
+        ephemeralFreshTask?.cancel()
+        ephemeralFreshTask = nil
+        ephemeralFreshInFlight = false
+        freshLocationForAnalysis = nil
+        completedDiscovery = nil
+        createdDiscoveryId = nil
+
+        // Transition to confirmation with the new photo
+        await prepareConfirmation(with: media)
     }
 
     func beginAnalysis() {
@@ -465,16 +333,14 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return
         }
 
-        onAnalysisBegan?(configuration.type)
-        analysisBeganPublisher.send(configuration.type)
-
         // Save photo to library if enabled (camera captures only)
         if configuration.type == .camera {
             Task { [weak self] in
-                await self?.savePhotoToLibraryIfEnabled(media: media)
+                guard let self else { return }
+                await self.streamingHandler.savePhotoIfEnabled(media: media)
             }
         }
-        
+
         analysisTask?.cancel()
         analysisTask = Task { [weak self] in
             await self?.startAnalysisSession(media: media, confirmation: state)
@@ -486,51 +352,28 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     }
 
     // Re-check location permission when app returns to foreground and
-    // update confirmation state accordingly. If permission has just been
-    // granted during the confirmation stage (camera flow), kick off
-    // location resolution and update the UI badges.
+    // update confirmation state accordingly.
     func refreshLocationPermissionOnForeground() {
-        // Only relevant while confirming; no-op otherwise.
         guard case .confirming = flowState else { return }
 
         Task { [weak self] in
             guard let self else { return }
-            let granted: Bool
-            if let cached = LocationPermissionCache.shared.current {
-                granted = cached
-            } else {
-                granted = await self.locationService.isPermissionGranted()
-            }
-            await self.apply(permissionGranted: granted)
+            let granted = await self.confirmationBuilder.checkLocationPermission()
+            await self.confirmationBuilder.applyPermission(granted: granted, flowType: self.flowType)
         }
     }
 
     func syncCreditBalance(_ newValue: Int?) async {
-        let normalized = await creditBalanceStore.set(newValue)
-        creditBalance = normalized
-    }
-
-    /// Refreshes confirmation state after returning from the credits sheet.
-    /// Updates credit balance and intro mode status which may have changed during purchase.
-    func refreshStateAfterCreditsSheet() async {
-        // Force refresh balance from server - cache may be stale if the purchase's
-        // balance refresh failed or the onBalanceUpdated callback didn't fire
-        do {
-            let freshBalance = try await creditBalanceStore.refresh(force: true)
-            creditBalance = freshBalance
-            debugLog("refreshStateAfterCreditsSheet: balance refreshed to \(freshBalance)")
-        } catch {
-            // Fall back to cached value if server refresh fails
-            if let cached = await creditBalanceStore.getCached() {
-                creditBalance = cached
-                debugLog("refreshStateAfterCreditsSheet: using cached balance \(cached)")
-            }
-        }
-
-        // Re-check intro mode status - user may have exited intro by purchasing
+        creditBalance = await confirmationBuilder.syncCreditBalance(newValue)
         let tracker = FreeCreditsAlertTracker.shared
         isInIntroMode = await tracker.isInIntroMode
-        debugLog("refreshStateAfterCreditsSheet: isInIntroMode = \(isInIntroMode)")
+    }
+
+    func refreshStateAfterCreditsSheet() async {
+        let result = await confirmationBuilder.refreshAfterCreditsSheet()
+        creditBalance = result.balance
+        isInIntroMode = result.isIntroMode
+        debugLog("refreshStateAfterCreditsSheet: balance=\(result.balance.map(String.init) ?? "nil"), isIntroMode=\(result.isIntroMode)")
     }
 
     private func beginFlow(retake: Bool) async {
@@ -541,231 +384,67 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         confirmationState = nil
         creditBalance = nil
         freshLocationForAnalysis = nil
+        completedDiscovery = nil
+        createdDiscoveryId = nil
 
-        // Clear stale preserved state on fresh start (not a retake).
-        // When retake=true, user is starting from streaming view and may cancel to return there.
-        // When retake=false, user is starting fresh from tab selection - no state to restore.
-        if !retake {
-            preservedState = nil
+        // For camera flow, start ephemeral location request before capture
+        // (cross-cutting concern: consumed at confirmation + analysis)
+        if configuration.type == .camera {
+            startEphemeralLocationRequest()
         }
 
-        // Permissions are now requested conditionally:
-        // - Camera/Photo Library: requested when needed (required for functionality)
-        // - Notifications: requested once after purchase, on confirm page
-        // - Location: requested once on second camera use, on confirm page
-
+        // Set intermediate flowState for UI (spinner/placeholder)
         switch configuration.type {
         case .camera:
             flowState = retake ? .capturingRetake : .requestingPermissions
-
-            let granted = await captureService.requestPermission(for: .camera)
-            guard granted else {
-                debugLog("Camera permission denied in beginFlow(retake: \(retake))")
-                error = .cameraPermissionDenied
-                // Don't set flowState to .idle — the error alert needs to present first.
-                // The modal will dismiss after the user handles the alert (via cancelFlow).
-                return
-            }
-            // Do not (re)start continuous tracking here; app-wide tracking handles it.
-            // We rely on a single ephemeral strict-fresh request instead.
-            // Start a single ephemeral, high-accuracy fresh request that can run up to 30s in the background.
-            // Do not block UI on this; use last-known immediately where possible.
-            ephemeralFreshInFlight = true
-            ephemeralFreshTask?.cancel()
-            ephemeralFreshTask = Task { [weak self] in
-                guard let self else { return }
-                self.debugLog("Ephemeral fresh location request (30s) started")
-                let fresh = await self.locationService.currentLocationStrictFreshEphemeral(timeout: 30)
-                guard !Task.isCancelled else { return }
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.ephemeralFreshInFlight = false
-                    if let fresh {
-                        self.freshLocationForAnalysis = fresh
-                        self.debugLog("[EphemeralFresh] lat=\(fresh.latitude), lon=\(fresh.longitude)")
-                        // If we are still on confirm, update coordinates without blocking.
-                        if let existing = self.confirmationState {
-                            let description = Self.makeLocationDescription(from: fresh)
-                            self.confirmationState = DiscoveryConfirmationState(
-                                media: existing.media,
-                                displayImageData: existing.displayImageData,
-                                creditBalance: existing.creditBalance,
-                                location: fresh,
-                                locationDescription: description,
-                                isLocationPermissionGranted: existing.isLocationPermissionGranted,
-                                isResolvingLocation: false,
-                                customContext: existing.customContext,
-                                nearbyPlaces: existing.nearbyPlaces,
-                                nearbyPlacesContext: existing.nearbyPlacesContext
-                            )
-                            if case .confirming = self.flowState, let state = self.confirmationState {
-                                self.flowState = .confirming(state)
-                            }
-                        }
-                    }
-                }
-            }
-            flowState = retake ? .capturingRetake : .capturingInitial
-            do {
-                debugLog("Invoking captureService.capturePhoto() (retake: \(retake))")
-                let media = try await captureService.capturePhoto()
-                debugLog("captureService.capturePhoto() completed successfully")
-                // Track camera usage for location permission timing (requested on 2nd use)
-                await FreeCreditsAlertTracker.shared.incrementCameraUseCount()
-                clearPreservedState()
-                await prepareConfirmation(with: media)
-            } catch {
-                if DiscoveryFlowCancellationError.isCancellation(error) {
-                    self.error = nil
-                    // Restore preserved state if available
-                    if preservedState != nil {
-                        restorePreservedStateIfAvailable()
-                        return
-                    }
-                    flowState = .cancelled
-                    flowState = .idle
-                    return
-                }
-                debugLog("captureService.capturePhoto() failed with error: \(error)")
-                self.error = .captureFailed
-                flowState = .error(message: FlowError.captureFailed.errorDescription ?? "Capture failed")
-            }
         case .upload:
             flowState = retake ? .selectingRetake : .requestingPermissions
+        }
 
-            let granted = await selectionService.requestPermission()
-            guard granted else {
-                error = .photoLibraryPermissionDenied
-                // Don't set flowState to .idle — the error alert needs to present first.
-                // The modal will dismiss after the user handles the alert (via cancelFlow).
-                return
-            }
-            flowState = retake ? .selectingRetake : .selectingInitial
-            do {
-                let media = try await selectionService.selectPhoto()
-                clearPreservedState()
-                await prepareConfirmation(with: media)
-            } catch {
-                if DiscoveryFlowCancellationError.isCancellation(error) {
-                    self.error = nil
-                    // Restore preserved state if available
-                    if preservedState != nil {
-                        restorePreservedStateIfAvailable()
-                        return
-                    }
-                    flowState = .cancelled
-                    flowState = .idle
-                    return
-                }
-                self.error = .selectionFailed
-                flowState = .error(message: FlowError.selectionFailed.errorDescription ?? "Selection failed")
-            }
+        let result = await photoCaptureCoordinator.capture(type: configuration.type)
+        switch result {
+        case .captured(let media):
+            await prepareConfirmation(with: media)
+        case .cancelled:
+            self.error = nil
+            flowState = .cancelled
+            flowState = .idle
+        case .permissionDenied(let type):
+            debugLog("\(type) permission denied in beginFlow(retake: \(retake))")
+            error = type == .camera ? .cameraPermissionDenied : .photoLibraryPermissionDenied
+            // Don't set flowState to .idle — the error alert needs to present first.
+            // The modal will dismiss after the user handles the alert (via cancelFlow).
+        case .failed(let type):
+            let flowError: FlowError = type == .camera ? .captureFailed : .selectionFailed
+            error = flowError
+            flowState = .error(message: flowError.errorDescription ?? "Failed")
         }
     }
 
-    // MARK: - Conditional Permission Requests
-
-    /// Requests location permission if this is the second+ camera use and permission hasn't been requested yet.
-    /// Called from prepareConfirmation() for camera flow.
-    private func requestLocationPermissionIfNeeded() async {
-        let tracker = FreeCreditsAlertTracker.shared
-        let cameraCount = await tracker.cameraUseCount
-        let hasRequested = await tracker.hasRequestedLocationPermission
-
-        // Request location on 2nd+ camera use, only once
-        guard cameraCount >= 2, !hasRequested else { return }
-
-        // Check if permission is not yet determined (already granted means no need to request)
-        let isGranted = await locationService.isPermissionGranted()
-        guard !isGranted else { return }
-
-        await tracker.markLocationPermissionRequested()
-        // Explicitly request location authorization
-        await locationService.requestLocationAuthorization()
-        // After authorization granted, start tracking
-        await locationService.startTrackingIfNeeded()
-        print("[Permissions] Requesting location permission (camera use #\(cameraCount))")
-    }
-
-    /// Requests notification permission if user has made a purchase and permission hasn't been requested yet.
-    /// Called from prepareConfirmation() after purchase.
-    private func requestNotificationPermissionIfNeeded() async {
-        let tracker = FreeCreditsAlertTracker.shared
-        let hasPurchased = await tracker.hasMadePurchase
-        let hasRequested = await tracker.hasRequestedNotificationPermission
-
-        // Only request after user has made a purchase, and only once
-        guard hasPurchased, !hasRequested else { return }
-
-        await tracker.markNotificationPermissionRequested()
-        _ = try? await pushService.requestPushAuthorizationIfNeeded()
-        print("[Permissions] Requesting notification permission (post-purchase)")
-    }
-
-    private func apply(permissionGranted granted: Bool) async {
-        // Update current confirmation snapshot with new permission value.
-        guard var current = confirmationState else { return }
-        let wasGranted = current.isLocationPermissionGranted
-        if wasGranted == granted {
-            return
-        }
-
-        current = DiscoveryConfirmationState(
-            media: current.media,
-            displayImageData: current.displayImageData,
-            creditBalance: current.creditBalance,
-            location: current.location,
-            locationDescription: current.locationDescription,
-            isLocationPermissionGranted: granted,
-            isResolvingLocation: current.isResolvingLocation,
-            customContext: current.customContext,
-            nearbyPlaces: current.nearbyPlaces,
-            nearbyPlacesContext: current.nearbyPlacesContext
-        )
-        confirmationState = current
-        if case .confirming = flowState, let state = confirmationState {
-            flowState = .confirming(state)
-        }
-
-        // If permission is newly granted during camera flow and we don't yet
-        // have coordinates, start resolving and update the UI badge.
-        if flowType == .camera, granted, current.location == nil {
-            confirmationState = confirmationState.map { existing in
-                DiscoveryConfirmationState(
-                    media: existing.media,
-                    displayImageData: existing.displayImageData,
-                    creditBalance: existing.creditBalance,
-                    location: existing.location,
-                    locationDescription: existing.locationDescription,
-                    isLocationPermissionGranted: existing.isLocationPermissionGranted,
-                    isResolvingLocation: true,
-                    customContext: existing.customContext,
-                    nearbyPlaces: existing.nearbyPlaces,
-                    nearbyPlacesContext: existing.nearbyPlacesContext
-                )
-            }
-            if case .confirming = flowState, let state = confirmationState {
-                flowState = .confirming(state)
-            }
-
-            // Resolve location and nearby places in background using a single ephemeral fresh request.
-            Task { [weak self] in
+    /// Starts a single ephemeral, high-accuracy fresh location request (up to 30s in background).
+    /// Does not block UI; result is consumed at confirmation and analysis time.
+    private func startEphemeralLocationRequest() {
+        ephemeralFreshInFlight = true
+        ephemeralFreshTask?.cancel()
+        ephemeralFreshTask = Task { [weak self] in
+            guard let self else { return }
+            self.debugLog("Ephemeral fresh location request (30s) started")
+            let fresh = await self.locationService.currentLocationStrictFreshEphemeral(timeout: 30)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.ephemeralFreshTask?.cancel()
-                self.ephemeralFreshInFlight = true
-                let resolved = await self.locationService.currentLocationStrictFreshEphemeral(timeout: 30)
-                guard !Task.isCancelled else { return }
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.ephemeralFreshInFlight = false
-                    guard let coords = resolved else { return }
-                    let description = Self.makeLocationDescription(from: coords)
+                self.ephemeralFreshInFlight = false
+                if let fresh {
+                    self.freshLocationForAnalysis = fresh
+                    self.debugLog("[EphemeralFresh] lat=\(fresh.latitude), lon=\(fresh.longitude)")
+                    // If we are still on confirm, update coordinates without blocking.
                     if let existing = self.confirmationState {
+                        let description = Self.makeLocationDescription(from: fresh)
                         self.confirmationState = DiscoveryConfirmationState(
                             media: existing.media,
                             displayImageData: existing.displayImageData,
                             creditBalance: existing.creditBalance,
-                            location: coords,
+                            location: fresh,
                             locationDescription: description,
                             isLocationPermissionGranted: existing.isLocationPermissionGranted,
                             isResolvingLocation: false,
@@ -778,269 +457,67 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                         }
                     }
                 }
-
-                if let coords = resolved, let selection = await self.locationService.prepareNearbyPlaces(for: coords) {
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if let existing = self.confirmationState {
-                            self.confirmationState = DiscoveryConfirmationState(
-                                media: existing.media,
-                                displayImageData: existing.displayImageData,
-                                creditBalance: existing.creditBalance,
-                                location: existing.location,
-                                locationDescription: existing.locationDescription,
-                                isLocationPermissionGranted: existing.isLocationPermissionGranted,
-                                isResolvingLocation: existing.isResolvingLocation,
-                                customContext: existing.customContext,
-                                nearbyPlaces: selection.snapshot.places,
-                                nearbyPlacesContext: selection.context
-                            )
-                            if case .confirming = self.flowState, let state = self.confirmationState {
-                                self.flowState = .confirming(state)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
 
     private func prepareConfirmation(with media: DiscoveryCapturedMedia) async {
-        // Determine permission once (from cached snapshot if available) to avoid showing wrong badge state.
-        let permissionNow: Bool
-        if let cached = LocationPermissionCache.shared.current {
-            permissionNow = cached
-            debugLog("Using cached location permission: \(permissionNow)")
-        } else {
-            let granted = await locationService.isPermissionGranted()
-            permissionNow = granted
-            debugLog("Queried location permission: \(permissionNow)")
-        }
-        // Seed initial state based on flow type:
-        // - uploads use EXIF immediately
-        // - camera prefers ephemeral fresh (if already available), otherwise last-known if recent/accurate
-        let initialLocation: DiscoveryLocation?
-        switch flowType {
-        case .upload:
-            initialLocation = media.location
-        case .camera:
-            // Prefer the already-fetched ephemeral fresh if it arrived before confirm.
-            if let fresh = freshLocationForAnalysis {
-                initialLocation = fresh
-            } else {
-                // Try to use a recent last-known fix to avoid spinner.
-                initialLocation = await locationService.currentLocationIfRecent(maxAge: 30, maxAccuracyMeters: 65)
-            }
-        }
-        if let initialLocation {
-            let source: String = flowType == .upload ? "EXIF" : (freshLocationForAnalysis != nil ? "ephemeral" : "last-known")
-            debugLog("[Confirm] Using \(source) coords: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
-        }
-        let initialResolving: Bool = (flowType == .camera) && permissionNow && (initialLocation == nil)
-        let initialConfirmationState = DiscoveryConfirmationState(
+        let result = await confirmationBuilder.build(
             media: media,
-            displayImageData: media.data,
-            creditBalance: nil,
-            location: initialLocation,
-            locationDescription: Self.makeLocationDescription(from: initialLocation),
-            isLocationPermissionGranted: permissionNow,
-            isResolvingLocation: initialResolving,
-            customContext: nil,
-            nearbyPlaces: nil,
-            nearbyPlacesContext: nil
+            flowType: flowType,
+            freshLocation: freshLocationForAnalysis,
+            recentHistoryLimit: configuration.recentHistoryLimit
         )
-
-        confirmationState = initialConfirmationState
-        flowState = .confirming(initialConfirmationState)
+        confirmationState = result.state
+        flowState = .confirming(result.state)
         currentMedia = media
-
-        // Check intro mode state - audio toggle is locked ON during intro
-        let tracker = FreeCreditsAlertTracker.shared
-        isInIntroMode = await tracker.isInIntroMode
-
-        // Load the default value for generateAudioGuide from preferences
-        // During intro mode, force audio ON regardless of user preference
-        if isInIntroMode {
-            generateAudioGuide = true
-        } else if let store = voiceoverPreferencesStore {
-            let prefs = await store.load()
-            generateAudioGuide = prefs.autoEnabled
-        }
-
-        // Debug: dump nearby cache state as we enter confirmation
-        await locationService.debugLogNearbyState(current: initialLocation)
-
-        // Ensure tracking is on for camera; uploads do not need live location.
-        // Tracking is started at the beginning of the camera flow, so avoid starting again here.
-        // (Keeps a single start point and prevents redundant calls.)
-        // if flowType == .camera { await locationService.startTrackingIfNeeded() }
-
-        // Load cached credits immediately and refresh in background.
-        if let cached = await creditBalanceStore.getCached() {
-            creditBalance = cached
-        }
-
-        // Confirm-stage: resolve a fresh location (shows spinner while pending)
-        // For camera flow: do not issue an additional fresh request here; rely on the single
-        // ephemeral request started at camera start. It will update confirmation when it arrives.
-
-        // Kick off nearby-places using the initial seed location only; do not refetch after fresh fix arrives.
-        if let seed = initialLocation {
-            Task { [weak self] in
-                guard let self else { return }
-                if let selection = await self.locationService.prepareNearbyPlaces(for: seed) {
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if let current = self.confirmationState {
-                            self.confirmationState = DiscoveryConfirmationState(
-                                media: current.media,
-                                displayImageData: current.displayImageData,
-                                creditBalance: current.creditBalance,
-                                location: current.location,
-                                locationDescription: current.locationDescription,
-                                isLocationPermissionGranted: current.isLocationPermissionGranted,
-                                isResolvingLocation: current.isResolvingLocation,
-                                customContext: current.customContext,
-                                nearbyPlaces: selection.snapshot.places,
-                                nearbyPlacesContext: selection.context
-                            )
-                            if case .confirming = self.flowState, let state = self.confirmationState {
-                                self.flowState = .confirming(state)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // For uploads with EXIF coordinates, pre-warm nearby immediately in background.
-        if flowType == .upload, let exifLocation = media.location {
-            Task { [weak self] in
-                guard let self else { return }
-                if let selection = await self.locationService.prepareNearbyPlaces(for: exifLocation) {
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if let current = self.confirmationState {
-                            self.confirmationState = DiscoveryConfirmationState(
-                                media: current.media,
-                                displayImageData: current.displayImageData,
-                                creditBalance: current.creditBalance,
-                                location: current.location,
-                                locationDescription: current.locationDescription,
-                                isLocationPermissionGranted: current.isLocationPermissionGranted,
-                                isResolvingLocation: current.isResolvingLocation,
-                                customContext: current.customContext,
-                                nearbyPlaces: selection.snapshot.places,
-                                nearbyPlacesContext: selection.context
-                            )
-                            if case .confirming = self.flowState, let state = self.confirmationState {
-                                self.flowState = .confirming(state)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        async let historyTask = historyRepository.fetchRecentDiscoveries(limit: configuration.recentHistoryLimit)
-        let ipopPreferences = await ipopPreferencesStore?.load()
-
-        // Conditional permission requests on confirm page:
-        // - Location: requested on 2nd+ camera use (once)
-        // - Notifications: requested after purchase (once)
-        if flowType == .camera {
-            await requestLocationPermissionIfNeeded()
-        }
-        await requestNotificationPermissionIfNeeded()
-
-        // Get push token if notifications are already authorized (don't request permission here)
-        do {
-            let token = try await pushService.getPushTokenIfAuthorized()
-            pushToken = token
-        } catch {
-            pushToken = nil
-        }
-
-        // Refresh credits if stale; if it fails, keep the cached value.
-        do {
-            let balance = try await creditBalanceStore.refreshIfStale()
-            creditBalance = balance
-        } catch {
-            // Keep existing cached value
-        }
-
-        do {
-            let discoveries = try await historyTask
-            let builder = DiscoveryContextBuilder()
-            confirmationState?.customContext = builder.buildContext(
-                from: discoveries,
-                limit: configuration.recentHistoryLimit,
-                ipopPreferences: ipopPreferences,
-                imageSource: flowType.rawValue
-            )
-        } catch {
-            confirmationState?.customContext = nil
-        }
-
-        // Preserve the previously computed location permission value.
-        confirmationState = confirmationState.map { current in
-            DiscoveryConfirmationState(
-                media: current.media,
-                displayImageData: current.displayImageData,
-                creditBalance: creditBalance,
-                location: current.location,
-                locationDescription: current.locationDescription,
-                isLocationPermissionGranted: current.isLocationPermissionGranted,
-                isResolvingLocation: current.isResolvingLocation,
-                customContext: current.customContext,
-                nearbyPlaces: current.nearbyPlaces,
-                nearbyPlacesContext: current.nearbyPlacesContext
-            )
-        }
-        // Only re-emit confirming if we are still in the confirmation step.
-        // If analysis has already begun, do not bounce the UI back to confirmation.
-        if case .confirming = flowState {
-            flowState = .confirming(confirmationState!)
-        }
-
-        // Check intro discovery limit AFTER showing confirm stage.
-        // User sees their photo, then we show the credits exhausted modal over it.
-        if await tracker.shouldShowCreditsExhaustedForIntroLimit() {
+        isInIntroMode = result.isIntroMode
+        generateAudioGuide = result.generateAudio
+        pushToken = result.pushToken
+        creditBalance = result.creditBalance
+        if result.showCreditsExhausted {
             showFreeCreditsExhaustedAtConfirm = true
             debugLog("Showing credits exhausted modal - intro discovery limit reached")
         }
     }
 
-    /// Start an analysis session by delegating to the session manager.
-    /// The session manager owns the stream; we subscribe to receive events.
+    /// Build the analysis payload and delegate streaming to the handler.
     private func startAnalysisSession(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async {
         defer { analysisTask = nil }
+
+        // Set initial analysis state and flow
         let initialState = DiscoveryAnalysisState(
             statusMessage: "Preparing analysis…",
             streamedText: "",
             isStreaming: true
         )
-        analysisState = initialState
         flowState = .analyzing(initialState)
-        analysisStartTime = Date()
-        pendingMedia = media
-        pollingTask?.cancel()
-        pollingTask = nil
-        
-        // Optimistically decrement credits as requested by user
-        Task { [weak self] in
-            guard let self else { return }
-            let adjusted = await self.creditBalanceStore.adjust(by: -1)
-            await MainActor.run {
-                self.creditBalance = adjusted
-            }
-        }
+
+        // Optimistically decrement credits
+        optimisticallyDecrementCredits()
 
         // Optimistically increment intro discovery count
         Task {
             await FreeCreditsAlertTracker.shared.incrementIntroDiscoveryCount()
         }
 
+        // Build payload (stays in VM — bridges ephemeral location + confirmation)
+        guard let payload = await buildAnalysisPayload(media: media, confirmation: confirmation) else {
+            return // Error already handled in buildAnalysisPayload
+        }
+
+        // Delegate to streaming handler
+        streamingHandler.startSession(
+            payload: payload,
+            media: media,
+            generateAudioGuide: generateAudioGuide,
+            flowType: configuration.type
+        )
+    }
+
+    /// Builds the analysis payload, handling nearby places resolution and error cases.
+    /// Returns nil if payload building fails (error state is set internally).
+    private func buildAnalysisPayload(media: DiscoveryCapturedMedia, confirmation: DiscoveryConfirmationState) async -> DiscoveryAnalysisPayload? {
         do {
             // Deterministic confirm-stage path: if coordinates exist and nearby are missing,
             // ask locationService to prepare nearby and wait (bounded by config timeout).
@@ -1059,12 +536,9 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                         nearbyPlaces: selection.snapshot.places,
                         nearbyPlacesContext: selection.context
                     )
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if case .confirming = self.flowState {
-                            self.confirmationState = effectiveConfirmation
-                            self.flowState = .confirming(effectiveConfirmation)
-                        }
+                    if case .confirming = self.flowState {
+                        self.confirmationState = effectiveConfirmation
+                        self.flowState = .confirming(effectiveConfirmation)
                     }
                 }
             }
@@ -1073,7 +547,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 let source = (self.freshLocationForAnalysis != nil) ? "fresh" : "confirmation"
                 debugLog("[ANALYSIS_LOC] source=\(source) lat=\(loc.latitude) lon=\(loc.longitude)")
             }
-            let payload = DiscoveryAnalysisPayload(
+            return DiscoveryAnalysisPayload(
                 base64Image: try await imageEncoder.makeBase64Payload(from: media, maxDimension: configuration.maxImageDimension),
                 location: analysisLocation,
                 customContext: effectiveConfirmation.customContext,
@@ -1081,363 +555,66 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 nearbyPlaces: effectiveConfirmation.nearbyPlaces,
                 nearbyPlacesContext: effectiveConfirmation.nearbyPlacesContext
             )
-
-            // Start session with session manager - we subscribe to receive events
-            // The session manager now owns the stream
-            currentSessionId = DiscoverySessionManager.shared.startSession(
-                payload: payload,
-                media: media,
-                generateAudioGuide: generateAudioGuide,
-                subscriber: self
-            )
-            
-            debugLog("Started session \(currentSessionId?.uuidString ?? "nil") via session manager")
-            
-            // Note: We no longer consume the stream here directly.
-            // Events will be delivered via handleSessionEvent() from the subscriber protocol.
-            // The analysisTask is kept alive to maintain strong reference, but we don't iterate a stream.
-            
         } catch {
             debugLog("Error building payload: \(type(of: error)) - \(error.localizedDescription)")
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
-            if Self.messageIndicatesInsufficientCredits(message) {
-                // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
-                Task { [weak self] in
-                    guard let self else { return }
-                    let updated = await self.creditBalanceStore.set(0)
-                    await MainActor.run {
-                        self.creditBalance = updated
-                        // Return to confirmation stage with the same image
-                        if let confirmState = self.confirmationState {
-                            self.flowState = .confirming(confirmState)
-                            // Show credits exhausted alert with "Get Credits" option
-                            self.showFreeCreditsExhaustedAtConfirm = true
-                        } else {
-                            // Fallback if confirmation state is unavailable
-                            self.error = .noCredits
-                            self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
-                        }
-                    }
-                }
+            if StreamingSessionHandler.messageIndicatesInsufficientCredits(message) {
+                handleCreditsExhaustedDuringAnalysis()
             } else {
                 self.error = .analysisFailed(message)
                 self.flowState = .error(message: message)
-                
-                // Refresh credits to ensure we aren't out of sync (e.g. if failure happened before consumption)
+
+                // Refresh credits to ensure we aren't out of sync
                 Task { [weak self] in
                     guard let self else { return }
                     if let updated = try? await self.creditBalanceStore.refresh() {
-                        await MainActor.run {
-                            self.creditBalance = updated
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func handle(event: DiscoveryAnalysisEvent) {
-        debugLog("Received \(debugDescription(for: event))")
-        switch event {
-        case let .status(message):
-            analysisState = analysisStateUpdated { state in
-                state.statusMessage = message
-            }
-            // Coarse phase: do not republish flowState during streaming/status updates.
-        case let .metadata(title, shortDescription):
-            analysisState = analysisStateUpdated { state in
-                let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let trimmedShort = shortDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let trimmedTitle, !trimmedTitle.isEmpty {
-                    state.metadataTitle = trimmedTitle
-                }
-                if let trimmedShort, !trimmedShort.isEmpty {
-                    state.metadataShortDescription = trimmedShort
-                }
-            }
-            // Coarse phase: do not republish flowState during streaming/metadata updates.
-        case let .token(token):
-            analysisState = analysisStateUpdated { state in
-                state.streamedText.append(token)
-                state.isStreaming = true
-            }
-            // Coarse phase: do not republish flowState for each token.
-        case let .complete(discoveryId, systemVersion, userVersion, serverCreditBalance):
-            debugLog("Received .complete event for discoveryId: \(discoveryId)")
-            analysisState = analysisStateUpdated { state in
-                state.discoveryIdentifier = discoveryId
-                state.isStreaming = false
-                state.statusMessage = "Completed"
-                state.systemPromptVersion = systemVersion
-                state.userPromptVersion = userVersion
-            }
-            // Do not republish flowState here; wait for the final end signal.
-            onDiscoveryCreated?(discoveryId)
-            cacheDiscoveryImageIfNeeded(for: discoveryId)
-            handleSuccessfulCreation(discoveryId: discoveryId, serverCreditBalance: serverCreditBalance)
-        case let .error(message, status):
-            // Decrement intro discovery count - edge function returned error, discovery not created
-            Task {
-                await FreeCreditsAlertTracker.shared.decrementIntroDiscoveryCount()
-            }
-
-            if status == 402 || Self.messageIndicatesInsufficientCredits(message) {
-                // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
-                Task { [weak self] in
-                    guard let self else { return }
-                    let updated = await self.creditBalanceStore.set(0)
-                    await MainActor.run {
                         self.creditBalance = updated
-                        // Return to confirmation stage with the same image
-                        if let confirmState = self.confirmationState {
-                            self.flowState = .confirming(confirmState)
-                            // Show credits exhausted alert with "Get Credits" option
-                            self.showFreeCreditsExhaustedAtConfirm = true
-                        } else {
-                            // Fallback if confirmation state is unavailable
-                            self.error = .noCredits
-                            self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
-                        }
                     }
                 }
-            } else {
-                error = .analysisFailed(message)
-                flowState = .error(message: message)
             }
-        case .end:
-            // Finalize: publish a single flowState update to reflect final analysis state.
-            if let analysisState {
-                flowState = .analyzing(analysisState)
-            }
-        }
-    }
-
-    // MARK: - Background Polling
-
-    private func startPollingForCompletion() {
-        debugLog("startPollingForCompletion")
-        pollingTask?.cancel()
-        let intervals = pollingIntervals
-        pollingTask = Task { [weak self] in
-            // Request background execution time to continue polling when app is backgrounded
-            var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
-            backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "DiscoveryPolling") {
-                if backgroundTaskId != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
-                    backgroundTaskId = .invalid
-                }
-            }
-            defer {
-                if backgroundTaskId != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
-                }
-            }
-
-            for (index, interval) in intervals.enumerated() {
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-
-                if let discovery = await self?.checkForCompletedDiscovery() {
-                    await MainActor.run { self?.handlePollingDiscoveryReady(discovery) }
-                    return
-                }
-            }
-
-            await MainActor.run { self?.handlePollingTimeout() }
-        }
-    }
-
-    private func checkForCompletedDiscovery() async -> DiscoverySummary? {
-        #if DEBUG
-        if Self.debugPollingAlwaysFails { return nil }
-        #endif
-        
-        guard let startTime = analysisStartTime else { return nil }
-        
-        do {
-            // Buffer the start time slightly to account for clock drift/processing delay
-            let searchStartTime = startTime.addingTimeInterval(-30)
-            let recents = try await historyRepository.fetchRecentDiscoveries(limit: 5)
-            
-            // Find a discovery that was captured after our analysis started
-            // Note: DB typically stores created_at but capturedAt in Summary maps to that.
-            return recents.first { $0.capturedAt >= searchStartTime }
-        } catch {
-            debugLog("Failed to fetch recent discoveries during polling: \(error.localizedDescription)")
             return nil
         }
     }
 
-    @MainActor
-    private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
-        // Populate the analysis state with discovery data
-        // This mimics what would have happened if the stream completed normally
-        analysisState = DiscoveryAnalysisState(
-            statusMessage: "Discovery complete!",
-            streamedText: discovery.detailDescription ?? "",
-            isStreaming: false,
-            isPolling: false,
-            discoveryIdentifier: discovery.id,
-            metadataTitle: discovery.title,
-            metadataShortDescription: discovery.shortDescription,
-            displayMarkdown: discovery.detailDescription ?? "",
-            discoverySummary: discovery
-        )
-        
-        // Update flowState to trigger UI refresh with the populated data
-        flowState = .analyzing(analysisState!)
-        
-        // Notify MainTabView to upsert the discovery (so it appears in Discoveries tab)
-        // But DON'T navigate - let user dismiss the streaming view normally
-        onPollingDiscoveryReady?(discovery)
-        
-        // Ensure credits and TTS are handled for polling success path
-        handleSuccessfulCreation(discoveryId: discovery.id)
-    }
-
-    @MainActor
-    private func handlePollingTimeout() {
-        // Update analysis state to show we've stopped polling
-        analysisState = analysisStateUpdated { state in
-            state.isPolling = false
-            state.isStreaming = false
-            state.statusMessage = "Connection lost"
-        }
-        
-        // Re-publish analysisState to update UI (keeps streaming view visible with the image)
-        if let analysisState {
-            flowState = .analyzing(analysisState)
-        }
-        
-        // Trigger the polling failed alert in DiscoveryCreationFlowView
-        // The alert has Cancel (dismiss) and Retry (go back to confirm) options
-        showPollingFailedAlert = true
-    }
-
-    /// Unified success handler for credits and TTS. Called from both real-time streaming and polling recovery.
-    private func handleSuccessfulCreation(discoveryId: Int64, serverCreditBalance: Int? = nil) {
-        debugLog("handleSuccessfulCreation: discoveryId=\(discoveryId)")
-        // Sync credits: use server-provided balance if available, otherwise adjust optimistically.
+    /// Optimistically decrement credits when analysis begins.
+    private func optimisticallyDecrementCredits() {
         Task { [weak self] in
             guard let self else { return }
-            let updated: Int?
-            if let serverBalance = serverCreditBalance {
-                // Use the authoritative server balance
-                updated = await self.creditBalanceStore.set(serverBalance)
-            } else {
-                // Polling recovery: credit was already optimistically decremented in performAnalysis.
-                // Just retrieve the current value to check if exhausted.
-                updated = await self.creditBalanceStore.getCached()
-            }
-            await MainActor.run {
-                self.creditBalance = updated
-            }
+            let adjusted = await self.creditBalanceStore.adjust(by: -1)
+            self.creditBalance = adjusted
+        }
+    }
 
-            // Check if we should show the "audio generating" modal for first discovery
-            // Note: Credits exhausted modal is now only shown at confirm stage based on intro discovery limit
-            let tracker = FreeCreditsAlertTracker.shared
-            let shouldShowAudioModal = await tracker.shouldShowAudioGeneratingModal()
-            if shouldShowAudioModal {
-                await tracker.markAudioGeneratingModalShown()
-                await MainActor.run {
-                    self.showAudioGeneratingModal = true
-                }
-                self.debugLog("Showing audio generating modal")
+    /// Shared handler for credits exhausted during analysis (both payload error + streaming delegate).
+    private func handleCreditsExhaustedDuringAnalysis() {
+        Task { [weak self] in
+            guard let self else { return }
+            let updated = await self.creditBalanceStore.set(0)
+            self.creditBalance = updated
+            if let confirmState = self.confirmationState {
+                self.flowState = .confirming(confirmState)
+                self.showFreeCreditsExhaustedAtConfirm = true
+            } else {
+                self.error = .noCredits
+                self.flowState = .error(message: FlowError.noCredits.errorDescription ?? "No credits")
             }
         }
-
-        // Note: Audio generation is now triggered exclusively by sessionDidComplete
-        // to avoid race conditions with multiple code paths.
     }
 
     func retryWithPendingMedia() {
-        guard let media = pendingMedia else { return }
+        guard let media = streamingHandler.pendingMedia else { return }
         debugLog("Retrying with pending media")
         Task {
             await prepareConfirmation(with: media)
         }
     }
 
-    private static func messageIndicatesInsufficientCredits(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        return lower.contains("insufficient") || lower.contains("credit") || lower.contains("no credits")
-    }
-
-    private func analysisStateUpdated(_ transform: (inout DiscoveryAnalysisState) -> Void) -> DiscoveryAnalysisState {
-        var existing = analysisState ?? DiscoveryAnalysisState()
-        let previousStream = existing.streamedText
-        let previousTitle = existing.metadataTitle
-        let previousShort = existing.metadataShortDescription
-        transform(&existing)
-        let streamChanged = existing.streamedText != previousStream
-        let metadataChanged = existing.metadataTitle != previousTitle || existing.metadataShortDescription != previousShort
-
-        if streamChanged || metadataChanged {
-            let parsed = analysisParser.parse(existing.streamedText)
-            if debugLoggingEnabled {
-                if let parsed {
-                    let t = parsed.metadata?.title ?? "nil"
-                    let sLen = parsed.metadata?.shortDescription?.count ?? 0
-                    debugLog("parser: metadata(title: \(t), shortLen: \(sLen))")
-                } else {
-                    let preview = String(existing.streamedText.suffix(140)).replacingOccurrences(of: "\n", with: " ")
-                    debugLog("parser: no metadata yet, streamSuffix=…\(preview)")
-                }
-            }
-
-            // Update metadata as soon as it is fully available in the stream
-            if let parsedTitle = parsed?.metadata?.title, !parsedTitle.isEmpty {
-                existing.metadataTitle = parsedTitle
-            }
-            if let parsedShort = parsed?.metadata?.shortDescription, !parsedShort.isEmpty {
-                existing.metadataShortDescription = parsedShort
-            }
-
-            // Gate narrative rendering until metadata has been parsed, to avoid
-            // rendering raw metadata JSON into the description area during streaming.
-            let hasMetadata = (existing.metadataTitle?.isEmpty == false) || (existing.metadataShortDescription?.isEmpty == false)
-            if hasMetadata {
-                if let parsedMarkdown = parsed?.markdown {
-                    existing.displayMarkdown = parsedMarkdown
-                } else {
-                    existing.displayMarkdown = DiscoveryStreamFormatter.narrative(from: existing.streamedText)
-                }
-            } else {
-                // Keep whatever is currently shown (typically empty) until metadata arrives.
-            }
-        }
-        return existing
-    }
-
-    private func debugDescription(for event: DiscoveryAnalysisEvent) -> String {
-        switch event {
-        case let .status(message):
-            return "status(message: \(message))"
-        case let .metadata(title, short):
-            let titlePreview = title.map { String($0.prefix(40)) } ?? "nil"
-            let shortPreview = short.map { String($0.prefix(40)) } ?? "nil"
-            return "metadata(title: \(titlePreview), short: \(shortPreview))"
-        case let .token(token):
-            let preview = String(token.replacingOccurrences(of: "\n", with: " ").prefix(60))
-            return "token(len: \(token.count), preview: \(preview))"
-        case let .complete(id, system, user, credits):
-            return "complete(id: \(id), system: \(system ?? "nil"), user: \(user ?? "nil"), credits: \(credits.map { String($0) } ?? "nil"))"
-        case let .error(message, status):
-            if let status {
-                return "error(message: \(message), status: \(status))"
-            } else {
-                return "error(message: \(message))"
-            }
-        case .end:
-            return "end"
-        }
-    }
+    // MARK: - Debug & Utilities
 
     private func debugLog(_ message: String) {
         guard debugLoggingEnabled else { return }
         // print("[DiscoveryCreationFlowViewModel] \(message)")
     }
-
 
     private func flowStateSummary(_ state: DiscoveryCreationFlowState) -> String {
         switch state {
@@ -1470,8 +647,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         case .idle, .cancelled, .error:
             return true
         case .confirming:
-            // Allow retake from confirmation, but do not implicitly
-            // start a new capture unless the user explicitly requests it.
             return retake
         case .requestingPermissions, .capturingInitial, .capturingRetake,
              .selectingInitial, .selectingRetake, .analyzing:
@@ -1479,187 +654,43 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         }
     }
 
-    /// Caches the discovery image data locally.
-    /// Note: Summary and audio generation callbacks are handled by sessionDidComplete.
-    private func cacheDiscoveryImageIfNeeded(for discoveryId: Int64) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let recents = try await self.historyRepository.fetchRecentDiscoveries(limit: max(self.configuration.recentHistoryLimit, 25))
-                guard let summary = recents.first(where: { $0.id == discoveryId }) else { return }
-
-                let capturedData = await MainActor.run { self.currentMedia?.data }
-                if let capturedData {
-                    let storedURL = await DiscoveryAssetCache.shared.storeImageData(
-                        capturedData,
-                        discoveryId: discoveryId
-                    )
-                    await MainActor.run { self.currentMedia = nil }
-
-                    if storedURL == nil,
-                       let path = summary.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       let remoteURL = URL(string: path) {
-                        _ = await DiscoveryAssetCache.shared.ensureImageCached(
-                            for: discoveryId,
-                            signedURL: remoteURL
-                        )
-                    }
-                } else if let path = summary.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          let remoteURL = URL(string: path) {
-                    _ = await DiscoveryAssetCache.shared.ensureImageCached(
-                        for: discoveryId,
-                        signedURL: remoteURL
-                    )
-                }
-                // Note: Audio generation and UI state updates are handled by
-                // DiscoverySessionManager.handleCompletion via onDiscoveryCompleted and sessionDidComplete
-            } catch {
-                // Intentionally ignore fetch errors; the detail view can defer to the feed refresh.
-            }
-        }
-    }
-
     static func makeLocationDescription(from location: DiscoveryLocation?) -> String? {
-        guard let location else { return nil }
-        if let closest = location.closestPlace {
-            return closest
-        }
-        if let locality = location.locality, let country = location.country {
-            return "\(locality), \(country)"
-        }
-        if let country = location.country {
-            return country
-        }
-        return String(format: "%.4f, %.4f", location.latitude, location.longitude)
+        ConfirmationStateBuilder.makeLocationDescription(from: location)
     }
 }
 
-// MARK: - DiscoverySessionSubscriber Conformance
+// MARK: - StreamingSessionDelegate Conformance
 
-extension DiscoveryCreationFlowViewModel: DiscoverySessionSubscriber {
-    
-    /// Called by DiscoverySessionManager for each stream event.
-    /// We forward to our existing handle(event:) method.
-    public func handleSessionEvent(_ event: DiscoveryAnalysisEvent) {
-        handle(event: event)
+extension DiscoveryCreationFlowViewModel: StreamingSessionDelegate {
+    func streamingDidCreateDiscovery(_ discoveryId: Int64) {
+        createdDiscoveryId = discoveryId
     }
-    
-    /// Called when the session completes successfully.
-    /// This is called even if we're still subscribed (overlay is visible).
-    public func sessionDidComplete(discoveryId: Int64, summary: DiscoverySummary?) {
-        debugLog("sessionDidComplete: discoveryId=\(discoveryId)")
-        
-        // The session manager has already notified us via handleSessionEvent with .complete
-        // This callback provides an opportunity for any additional cleanup or state updates
-        
-        // Ensure we have the summary in our analysis state
-        if let summary = summary {
-            // Note: Audio generation is triggered by DiscoverySessionManager.onDiscoveryCompleted
-            // (in MainTabView) which is called for ALL completions. We only handle state updates here.
-            analysisState = analysisStateUpdated { state in
-                state.discoverySummary = summary
-            }
-            onDiscoverySummaryReady?(summary)
-        }
-        
-        // Clear the session ID since it's complete
-        currentSessionId = nil
+
+    func streamingDidCompleteDiscovery(_ summary: DiscoverySummary) {
+        completedDiscovery = summary
     }
-    
-    /// Called when the session fails with an error.
-    public func sessionDidFail(error: Error) {
-        debugLog("sessionDidFail: \(error.localizedDescription)")
-        
-        // Special handling for stream interruption - start polling fallback
-        if let analysisError = error as? DiscoveryAnalysisError, analysisError == .streamInterrupted {
-            debugLog("Stream interrupted - starting polling fallback")
-            // Keep the streaming UI visible but update status to show we're polling
-            analysisState = analysisStateUpdated { state in
-                state.isStreaming = false
-                state.isPolling = true
-                state.statusMessage = "Connection interrupted. Checking for your discovery..."
-            }
-            // Republish flowState to update UI
-            if let analysisState {
-                flowState = .analyzing(analysisState)
-            }
-            startPollingForCompletion()
-            return
-        }
-        
-        let message = error.localizedDescription
-        if Self.messageIndicatesInsufficientCredits(message) {
-            // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
-            Task { [weak self] in
-                guard let self else { return }
-                let updated = await self.creditBalanceStore.set(0)
-                await MainActor.run {
-                    self.creditBalance = updated
-                    // Return to confirmation stage with the same image
-                    if let confirmState = self.confirmationState {
-                        self.flowState = .confirming(confirmState)
-                        // Show credits exhausted alert with "Get Credits" option
-                        self.showFreeCreditsExhaustedAtConfirm = true
-                    } else {
-                        // Fallback if confirmation state is unavailable
-                        self.error = .noCredits
-                        self.flowState = .error(message: FlowError.noCredits.errorDescription ?? message)
-                    }
-                }
-            }
-        } else {
-            self.error = .analysisFailed(message)
-            self.flowState = .error(message: message)
-            
-            // Refresh credits to ensure we aren't out of sync
-            Task { [weak self] in
-                guard let self else { return }
-                if let updated = try? await self.creditBalanceStore.refresh() {
-                    await MainActor.run {
-                        self.creditBalance = updated
-                    }
-                }
-            }
-        }
-        
-        // Clear the session ID since it's complete
-        currentSessionId = nil
+
+    func streamingDidFail(_ error: FlowError) {
+        self.error = error
     }
-    
-    // MARK: - Photo Library Saving
-    
-    /// Saves the captured photo to the user's Photos library if auto-save is enabled.
-    /// Requests permission on first use. Non-blocking; failures are logged but don't affect the flow.
-    private func savePhotoToLibraryIfEnabled(media: DiscoveryCapturedMedia) async {
-        guard let preferencesStore = photoSavePreferencesStore,
-              let saveService = photoLibrarySaveService else {
-            debugLog("Photo save services not available")
-            return
-        }
-        
-        // Check if auto-save is enabled
-        let isEnabled = await preferencesStore.isEnabled()
-        guard isEnabled else {
-            debugLog("Photo auto-save is disabled")
-            return
-        }
-        
-        debugLog("Saving photo to library...")
-        
-        // Save photo (service handles permission request if needed)
-        let result = await saveService.save(imageData: media.data)
-        
-        switch result {
-        case .success:
-            debugLog("Photo saved to library successfully")
-        case .permissionDenied:
-            debugLog("Photo save skipped: permission denied")
-            // Permission was denied; the user can enable in Settings
-            // We don't show an error since this is non-blocking
-        case .permissionRestricted:
-            debugLog("Photo save skipped: permission restricted")
-        case .saveFailed(let error):
-            debugLog("Photo save failed: \(error.localizedDescription)")
-        }
+
+    func streamingDidUpdateCreditBalance(_ balance: Int?) {
+        creditBalance = balance
+    }
+
+    func streamingDidChangeFlowState(_ state: DiscoveryCreationFlowState) {
+        flowState = state
+    }
+
+    func streamingShouldShowAudioModal() {
+        showAudioGeneratingModal = true
+    }
+
+    func streamingShouldShowPollingFailedAlert() {
+        showPollingFailedAlert = true
+    }
+
+    func streamingShouldReturnToConfirmation() {
+        handleCreditsExhaustedDuringAnalysis()
     }
 }

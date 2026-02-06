@@ -29,21 +29,19 @@ struct MainTabView: View {
     @State private var pendingDiscoveryId: Int64?
     @State private var awaitingSummaryId: Int64?
     @State private var summaryFallbackTask: Task<Void, Never>?
-    @State private var activeOverlayTab: Tab?
     @State private var audioGuidesMode: AudioGuidesDisplayMode = .hero
     @State private var openFirstDetailFromAudioGuides = false
     @State private var audioGuidesTargetDiscoveryId: Int64?
     @State private var audioGuidesTargetDiscoverySummary: DiscoverySummary?
 
-    // Credits sheet state (opened from various triggers)
-    @State private var showCreditsSheetFromExhausted: Bool = false
-    @State private var creditsExhaustedCreditsViewModel: CreditsViewModel?
-
-    // Free credits exhausted full-screen modal (triggered from either camera or upload viewModel)
-    @State private var showFreeCreditsExhaustedModal: Bool = false
-
-    // Flag to present credits sheet AFTER fullScreenCover dismisses (avoids SwiftUI presentation race)
-    @State private var shouldPresentCreditsAfterDismiss: Bool = false
+    // Modal presentation state for creation flow (replaces overlay ZStack)
+    @State private var activeCreationFlowType: DiscoveryCreationFlowType?
+    // Pending flow type for "Discover More" or tab tap during dismiss animation
+    @State private var pendingCreationFlowAfterDismiss: DiscoveryCreationFlowType?
+    // True between activeCreationFlowType=nil and fullScreenCover's onDismiss callback.
+    // Prevents setting a new activeCreationFlowType during the dismiss animation,
+    // which SwiftUI silently drops (leaving the state stuck).
+    @State private var isDismissingModal = false
 
     // Reference to session manager (singleton, not StateObject since it's shared globally)
     private var sessionManager: DiscoverySessionManager { DiscoverySessionManager.shared }
@@ -113,27 +111,14 @@ struct MainTabView: View {
 
     
     var body: some View {
-        let _ = print("[MainTabView] body evaluated: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                DiscoveryCreationFlowView(
-                    viewModel: cameraViewModel,
-                    placeholderEmoji: "📷",
-                    ctaTitle: "Take a photo to discover",
-                    retryTitle: "Try again",
-                    makeCreditsViewModel: makeCreditsViewModel,
-                    fetchRecentDiscoveries: { storeObserver.discoveries },
-                    loadVoiceoverPreferences: loadVoiceoverPreferences,
-                    saveVoiceoverPreferences: saveVoiceoverPreferences,
-                    fetchVoiceOptions: fetchVoiceOptions,
-                    fetchVoiceSampleURL: fetchVoiceSampleURL,
-                    loadIPoPPreferences: loadIPoPPreferences,
-                    saveIPoPPreferences: saveIPoPPreferences
-                )
-                .tag(Tab.camera)
-                .tabItem {
-                    Label("Camera", systemImage: "camera.fill")
-                }
+                // Camera tab — pure trigger, no content
+                TabTriggerPlaceholder()
+                    .tag(Tab.camera)
+                    .tabItem {
+                        Label("Camera", systemImage: "camera.fill")
+                    }
 
                 DiscoveriesHomeView(
                     storeObserver: storeObserver,
@@ -176,79 +161,21 @@ struct MainTabView: View {
                     Label("Audio Guides", systemImage: "headphones")
                 }
 
-                DiscoveryCreationFlowView(
-                    viewModel: uploadViewModel,
-                    placeholderEmoji: "🖼️",
-                    ctaTitle: "Choose a photo from your gallery",
-                    retryTitle: "Select again",
-                    makeCreditsViewModel: makeCreditsViewModel,
-                    fetchRecentDiscoveries: { storeObserver.discoveries },
-                    loadVoiceoverPreferences: loadVoiceoverPreferences,
-                    saveVoiceoverPreferences: saveVoiceoverPreferences,
-                    fetchVoiceOptions: fetchVoiceOptions,
-                    fetchVoiceSampleURL: fetchVoiceSampleURL,
-                    loadIPoPPreferences: loadIPoPPreferences,
-                    saveIPoPPreferences: saveIPoPPreferences
-                )
-                .tag(Tab.upload)
-                .tabItem {
-                    Label("Gallery", systemImage: "photo.on.rectangle")
-                }
+                // Gallery tab — pure trigger, no content
+                TabTriggerPlaceholder()
+                    .tag(Tab.upload)
+                    .tabItem {
+                        Label("Gallery", systemImage: "photo.on.rectangle")
+                    }
             }
-        
-            // Creation overlay
-            // During analyzing phase, leave space for tab bar so user can navigate
-            if let overlayTab = activeOverlayTab,
-               let overlayViewModel = viewModel(for: overlayTab),
-               shouldShowOverlay(for: overlayViewModel.flowState)
-            {
-                DiscoveryCreationFlowView(
-                    viewModel: overlayViewModel,
-                    placeholderEmoji: overlayTab == .camera ? "📷" : "🖼️",
-                    ctaTitle: overlayTab == .camera ? "Take a photo to discover" : "Choose a photo from your gallery",
-                    retryTitle: overlayTab == .camera ? "Try again" : "Select again",
-                    isOverlay: true,
-                    onDiscoverAnother: {
-                        // Handle "Discover Another" from audio generating modal.
-                        // This callback is invoked AFTER the modal is fully dismissed (via onDismiss).
-                        let targetTab: Tab = overlayTab == .camera ? .camera : .upload
-                        let targetViewModel = overlayTab == .camera ? cameraViewModel : uploadViewModel
 
-                        // Unsubscribe preserves state for cancellation restoration.
-                        // If user cancels the new capture, they'll return to this completed discovery.
-                        targetViewModel.unsubscribe()
-
-                        // Switch to the target tab so user sees confirm stage there after capture.
-                        // The onChange handler dispatches handleTabChange async, so retake() runs first.
-                        // By the time handleTabChange runs, flowState is already capturing, so
-                        // canStartFlow() returns false and won't interfere with the retake flow.
-                        selectedTab = targetTab
-
-                        // Start new capture via retake() which keeps preservedState intact.
-                        targetViewModel.retake()
-                    },
-                    makeCreditsViewModel: makeCreditsViewModel,
-                    fetchRecentDiscoveries: { storeObserver.discoveries },
-                    loadVoiceoverPreferences: loadVoiceoverPreferences,
-                    saveVoiceoverPreferences: saveVoiceoverPreferences,
-                    fetchVoiceOptions: fetchVoiceOptions,
-                    fetchVoiceSampleURL: fetchVoiceSampleURL,
-                    loadIPoPPreferences: loadIPoPPreferences,
-                    saveIPoPPreferences: saveIPoPPreferences
-                )
-                .padding(.bottom, overlayViewModel.flowState.phase == .analyzing ? 49 : 0)
-                .transition(.opacity)
-                .zIndex(1)
-            }
-            
-            // Global mini player overlay - wrapped to properly observe controller changes
-            // Use zIndex(2) when analyzing to appear above the creation overlay (zIndex 1)
+            // Global mini player overlay (visible when no modal is showing)
             MiniPlayerVisibilityWrapper(
                 controller: audioServices.playbackController,
                 miniPlayerPresence: audioServices.miniPlayerPresence,
                 isAudioGuidesTab: selectedTab == .audioGuides,
                 audioGuidesMode: audioGuidesMode,
-                activeOverlayPhase: activeOverlayPhase
+                activeOverlayPhase: nil
             ) {
                 VStack {
                     Spacer()
@@ -264,10 +191,7 @@ struct MainTabView: View {
                 .padding(.bottom, UIDevice.isIPad ? 20 : 49 + 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .zIndex(activeOverlayPhase == .analyzing ? 2 : 0)
-            
 
-            
             // Unified toast overlay for all toast types (discovery + audio guide)
             UnifiedToastOverlay(
                 audioServices: audioServices,
@@ -282,44 +206,70 @@ struct MainTabView: View {
             )
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
-        .sheet(isPresented: $showCreditsSheetFromExhausted, onDismiss: {
-            creditsExhaustedCreditsViewModel = nil
-        }) {
-            if let viewModel = creditsExhaustedCreditsViewModel {
-                NavigationStack {
-                    CreditsView(
-                        viewModel: viewModel,
-                        loadVoiceoverPreferences: loadVoiceoverPreferences ?? { VoiceoverPreferences(autoEnabled: false, voiceModelId: "", ttsModel: "s1") },
-                        saveVoiceoverPreferences: saveVoiceoverPreferences ?? { _ in },
-                        fetchVoiceOptions: fetchVoiceOptions ?? { [] },
-                        fetchVoiceSampleURL: fetchVoiceSampleURL ?? { _ in nil },
-                        loadIPoPPreferences: loadIPoPPreferences ?? { nil },
-                        saveIPoPPreferences: saveIPoPPreferences ?? { _ in }
-                    )
-                }
-                .presentationDetents([.fraction(0.8), .large])
-            } else {
-                // Fallback view if credits view model failed to initialize
-                CreditsSheetErrorView(
-                    onRetry: {
-                        if let maker = makeCreditsViewModel {
-                            creditsExhaustedCreditsViewModel = maker()
-                        }
-                    },
-                    onDismiss: {
-                        showCreditsSheetFromExhausted = false
+        .audioServices(audioServices)
+        // Creation flow presented as a fullScreenCover modal
+        .fullScreenCover(item: $activeCreationFlowType, onDismiss: {
+            // Dismiss animation is complete — safe to present again
+            isDismissingModal = false
+            // Check if there's a pending request (from "Discover More" or tab tap during dismiss)
+            if let pendingType = pendingCreationFlowAfterDismiss {
+                pendingCreationFlowAfterDismiss = nil
+                // Don't call startFlow() here — the modal's .task will call it once
+                // the view is actually on screen, ensuring the photo picker / camera
+                // presents on the correct view controller.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    // Present instantly (no slide-up animation)
+                    var transaction = Transaction(animation: .none)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        activeCreationFlowType = pendingType
                     }
-                )
-                .presentationDetents([.fraction(0.5)])
+                }
+            }
+            // selectedTab is already .discoveries — set by the onDismiss closure
+            // inside DiscoveryCreationFlowView before activeCreationFlowType was nil'd.
+            // Don't override it here as it can race with user tab selection.
+        }) { flowType in
+            let viewModel = flowType == .camera ? cameraViewModel : uploadViewModel
+            DiscoveryCreationFlowView(
+                viewModel: viewModel,
+                onRequestNewDiscovery: { type in handleNewDiscoveryRequest(type: type) },
+                onDismiss: {
+                    selectedTab = .discoveries
+                    isDismissingModal = true
+                    // Dismiss instantly (no slide-down animation)
+                    var transaction = Transaction(animation: .none)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        activeCreationFlowType = nil
+                    }
+                },
+                makeCreditsViewModel: makeCreditsViewModel,
+                fetchRecentDiscoveries: { storeObserver.discoveries },
+                audioServices: audioServices,
+                loadVoiceoverPreferences: loadVoiceoverPreferences,
+                saveVoiceoverPreferences: saveVoiceoverPreferences,
+                fetchVoiceOptions: fetchVoiceOptions,
+                fetchVoiceSampleURL: fetchVoiceSampleURL,
+                loadIPoPPreferences: loadIPoPPreferences,
+                saveIPoPPreferences: saveIPoPPreferences
+            )
+            .task {
+                // Start the flow once the modal is on screen. This ensures the
+                // camera/photo picker presents on the modal's view controller,
+                // not the root VC. Without this, the picker races with the
+                // fullScreenCover presentation and can block it entirely.
+                if viewModel.flowState.phase == .idle {
+                    viewModel.startFlow()
+                }
             }
         }
-        .audioServices(audioServices)
         .onAppear {
             cameraViewModel.onDiscoveryCreated = handleDiscoveryCreated
             uploadViewModel.onDiscoveryCreated = handleDiscoveryCreated
             cameraViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
             uploadViewModel.onDiscoverySummaryReady = handleDiscoverySummaryReady
-            
+
             cameraViewModel.onPollingDiscoveryReady = { discovery in
                 handlePollingDiscoveryReady(discovery)
             }
@@ -327,20 +277,6 @@ struct MainTabView: View {
                 handlePollingDiscoveryReady(discovery)
             }
 
-            // Handle state restoration when user cancels "Discover Another" (e.g., cancels camera picker)
-            // This restores the overlay and switches back to discoveries tab
-            cameraViewModel.onStateRestored = { _ in
-                activeOverlayTab = .camera
-                selectedTab = .discoveries
-            }
-            uploadViewModel.onStateRestored = { _ in
-                activeOverlayTab = .upload
-                selectedTab = .discoveries
-            }
-
-            // Note: Audio generation is now triggered exclusively via sessionManager.onDiscoveryCompleted
-            // (configured below) which runs before sessionDidComplete updates UI state.
-            
             // Configure session manager callbacks for background discovery completion
             sessionManager.onDiscoveryCompleted = { [weak audioServices, weak storeObserver] summary, generateAudio in
                 // Refresh discovery list to include new discovery
@@ -361,144 +297,41 @@ struct MainTabView: View {
         .onDisappear {
             summaryFallbackTask?.cancel()
         }
-        .onChange(of: selectedTab) { oldValue, newValue in
-            print("[MainTabView] onChange(selectedTab): \(oldValue) -> \(newValue)")
+        .onChange(of: selectedTab) { _, newValue in
             // Defer to next runloop to prevent "update multiple times per frame" error
             DispatchQueue.main.async {
                 handleTabChange(to: newValue)
             }
         }
-        .onChange(of: cameraViewModel.flowState.phase) { _, newPhase in
-            // Defer to next runloop to prevent "update multiple times per frame" error
-            DispatchQueue.main.async {
-                updateOverlayVisibility(for: .camera, phase: newPhase)
-            }
-        }
-        .onChange(of: uploadViewModel.flowState.phase) { _, newPhase in
-            // Defer to next runloop to prevent "update multiple times per frame" error
-            DispatchQueue.main.async {
-                updateOverlayVisibility(for: .upload, phase: newPhase)
-            }
-        }
-        .onChange(of: activeOverlayTab) { oldValue, newValue in
-            print("[MainTabView] onChange(activeOverlayTab): \(String(describing: oldValue)) -> \(String(describing: newValue))")
-        }
-        .onReceive(cameraViewModel.analysisBeganPublisher) { type in
-            handleAnalysisBegan(type)
-        }
-        .onReceive(uploadViewModel.analysisBeganPublisher) { type in
-            handleAnalysisBegan(type)
-        }
-        // Watch for free credits exhausted modal from either viewModel
-        // We present at MainTabView level to ensure visibility regardless of flow state
-        .onChange(of: cameraViewModel.showFreeCreditsExhaustedAtConfirm) { _, show in
-            if show {
-                // Reset viewModel flag immediately to prevent DiscoveryCreationFlowView from also presenting
-                cameraViewModel.showFreeCreditsExhaustedAtConfirm = false
-                showFreeCreditsExhaustedModal = true
-            }
-        }
-        .onChange(of: uploadViewModel.showFreeCreditsExhaustedAtConfirm) { _, show in
-            if show {
-                // Reset viewModel flag immediately to prevent DiscoveryCreationFlowView from also presenting
-                uploadViewModel.showFreeCreditsExhaustedAtConfirm = false
-                showFreeCreditsExhaustedModal = true
-            }
-        }
-        .fullScreenCover(isPresented: $showFreeCreditsExhaustedModal, onDismiss: {
-            // Present credits sheet AFTER fullScreenCover is fully dismissed to avoid SwiftUI race condition
-            if shouldPresentCreditsAfterDismiss {
-                shouldPresentCreditsAfterDismiss = false
-                if let maker = makeCreditsViewModel {
-                    creditsExhaustedCreditsViewModel = maker()
-                    // Small delay to ensure clean presentation after dismiss animation completes
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        showCreditsSheetFromExhausted = true
-                    }
-                }
-            }
-        }) {
-            CreditsExhaustedFullScreenView(
-                discoveries: Array(storeObserver.discoveries.prefix(3)),
-                playbackController: audioServices.playbackController,
-                onGetCredits: {
-                    // Set flag to present credits sheet after this fullScreenCover dismisses
-                    shouldPresentCreditsAfterDismiss = true
-                    showFreeCreditsExhaustedModal = false
-                },
-                onDismiss: {
-                    shouldPresentCreditsAfterDismiss = false
-                    showFreeCreditsExhaustedModal = false
-                    // Cancel flows and return to discoveries - user hit intro limit
-                    cameraViewModel.cancelFlow()
-                    uploadViewModel.cancelFlow()
-                    activeOverlayTab = nil
-                    selectedTab = .discoveries
-                }
-            )
-        }
     }
 
     private func handleTabChange(to tab: Tab, isInitial: Bool = false) {
-        print("[MainTabView] handleTabChange called: tab=\(tab), isInitial=\(isInitial), activeOverlayTab=\(String(describing: activeOverlayTab))")
         // Track screen safety for compliance overlay deferral
-        // Discoveries and Audio Guides are "safe" screens (not mid-action)
-        // Camera and Upload are "unsafe" (user may be capturing/selecting)
-        let isSafeScreen = (tab == .discoveries || tab == .audioGuides) && activeOverlayTab == nil
+        let isSafeScreen = (tab == .discoveries || tab == .audioGuides)
         onScreenSafetyChanged?(isSafeScreen)
 
-        switch tab {
-        case .camera:
-            // Check if upload is analyzing - unsubscribe to allow background completion
-            if case .analyzing = uploadViewModel.flowState {
-                uploadViewModel.unsubscribe()
-            } else {
-                uploadViewModel.cancelFlow()
+        // Camera/Gallery tabs are pure triggers — present the creation flow modal
+        if tab == .camera || tab == .upload {
+            let flowType: DiscoveryCreationFlowType = tab == .camera ? .camera : .upload
+            // Don't start a new flow if a modal is already active
+            guard activeCreationFlowType == nil else { return }
+            // If a dismiss animation is in progress, queue the request.
+            // Setting activeCreationFlowType during the animation causes SwiftUI to
+            // silently drop the presentation, leaving the state stuck.
+            if isDismissingModal {
+                pendingCreationFlowAfterDismiss = flowType
+                return
             }
-            cameraViewModel.startFlow()
-            activeOverlayTab = nil
-        case .upload:
-            // Check if camera is analyzing - unsubscribe to allow background completion
-            if case .analyzing = cameraViewModel.flowState {
-                cameraViewModel.unsubscribe()
-            } else {
-                cameraViewModel.cancelFlow()
+            // Don't call startFlow() here — the modal's .task will call it once
+            // the fullScreenCover is on screen. Calling it here races with the
+            // fullScreenCover presentation: the camera/photo picker tries to present
+            // on the root VC before the modal is ready, blocking the modal presentation.
+            // Present instantly (no slide-up animation)
+            var transaction = Transaction(animation: .none)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                activeCreationFlowType = flowType
             }
-            uploadViewModel.startFlow()
-            activeOverlayTab = nil
-        case .discoveries:
-            // Unsubscribe or cancel based on whether analyzing
-            if activeOverlayTab != .camera {
-                if case .analyzing = cameraViewModel.flowState {
-                    cameraViewModel.unsubscribe()
-                } else {
-                    cameraViewModel.cancelFlow()
-                }
-            }
-            if activeOverlayTab != .upload {
-                if case .analyzing = uploadViewModel.flowState {
-                    uploadViewModel.unsubscribe()
-                } else {
-                    uploadViewModel.cancelFlow()
-                }
-            }
-            if isInitial {
-                cameraViewModel.cancelFlow()
-                uploadViewModel.cancelFlow()
-            }
-        case .audioGuides:
-            // Unsubscribe or cancel based on whether analyzing
-            if case .analyzing = cameraViewModel.flowState {
-                cameraViewModel.unsubscribe()
-            } else {
-                cameraViewModel.cancelFlow()
-            }
-            if case .analyzing = uploadViewModel.flowState {
-                uploadViewModel.unsubscribe()
-            } else {
-                uploadViewModel.cancelFlow()
-            }
-            activeOverlayTab = nil
         }
     }
 
@@ -529,7 +362,7 @@ struct MainTabView: View {
 
 
     private func handleDiscoveryCreated(_ discoveryId: Int64) {
-        // Do not pre-select the discovery from the feed; keep the overlay active during creation.
+        // Do not pre-select the discovery from the feed; keep the modal active during creation.
         awaitingSummaryId = discoveryId
         summaryFallbackTask?.cancel()
         summaryFallbackTask = Task {
@@ -553,22 +386,6 @@ struct MainTabView: View {
             // Also update the audio services store for immediate Audio Guides access
             await audioServices.discoveryStore.upsert(summary)
         }
-        // Ensure we're showing the Discoveries tab underneath the overlay.
-        selectedTab = .discoveries
-        // Keep the creation overlay visible; do not cancel the flow or clear the overlay.
-    }
-
-    private func handleAnalysisBegan(_ type: DiscoveryCreationFlowType) {
-        print("[MainTabView] handleAnalysisBegan called with type: \(type)")
-        print("[MainTabView] BEFORE: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
-        switch type {
-        case .camera:
-            activeOverlayTab = .camera
-        case .upload:
-            activeOverlayTab = .upload
-        }
-        selectedTab = .discoveries
-        print("[MainTabView] AFTER: selectedTab=\(selectedTab), activeOverlayTab=\(String(describing: activeOverlayTab))")
     }
 
     private func handlePollingDiscoveryReady(_ discovery: DiscoverySummary) {
@@ -581,94 +398,21 @@ struct MainTabView: View {
         }
     }
 
-    private func shouldShowOverlay(for state: DiscoveryCreationFlowState) -> Bool {
-        switch state {
-        case .idle, .cancelled:
-            return false
-        default:
-            return true
+    /// Handles "Discover More" request from within the creation flow modal.
+    /// Stores the pending type, unsubscribes the current flow, and dismisses.
+    /// The fullScreenCover's onDismiss callback picks up the pending type and re-presents.
+    private func handleNewDiscoveryRequest(type: DiscoveryCreationFlowType) {
+        let currentViewModel = activeCreationFlowType == .some(.camera) ? cameraViewModel : uploadViewModel
+        currentViewModel.unsubscribe()
+        pendingCreationFlowAfterDismiss = type
+        isDismissingModal = true
+        // Dismiss instantly (no slide-down animation)
+        var transaction = Transaction(animation: .none)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            activeCreationFlowType = nil
         }
     }
-
-    private func shouldShowOverlay(for phase: DiscoveryCreationPhase) -> Bool {
-        switch phase {
-        case .idle, .cancelled:
-            return false
-        default:
-            return true
-        }
-    }
-
-    private func viewModel(for tab: Tab) -> DiscoveryCreationFlowViewModel? {
-        switch tab {
-        case .camera:
-            return cameraViewModel
-        case .upload:
-            return uploadViewModel
-        case .discoveries:
-            return nil
-        case .audioGuides:
-            return nil
-        }
-    }
-
-    private func updateOverlayVisibility(for tab: Tab, state: DiscoveryCreationFlowState) {
-        guard activeOverlayTab == tab else { return }
-        if !shouldShowOverlay(for: state) {
-            activeOverlayTab = nil
-        }
-    }
-
-    private func updateOverlayVisibility(for tab: Tab, phase: DiscoveryCreationPhase) {
-        print("[MainTabView] updateOverlayVisibility: tab=\(tab), phase=\(phase), activeOverlayTab=\(String(describing: activeOverlayTab))")
-        guard activeOverlayTab == tab else {
-            print("[MainTabView] updateOverlayVisibility: guard failed, activeOverlayTab != tab")
-            return
-        }
-        if !shouldShowOverlay(for: phase) {
-            print("[MainTabView] updateOverlayVisibility: clearing activeOverlayTab")
-            activeOverlayTab = nil
-            // Screen becomes safe when overlay dismissed on discoveries/audioGuides
-            if selectedTab == .discoveries || selectedTab == .audioGuides {
-                onScreenSafetyChanged?(true)
-            }
-        } else {
-            // Screen is unsafe when overlay is active
-            onScreenSafetyChanged?(false)
-        }
-    }
-
-    private var activeOverlayPhase: DiscoveryCreationPhase? {
-        // First check if there's an active overlay (used during analysis when overlaid on discoveries)
-        if let tab = activeOverlayTab {
-            switch tab {
-            case .camera:
-                return cameraViewModel.flowState.phase
-            case .upload:
-                return uploadViewModel.flowState.phase
-            case .discoveries, .audioGuides:
-                return nil
-            }
-        }
-        
-        // Also check current tab for camera/upload - covers confirming/selecting phases before analysis starts
-        switch selectedTab {
-        case .camera:
-            return cameraViewModel.flowState.phase
-        case .upload:
-            return uploadViewModel.flowState.phase
-        case .discoveries, .audioGuides:
-            return nil
-        }
-    }
-
-    private func imageURL(for discovery: DiscoverySummary) -> URL? {
-        guard let path = discovery.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
-            return nil
-        }
-        return URL(string: path)
-    }
-
 
     private static func tab(for destination: MainTabDestination) -> Tab {
         switch destination {
@@ -695,72 +439,48 @@ struct MainTabView: View {
         UITabBar.appearance().standardAppearance = appearance
     }
 
-    private func presentCreditsSheetFromExhausted() {
-        guard let factory = makeCreditsViewModel else { return }
-        creditsExhaustedCreditsViewModel = factory()
-        showCreditsSheetFromExhausted = true
-    }
 }
 
-// MARK: - Credits Sheet Error View
+// MARK: - Tab Trigger Placeholder
 
-/// Fallback view shown when the credits sheet fails to load properly
-private struct CreditsSheetErrorView: View {
-    let onRetry: () -> Void
-    let onDismiss: () -> Void
-
+/// Branded placeholder shown briefly on Camera/Gallery tab before the modal presents.
+/// Uses the app logo with a spinning ring for a polished loading appearance.
+private struct TabTriggerPlaceholder: View {
     @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: BrandTheme.Palette {
-        BrandTheme.palette(for: colorScheme)
-    }
+    @State private var isAnimating = false
 
     var body: some View {
-        VStack(spacing: BrandSpacing.large) {
-            Spacer()
-
-            VStack(spacing: BrandSpacing.medium) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 40))
-                    .foregroundStyle(palette.textSecondary)
-
-                Text("Something went wrong")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(palette.textPrimary)
-
-                Text("We couldn't load the credits page. Please try again.")
-                    .font(.system(size: 15))
-                    .foregroundStyle(palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, BrandSpacing.large)
+        ZStack {
+            (colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background)
+                .ignoresSafeArea()
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: 0.7)
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(colors: [
+                                BrandColors.spinner.opacity(0.1),
+                                BrandColors.spinner
+                            ]),
+                            center: .center,
+                            startAngle: .degrees(0),
+                            endAngle: .degrees(360)
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .frame(width: 80, height: 80)
+                    .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                    .animation(
+                        .linear(duration: 1.2).repeatForever(autoreverses: false),
+                        value: isAnimating
+                    )
+                Image("LaunchLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 48, height: 48)
             }
-
-            Spacer()
-
-            VStack(spacing: BrandSpacing.small) {
-                Button(action: onRetry) {
-                    Text("Try Again")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .background(
-                    Capsule()
-                        .fill(palette.primaryAction)
-                )
-
-                Button(action: onDismiss) {
-                    Text("Close")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(palette.textSecondary)
-                }
-            }
-            .padding(.horizontal, BrandSpacing.large)
-            .padding(.bottom, BrandSpacing.xLarge)
         }
-        .background(palette.background.ignoresSafeArea())
+        .onAppear { isAnimating = true }
     }
 }
 

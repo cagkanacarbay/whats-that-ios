@@ -103,7 +103,7 @@ public extension VoiceoverFileCache {
             entry.lastAccessedAt = Date()
             entries[discoveryId] = entry
             persistMetadata()
-            log.debug("Cache hit for discovery \(discoveryId, privacy: .public) at \(fileURL.lastPathComponent, privacy: .public)")
+            log.trace("Cache hit for discovery \(discoveryId, privacy: .public)")
             return fileURL
         }
 

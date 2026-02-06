@@ -1,8 +1,10 @@
 import Foundation
 
-public enum DiscoveryCreationFlowType: String, Equatable, Sendable {
+public enum DiscoveryCreationFlowType: String, Equatable, Sendable, Identifiable {
     case camera
     case upload
+
+    public var id: String { rawValue }
 }
 
 public enum DiscoveryAnalysisError: LocalizedError, Equatable, Sendable {

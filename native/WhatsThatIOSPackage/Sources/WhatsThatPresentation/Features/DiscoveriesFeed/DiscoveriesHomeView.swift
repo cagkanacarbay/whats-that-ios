@@ -573,7 +573,7 @@ struct DiscoveriesHomeView: View {
     private func prefetchVoiceovers(for discoveries: [DiscoverySummary]) {
         let discoveryIds = discoveries.map { $0.id }
         voiceoverController.prefetch(for: discoveryIds)
-        discoveriesHomeLogger.info("Prefetched voiceovers for \(discoveryIds.count) discoveries")
+        discoveriesHomeLogger.trace("Prefetched voiceovers for \(discoveryIds.count) discoveries")
     }
 
     private var detailEdgeDragGesture: AnyGesture<DragGesture.Value> {

@@ -48,15 +48,11 @@ struct DiscoveryCreationFlowView: View {
     }
 
     @ObservedObject private var viewModel: DiscoveryCreationFlowViewModel
-    let placeholderEmoji: String
-    let ctaTitle: String
-    let retryTitle: String
-    /// When true, this view is the overlay instance and should present sheets like the audio generating modal.
-    /// When false, this view is embedded in a tab and should not present to avoid duplicate presentation conflicts.
-    private let isOverlay: Bool
-    /// Called when user taps "Discover Another" from the audio generating modal.
-    /// MainTabView handles this to switch to the appropriate tab before starting the new flow.
-    private let onDiscoverAnother: (() -> Void)?
+    /// Called when user wants to start a new discovery from the audio generating modal or streaming view.
+    /// The parent (MainTabView) handles dismissing the current modal and presenting a new one.
+    private let onRequestNewDiscovery: ((DiscoveryCreationFlowType) -> Void)?
+    /// Called when user dismisses the creation flow (X button, cancel, etc.)
+    private let onDismiss: (() -> Void)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
     private let fetchRecentDiscoveries: (() -> [DiscoverySummary])?
 
@@ -68,25 +64,29 @@ struct DiscoveryCreationFlowView: View {
     private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
     private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
 
+    // Audio services for mini player and toasts inside the modal
+    private let audioServices: AudioServicesContainer?
+
     @Environment(\.colorScheme) private var colorScheme
     @State private var presentedCreditsViewModel: CreditsViewModel?
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
     @State private var activeAlert: ActiveAlert?
     @State private var activeSheet: ActiveSheet?
-    @State private var shouldCreateAnotherAfterModalDismiss = false
+    @State private var pendingNewDiscoveryType: DiscoveryCreationFlowType?
     @State private var shouldPresentCreditsAfterExhaustedDismiss = false
     @State private var wasCreditsSheetPresented = false
+    /// Tracks whether the flow has progressed past the initial idle state.
+    /// Prevents auto-dismiss when the modal opens with an idle ViewModel (e.g. "Discover More" re-present).
+    @State private var hasEnteredActivePhase = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(
         viewModel: DiscoveryCreationFlowViewModel,
-        placeholderEmoji: String,
-        ctaTitle: String,
-        retryTitle: String,
-        isOverlay: Bool = false,
-        onDiscoverAnother: (() -> Void)? = nil,
+        onRequestNewDiscovery: ((DiscoveryCreationFlowType) -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
         fetchRecentDiscoveries: (() -> [DiscoverySummary])? = nil,
+        audioServices: AudioServicesContainer? = nil,
         loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
         saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
         fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
@@ -95,13 +95,11 @@ struct DiscoveryCreationFlowView: View {
         saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         _viewModel = ObservedObject(initialValue: viewModel)
-        self.placeholderEmoji = placeholderEmoji
-        self.ctaTitle = ctaTitle
-        self.retryTitle = retryTitle
-        self.isOverlay = isOverlay
-        self.onDiscoverAnother = onDiscoverAnother
+        self.onRequestNewDiscovery = onRequestNewDiscovery
+        self.onDismiss = onDismiss
         self.makeCreditsViewModel = makeCreditsViewModel
         self.fetchRecentDiscoveries = fetchRecentDiscoveries
+        self.audioServices = audioServices
         self.loadVoiceoverPreferences = loadVoiceoverPreferences
         self.saveVoiceoverPreferences = saveVoiceoverPreferences
         self.fetchVoiceOptions = fetchVoiceOptions
@@ -114,20 +112,57 @@ struct DiscoveryCreationFlowView: View {
         DiscoveryCreationPalette.resolve(for: colorScheme)
     }
 
-    // During analyzing phase, only ignore top safe area so tab bar remains visible
-    private var backgroundSafeAreaEdges: Edge.Set {
-        switch viewModel.flowState {
-        case .analyzing:
-            return .top
-        default:
-            return .all
-        }
-    }
-
     var body: some View {
-        mainContent
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(palette.background.ignoresSafeArea(edges: backgroundSafeAreaEdges))
+        ZStack(alignment: .bottom) {
+            mainContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(palette.background.ignoresSafeArea())
+
+            // Mini player inside modal — visible during analyzing phase
+            if let audioServices = audioServices {
+                MiniPlayerVisibilityWrapper(
+                    controller: audioServices.playbackController,
+                    miniPlayerPresence: audioServices.miniPlayerPresence,
+                    isAudioGuidesTab: false,
+                    audioGuidesMode: .hero,
+                    activeOverlayPhase: viewModel.flowState.phase
+                ) {
+                    VStack {
+                        Spacer()
+                        MiniPlayerView {
+                            // Tap mini player during modal -> dismiss modal and navigate to Audio Guides
+                            onDismiss?()
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                    .padding(.bottom, UIDevice.isIPad ? 20 : 4)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                // Toast overlay inside modal — shows background session completions
+                UnifiedToastOverlay(
+                    audioServices: audioServices,
+                    miniPlayerPresence: audioServices.miniPlayerPresence,
+                    onViewDiscovery: { _ in
+                        // Dismiss modal — MainTabView will navigate to the discovery
+                        onDismiss?()
+                    },
+                    onGenerateAudio: { summary in
+                        audioServices.playbackController.requestVoiceover(for: summary)
+                    }
+                )
+            }
+        }
+        .modifier(OptionalAudioServicesModifier(audioServices: audioServices))
+            .onAppear {
+                // Set hasEnteredActivePhase based on the initial state.
+                // onChange doesn't fire for the initial value, so when startFlow()
+                // is called before the modal presents (tab trigger), the phase is
+                // already .requestingPermissions and onChange never records it.
+                if viewModel.flowState.phase != .idle && viewModel.flowState.phase != .cancelled {
+                    hasEnteredActivePhase = true
+                }
+            }
             .alert(
                 item: Binding(
                     get: { activeAlert },
@@ -138,7 +173,15 @@ struct DiscoveryCreationFlowView: View {
                             let dismissedAlert = activeAlert
                             activeAlert = nil
                             if case .flowError = dismissedAlert {
+                                // Check before clearing — permission errors leave the flow
+                                // in a non-idle state so the alert can present safely.
+                                // After the alert is dismissed, cancel the flow to trigger
+                                // the auto-dismiss.
+                                let isPermissionError = viewModel.error?.isPermissionError ?? false
                                 viewModel.clearError()
+                                if isPermissionError {
+                                    viewModel.cancelFlow()
+                                }
                             }
                         }
                     }
@@ -161,7 +204,24 @@ struct DiscoveryCreationFlowView: View {
                     }
                 }
             }
-            // Credits exhausted alerts are now handled via fullScreenCover below
+            // Auto-dismiss modal when flow reaches idle/cancelled (e.g. after error dismissed)
+            .onChange(of: viewModel.flowState.phase) { _, newPhase in
+                if newPhase != .idle && newPhase != .cancelled {
+                    hasEnteredActivePhase = true
+                }
+                // Don't auto-dismiss on idle if the flow never started (e.g. "Discover More"
+                // re-present opens with idle state — the .task modifier will call startFlow()).
+                // Don't auto-dismiss while an error alert is pending (permission denied sets
+                // error before idle — dismissing now would race with the alert presentation).
+                let shouldDismiss = newPhase == .cancelled
+                    || (newPhase == .idle && hasEnteredActivePhase && viewModel.error == nil)
+                if shouldDismiss {
+                    // Defer to prevent "update multiple times per frame"
+                    DispatchQueue.main.async {
+                        onDismiss?()
+                    }
+                }
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     viewModel.refreshLocationPermissionOnForeground()
@@ -209,34 +269,23 @@ struct DiscoveryCreationFlowView: View {
                     .presentationDragIndicator(.visible)
                 }
             }
-            // Audio generating modal - only presented by overlay to avoid duplicate presentation conflicts
-            // when both embedded tab view and overlay share the same viewModel
+            // Audio generating modal - presented from this single modal instance
             .sheet(
-                isPresented: Binding(
-                    get: { isOverlay && viewModel.showAudioGeneratingModal },
-                    set: { viewModel.showAudioGeneratingModal = $0 }
-                ),
+                isPresented: $viewModel.showAudioGeneratingModal,
                 onDismiss: {
                     // Handle "Create Another" action AFTER sheet is fully dismissed.
-                    // This prevents the camera picker from trying to present on the dismissing modal.
-                    if shouldCreateAnotherAfterModalDismiss {
-                        shouldCreateAnotherAfterModalDismiss = false
-                        if let onDiscoverAnother {
-                            onDiscoverAnother()
-                        } else {
-                            viewModel.unsubscribe()
-                            viewModel.retake()
-                        }
+                    if let type = pendingNewDiscoveryType {
+                        pendingNewDiscoveryType = nil
+                        onRequestNewDiscovery?(type)
                     }
                 }
             ) {
                 AudioGeneratingModalView(
                     onCreateAnother: {
                         // Dismiss modal first, then trigger action in onDismiss.
-                        // This ensures the modal is fully dismissed before starting new camera flow,
-                        // preventing "view not in window hierarchy" errors.
+                        // Re-trigger the same flow type the user was using.
                         viewModel.showAudioGeneratingModal = false
-                        shouldCreateAnotherAfterModalDismiss = true
+                        pendingNewDiscoveryType = viewModel.flowType
                     },
                     onReadThisDiscovery: {
                         viewModel.showAudioGeneratingModal = false
@@ -257,7 +306,7 @@ struct DiscoveryCreationFlowView: View {
             }) {
                 CreditsExhaustedFullScreenView(
                     discoveries: Array((fetchRecentDiscoveries?() ?? []).prefix(3)),
-                    playbackController: nil,
+                    playbackController: audioServices?.playbackController,
                     onGetCredits: {
                         // Don't mark intro complete - user needs to actually purchase credits
                         // Intro mode will exit when balance > 6 (via resolveIntroStateIfNeeded or purchase handler)
@@ -270,6 +319,9 @@ struct DiscoveryCreationFlowView: View {
                         // This ensures user keeps seeing the modal until they purchase credits
                         shouldPresentCreditsAfterExhaustedDismiss = false
                         viewModel.showFreeCreditsExhaustedAtConfirm = false
+                        // Cancel the creation flow and dismiss the modal
+                        viewModel.cancelFlow()
+                        onDismiss?()
                     }
                 )
             }
@@ -293,18 +345,18 @@ struct DiscoveryCreationFlowView: View {
     private var content: some View {
         switch viewModel.flowState {
         case .idle, .cancelled:
-            DiscoveryCaptureStartView(
-                emoji: placeholderEmoji,
-                title: ctaTitle,
-                action: { viewModel.startFlow() }
-            )
+            // Show the branded spinner during transient states (modal opening,
+            // dismiss animation after camera/photo picker cancelled). The
+            // onChange(of: viewModel.flowState.phase) handler will dismiss the
+            // modal — this just ensures a polished appearance while it animates away.
+            DiscoveryCaptureProgressView()
         case .requestingPermissions, .capturingInitial, .capturingRetake, .selectingInitial, .selectingRetake:
             DiscoveryCaptureProgressView()
         case let .error(message):
             DiscoveryCreationErrorView(
                 title: "Something went wrong",
                 message: message.isEmpty ? "Please try again." : message,
-                actionTitle: retryTitle,
+                actionTitle: "Try again",
                 action: { viewModel.retake() }
             )
         case let .confirming(state):
@@ -314,7 +366,10 @@ struct DiscoveryCreationFlowView: View {
                 flowType: viewModel.flowType,
                 onRetake: { viewModel.retake() },
                 onContinue: { viewModel.beginAnalysis() },
-                onCancel: { viewModel.cancelFlow() },
+                onCancel: {
+                    viewModel.cancelFlow()
+                    onDismiss?()
+                },
                 onRequestCredits: makeCreditsHandler,
                 onShowLocationPermissions: { showLocationPermissionsAlert() },
                 onShowMissingUploadLocation: { presentMissingUploadLocationSheet() },
@@ -335,20 +390,11 @@ struct DiscoveryCreationFlowView: View {
             onCancel: {
                 // Transfer to background instead of cancelling - discovery continues processing
                 viewModel.unsubscribe()
+                onDismiss?()
             },
             onNewDiscovery: {
-                // Use MainTabView's callback if available (for overlay) to ensure proper
-                // tab switching and state restoration when user cancels. This matches
-                // the behavior of "Discover Another" from the audio generating modal.
-                if let onDiscoverAnother = onDiscoverAnother {
-                    onDiscoverAnother()
-                } else {
-                    // Fallback for embedded tab views (not the overlay)
-                    viewModel.unsubscribe()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        viewModel.retake()
-                    }
-                }
+                // Re-trigger the same flow type via the parent coordinator
+                onRequestNewDiscovery?(viewModel.flowType)
             },
             makeCreditsViewModel: makeCreditsViewModel
         )
@@ -469,6 +515,20 @@ struct DiscoveryCreationFlowView: View {
 
         guard let fallbackURL = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(fallbackURL, options: [:], completionHandler: nil)
+    }
+}
+
+/// Conditionally applies `.audioServices()` environment modifier only when audioServices is non-nil.
+/// This ensures @Environment(\.audioServices) resolves inside fullScreenCover modals.
+private struct OptionalAudioServicesModifier: ViewModifier {
+    let audioServices: AudioServicesContainer?
+
+    func body(content: Content) -> some View {
+        if let audioServices = audioServices {
+            content.audioServices(audioServices)
+        } else {
+            content
+        }
     }
 }
 

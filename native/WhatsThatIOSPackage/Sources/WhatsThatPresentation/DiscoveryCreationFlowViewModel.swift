@@ -304,18 +304,18 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     /// Restores preserved streaming state after cancelled photo selection
     private func restorePreservedStateIfAvailable() {
         guard let preserved = preservedState else { return }
-        print("[DiscoveryCreationFlowViewModel] restorePreservedStateIfAvailable called")
+        debugLog("restorePreservedStateIfAvailable called")
 
         // Check if the session has already completed while we were away
         if let sessionId = preserved.sessionId {
             let sessionManager = DiscoverySessionManager.shared
-            print("[DiscoveryCreationFlowViewModel] Checking session status for \(sessionId)")
+            debugLog("Checking session status for \(sessionId)")
             if let status = sessionManager.sessionStatuses[sessionId] {
-                print("[DiscoveryCreationFlowViewModel] Session status: \(status)")
+                debugLog("Session status: \(status)")
                 switch status {
                 case .completed(let summary):
                     // Session completed in background - show the completed discovery
-                    print("[DiscoveryCreationFlowViewModel] Session \(sessionId) already completed, showing result")
+                    debugLog("Session \(sessionId) already completed, showing result")
                     analysisState = DiscoveryAnalysisState(
                         statusMessage: "Discovery complete!",
                         streamedText: summary.detailDescription ?? "",
@@ -359,7 +359,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 case .processing, .queued:
                     // Session still processing - re-subscribe with fresh state.
                     // The session manager will replay all accumulated events to rebuild full content.
-                    print("[DiscoveryCreationFlowViewModel] Session \(sessionId) still processing, re-subscribing with fresh state")
+                    debugLog("Session \(sessionId) still processing, re-subscribing with fresh state")
 
                     // Start with fresh analysis state - replayed events will rebuild it
                     analysisState = DiscoveryAnalysisState()
@@ -372,14 +372,14 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     // Re-subscribe - this will replay all accumulated events
                     currentSessionId = sessionId
                     DiscoverySessionManager.shared.subscribe(to: sessionId, subscriber: self)
-                    print("[DiscoveryCreationFlowViewModel] Re-subscribed to session \(sessionId)")
+                    debugLog("Re-subscribed to session \(sessionId)")
 
                     // Check if session completed during the race window between status check and subscribe.
                     // If so, activeSession would be nil and subscribe would have failed silently.
                     // Re-check status and handle completion if needed.
                     if let updatedStatus = sessionManager.sessionStatuses[sessionId],
                        case .completed(let summary) = updatedStatus {
-                        print("[DiscoveryCreationFlowViewModel] Session \(sessionId) completed during re-subscribe race window")
+                        debugLog("Session \(sessionId) completed during re-subscribe race window")
                         analysisState = DiscoveryAnalysisState(
                             statusMessage: "Discovery complete!",
                             streamedText: summary.detailDescription ?? "",
@@ -465,10 +465,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             return
         }
 
-        print("[DiscoveryCreationFlowViewModel] About to call onAnalysisBegan with type: \(configuration.type), callback is \(onAnalysisBegan == nil ? "nil" : "set")")
         onAnalysisBegan?(configuration.type)
         analysisBeganPublisher.send(configuration.type)
-        print("[DiscoveryCreationFlowViewModel] onAnalysisBegan callback completed")
 
         // Save photo to library if enabled (camera captures only)
         if configuration.type == .camera {
@@ -564,7 +562,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             guard granted else {
                 debugLog("Camera permission denied in beginFlow(retake: \(retake))")
                 error = .cameraPermissionDenied
-                flowState = .idle
+                // Don't set flowState to .idle — the error alert needs to present first.
+                // The modal will dismiss after the user handles the alert (via cancelFlow).
                 return
             }
             // Do not (re)start continuous tracking here; app-wide tracking handles it.
@@ -583,7 +582,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                     self.ephemeralFreshInFlight = false
                     if let fresh {
                         self.freshLocationForAnalysis = fresh
-                        print("[Prefetch][EphemeralFresh] lat=\(fresh.latitude), lon=\(fresh.longitude)")
+                        self.debugLog("[EphemeralFresh] lat=\(fresh.latitude), lon=\(fresh.longitude)")
                         // If we are still on confirm, update coordinates without blocking.
                         if let existing = self.confirmationState {
                             let description = Self.makeLocationDescription(from: fresh)
@@ -637,7 +636,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             let granted = await selectionService.requestPermission()
             guard granted else {
                 error = .photoLibraryPermissionDenied
-                flowState = .idle
+                // Don't set flowState to .idle — the error alert needs to present first.
+                // The modal will dismiss after the user handles the alert (via cancelFlow).
                 return
             }
             flowState = retake ? .selectingRetake : .selectingInitial
@@ -833,16 +833,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
         }
         if let initialLocation {
-            switch flowType {
-            case .upload:
-                print("[Confirm] Using EXIF coordinates for upload: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
-            case .camera:
-                if freshLocationForAnalysis != nil {
-                    print("[Confirm] Using ephemeral coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
-                } else {
-                    print("[Confirm] Using last-known coordinates for camera: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
-                }
-            }
+            let source: String = flowType == .upload ? "EXIF" : (freshLocationForAnalysis != nil ? "ephemeral" : "last-known")
+            debugLog("[Confirm] Using \(source) coords: lat=\(initialLocation.latitude), lon=\(initialLocation.longitude)")
         }
         let initialResolving: Bool = (flowType == .camera) && permissionNow && (initialLocation == nil)
         let initialConfirmationState = DiscoveryConfirmationState(
@@ -1015,7 +1007,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
         // User sees their photo, then we show the credits exhausted modal over it.
         if await tracker.shouldShowCreditsExhaustedForIntroLimit() {
             showFreeCreditsExhaustedAtConfirm = true
-            print("[DiscoveryCreationFlowViewModel] Showing credits exhausted modal at confirm stage - intro discovery limit reached")
+            debugLog("Showing credits exhausted modal - intro discovery limit reached")
         }
     }
 
@@ -1079,9 +1071,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             let analysisLocation = self.freshLocationForAnalysis ?? effectiveConfirmation.location
             if let loc = analysisLocation {
                 let source = (self.freshLocationForAnalysis != nil) ? "fresh" : "confirmation"
-                print("[ANALYSIS_LOC] source=\(source) lat=\(loc.latitude) lon=\(loc.longitude)")
-            } else {
-                print("[ANALYSIS_LOC] source=none")
+                debugLog("[ANALYSIS_LOC] source=\(source) lat=\(loc.latitude) lon=\(loc.longitude)")
             }
             let payload = DiscoveryAnalysisPayload(
                 base64Image: try await imageEncoder.makeBase64Payload(from: media, maxDimension: configuration.maxImageDimension),
@@ -1101,14 +1091,14 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
                 subscriber: self
             )
             
-            print("[DiscoveryCreationFlowViewModel] Started session \(currentSessionId?.uuidString ?? "nil") via session manager")
+            debugLog("Started session \(currentSessionId?.uuidString ?? "nil") via session manager")
             
             // Note: We no longer consume the stream here directly.
             // Events will be delivered via handleSessionEvent() from the subscriber protocol.
             // The analysisTask is kept alive to maintain strong reference, but we don't iterate a stream.
             
         } catch {
-            print("[DEBUG] Error building payload: \(type(of: error)) - \(error.localizedDescription)")
+            debugLog("Error building payload: \(type(of: error)) - \(error.localizedDescription)")
             let message = (error as? FlowError)?.errorDescription ?? error.localizedDescription
             if Self.messageIndicatesInsufficientCredits(message) {
                 // Normalize to friendly no-credits error, sync local cache, and return to confirm stage
@@ -1173,7 +1163,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             }
             // Coarse phase: do not republish flowState for each token.
         case let .complete(discoveryId, systemVersion, userVersion, serverCreditBalance):
-            print("[DiscoveryCreationFlowViewModel] Received .complete event for discoveryId: \(discoveryId)")
+            debugLog("Received .complete event for discoveryId: \(discoveryId)")
             analysisState = analysisStateUpdated { state in
                 state.discoveryIdentifier = discoveryId
                 state.isStreaming = false
@@ -1225,59 +1215,41 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     // MARK: - Background Polling
 
     private func startPollingForCompletion() {
-        print("[DEBUG] startPollingForCompletion called")
+        debugLog("startPollingForCompletion")
         pollingTask?.cancel()
         let intervals = pollingIntervals
         pollingTask = Task { [weak self] in
             // Request background execution time to continue polling when app is backgrounded
             var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
             backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "DiscoveryPolling") {
-                print("[DEBUG] Polling background task expired")
                 if backgroundTaskId != .invalid {
                     UIApplication.shared.endBackgroundTask(backgroundTaskId)
                     backgroundTaskId = .invalid
                 }
             }
             defer {
-                print("[DEBUG] Polling task defer block executing")
                 if backgroundTaskId != .invalid {
                     UIApplication.shared.endBackgroundTask(backgroundTaskId)
                 }
             }
 
-            print("[DEBUG] Polling task started, intervals: \(intervals)")
             for (index, interval) in intervals.enumerated() {
-                // Wait for specified interval
-                print("[DEBUG] Poll #\(index + 1): sleeping for \(interval)s")
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-                guard !Task.isCancelled else {
-                    print("[DEBUG] Poll #\(index + 1): task was cancelled")
-                    return
-                }
+                guard !Task.isCancelled else { return }
 
-                print("[DEBUG] Poll #\(index + 1): checking for completed discovery")
                 if let discovery = await self?.checkForCompletedDiscovery() {
-                    print("[DEBUG] Poll #\(index + 1): Found discovery \(discovery.id)")
                     await MainActor.run { self?.handlePollingDiscoveryReady(discovery) }
                     return
-                } else {
-                    
-                    print("[DEBUG] Poll #\(index + 1): No discovery found")
                 }
             }
 
-            print("[DEBUG] All polls exhausted. Calling handlePollingTimeout")
             await MainActor.run { self?.handlePollingTimeout() }
         }
     }
 
     private func checkForCompletedDiscovery() async -> DiscoverySummary? {
         #if DEBUG
-        // Simulate polling failure for testing timeout flow
-        if Self.debugPollingAlwaysFails {
-            print("[DEBUG] debugPollingAlwaysFails=true, returning nil")
-            return nil
-        }
+        if Self.debugPollingAlwaysFails { return nil }
         #endif
         
         guard let startTime = analysisStartTime else { return nil }
@@ -1325,8 +1297,6 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     @MainActor
     private func handlePollingTimeout() {
-        print("[DEBUG] handlePollingTimeout: showing polling failure alert")
-        
         // Update analysis state to show we've stopped polling
         analysisState = analysisStateUpdated { state in
             state.isPolling = false
@@ -1346,13 +1316,10 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
 
     /// Unified success handler for credits and TTS. Called from both real-time streaming and polling recovery.
     private func handleSuccessfulCreation(discoveryId: Int64, serverCreditBalance: Int? = nil) {
-        print("[DiscoveryCreationFlowViewModel] handleSuccessfulCreation called for discoveryId: \(discoveryId)")
+        debugLog("handleSuccessfulCreation: discoveryId=\(discoveryId)")
         // Sync credits: use server-provided balance if available, otherwise adjust optimistically.
         Task { [weak self] in
-            guard let self else {
-                print("[DiscoveryCreationFlowViewModel] handleSuccessfulCreation: self was nil, exiting early")
-                return
-            }
+            guard let self else { return }
             let updated: Int?
             if let serverBalance = serverCreditBalance {
                 // Use the authoritative server balance
@@ -1370,16 +1337,12 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             // Note: Credits exhausted modal is now only shown at confirm stage based on intro discovery limit
             let tracker = FreeCreditsAlertTracker.shared
             let shouldShowAudioModal = await tracker.shouldShowAudioGeneratingModal()
-            print("[DiscoveryCreationFlowViewModel] shouldShowAudioModal: \(shouldShowAudioModal)")
             if shouldShowAudioModal {
                 await tracker.markAudioGeneratingModalShown()
                 await MainActor.run {
                     self.showAudioGeneratingModal = true
-                    print("[DiscoveryCreationFlowViewModel] showAudioGeneratingModal set to true")
                 }
-                print("[DiscoveryCreationFlowViewModel] Showing audio generating modal")
-            } else {
-                print("[DiscoveryCreationFlowViewModel] NOT showing audio generating modal - already seen or user not bound")
+                self.debugLog("Showing audio generating modal")
             }
         }
 

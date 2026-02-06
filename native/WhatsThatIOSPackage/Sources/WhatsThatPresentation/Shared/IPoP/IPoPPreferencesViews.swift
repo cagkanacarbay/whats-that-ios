@@ -42,7 +42,8 @@ struct IPoPPreferencesListView: View {
 
     var body: some View {
         List {
-            ForEach(Array(viewModel.orderedDraft.enumerated()), id: \.element.rawValue) { index, dimension in
+            ForEach(viewModel.orderedDraft, id: \.self) { dimension in
+                let index = viewModel.orderedDraft.firstIndex(of: dimension) ?? 0
                 HStack(alignment: .top, spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)

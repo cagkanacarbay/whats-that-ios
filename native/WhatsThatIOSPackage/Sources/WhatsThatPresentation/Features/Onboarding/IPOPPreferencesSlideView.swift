@@ -48,6 +48,8 @@ struct IPOPPreferencesSlideView: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.xLarge)
             }
+            .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
+            .frame(maxWidth: .infinity)
             .background(palette.background)
 
             // Back button

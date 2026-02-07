@@ -113,6 +113,7 @@ struct PostOnboardingCarousel: View {
                 )
             }
             .padding(.horizontal, BrandSpacing.large)
+            .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
 
             Spacer()
         }

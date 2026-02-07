@@ -28,6 +28,7 @@ struct PreOnboardingBottomSheetView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
                 .padding(.horizontal, BrandSpacing.large)
                 .padding(.top, BrandSpacing.large)
                 .padding(.bottom, max(bottomInset + BrandSpacing.small, BrandSpacing.large))

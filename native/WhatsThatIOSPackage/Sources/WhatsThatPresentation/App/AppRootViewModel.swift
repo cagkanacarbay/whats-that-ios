@@ -30,6 +30,11 @@ public final class AppRootViewModel: ObservableObject {
     private var latestSession: AuthSession = .signedOut
     private var observationTask: Task<Void, Never>?
 
+    /// Monotonically increasing counter to prevent stale async Tasks from overriding newer flow state.
+    /// Each call to `updateFlow` increments this. The async Task captures its generation and
+    /// only updates `flowState` if no newer `updateFlow` call has occurred since.
+    private var flowUpdateGeneration: UInt64 = 0
+
     /// Tracks if user started signup but is waiting for email verification.
     /// When they verify, we'll record their terms acceptance.
     private var pendingNewSignupVerification: Bool = false
@@ -295,10 +300,15 @@ public final class AppRootViewModel: ObservableObject {
         print("[UpdateFlow] Called with isNewSignup=\(isNewSignup), isOAuthSignIn=\(isOAuthSignIn), session=\(session)")
         latestSession = session
 
+        // Increment generation so any in-flight async Task from a previous updateFlow call
+        // will detect it's stale and not override this newer state.
+        flowUpdateGeneration &+= 1
+        let myGeneration = flowUpdateGeneration
+
         // For signed-in users, we need to bind stores BEFORE resolving flow state
         // because flow resolution depends on user-specific flags
         if let user = session.user {
-            print("[UpdateFlow] User authenticated: \(user.id)")
+            print("[UpdateFlow] User authenticated: \(user.id) (generation=\(myGeneration))")
             Task {
                 let userId = user.id.uuidString
 
@@ -327,7 +337,14 @@ public final class AppRootViewModel: ObservableObject {
 
                 // 6. Resolve flow state with correct user flags
                 // If returning onboarding user, override to show post-onboarding again
+                // Guard: only update if no newer updateFlow call has occurred since we started.
+                // This prevents stale async completions from overriding a more recent .signedOut
+                // transition (e.g., when the auth observer fires during our async work).
                 await MainActor.run {
+                    guard myGeneration == self.flowUpdateGeneration else {
+                        print("[UpdateFlow] Skipping stale flow update (generation=\(myGeneration), current=\(self.flowUpdateGeneration))")
+                        return
+                    }
                     self.currentFlags = flags
                     self.isReturningOnboardingUser = isReturningOnboardingUser
 
@@ -339,6 +356,9 @@ public final class AppRootViewModel: ObservableObject {
                         self.flowState = self.flowResolver.resolve(session: session, flags: flags)
                     }
                 }
+
+                // Also skip post-flow-state work if generation is stale
+                guard myGeneration == self.flowUpdateGeneration else { return }
 
                 // 7. For new signups, record terms acceptance BEFORE checking compliance
                 // This ensures the user doesn't see a terms modal immediately after signup

@@ -24,6 +24,7 @@ struct PreOnboardingDiscoveriesContainer: View {
 
     private let gridSpacing: CGFloat = 1
     private let gridHorizontalPadding: CGFloat = 1
+    private var gridColumnCount: Int { UIDevice.isIPad ? 3 : 2 }
 
     /// Whether the mini player should be considered visible for layout purposes
     private var isMiniPlayerVisibleForLayout: Bool {
@@ -253,7 +254,9 @@ struct PreOnboardingDiscoveriesContainer: View {
 
     @ViewBuilder
     private func gridContent(contentWidth: CGFloat) -> some View {
-        let cardWidth = max((contentWidth - gridSpacing) / 2, 120)
+        let columns = CGFloat(gridColumnCount)
+        let totalSpacing = gridSpacing * (columns - 1)
+        let cardWidth = max((contentWidth - totalSpacing) / columns, 120)
         let cardHeight = cardWidth * 1.2
 
         switch storeObserver.loadState {
@@ -271,11 +274,10 @@ struct PreOnboardingDiscoveriesContainer: View {
     }
 
     private func skeletonGrid(contentWidth: CGFloat, cardWidth: CGFloat, cardHeight: CGFloat) -> some View {
-        let gridColumns = [
-            GridItem(.fixed(cardWidth), spacing: gridSpacing, alignment: .top),
+        let gridColumns = (0..<gridColumnCount).map { _ in
             GridItem(.fixed(cardWidth), spacing: gridSpacing, alignment: .top)
-        ]
-        let placeholderItems = Array(0..<6)
+        }
+        let placeholderItems = Array(0..<(gridColumnCount * 2))
 
         return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: gridSpacing) {
             ForEach(placeholderItems, id: \.self) { _ in
@@ -286,10 +288,9 @@ struct PreOnboardingDiscoveriesContainer: View {
     }
 
     private func discoveryGrid(contentWidth: CGFloat, cardWidth: CGFloat, cardHeight: CGFloat) -> some View {
-        let gridColumns = [
-            GridItem(.fixed(cardWidth), spacing: gridSpacing, alignment: .top),
+        let gridColumns = (0..<gridColumnCount).map { _ in
             GridItem(.fixed(cardWidth), spacing: gridSpacing, alignment: .top)
-        ]
+        }
 
         return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: gridSpacing) {
             ForEach(storeObserver.discoveries) { discovery in
@@ -433,9 +434,11 @@ struct PreOnboardingDiscoveriesContainer: View {
     private func resolveCloseFrame(for discoveryId: Int64) -> CGRect? {
         guard let index = storeObserver.discoveries.firstIndex(where: { $0.id == discoveryId }) else { return nil }
 
+        let columns = gridColumnCount
         let screen = UIScreen.main.bounds
         let availableWidth = max(screen.width - (gridHorizontalPadding * 2), 0)
-        let cardWidth = max((availableWidth - gridSpacing) / 2, 120)
+        let totalSpacing = gridSpacing * CGFloat(columns - 1)
+        let cardWidth = max((availableWidth - totalSpacing) / CGFloat(columns), 120)
         let cardHeight = cardWidth * 1.2
         let rowHeight = cardHeight + gridSpacing
 
@@ -445,8 +448,8 @@ struct PreOnboardingDiscoveriesContainer: View {
         let visibleRowsCount = Int(ceil(viewportHeight / rowHeight)) + 1
         let lastVisibleRowIndex = firstVisibleRowIndex + visibleRowsCount
 
-        let rowIndex = index / 2
-        let col = CGFloat(index % 2)
+        let rowIndex = index / columns
+        let col = CGFloat(index % columns)
         let xPos = gridHorizontalPadding + col * (cardWidth + gridSpacing)
 
         if rowIndex < firstVisibleRowIndex {
@@ -461,7 +464,9 @@ struct PreOnboardingDiscoveriesContainer: View {
     }
 
     private func headerOpacityFollowingFirstRow(availableWidth: CGFloat) -> Double {
-        let cardWidth = max((availableWidth - gridSpacing) / 2, 120)
+        let columns = CGFloat(gridColumnCount)
+        let totalSpacing = gridSpacing * (columns - 1)
+        let cardWidth = max((availableWidth - totalSpacing) / columns, 120)
         let cardHeight = cardWidth * 1.2
         let start = cardHeight * 0.5
         let end = cardHeight

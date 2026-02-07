@@ -11,7 +11,7 @@ struct InProgressSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("In Progress")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.adaptiveSystem(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .padding(.leading, 4)

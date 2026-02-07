@@ -96,6 +96,7 @@ public final actor SupabaseAuthService: AuthService {
         return AsyncStream { continuation in
             let task = Task {
                 for await change in client.auth.authStateChanges {
+                    supabaseAuthLogger.debug("Auth state change: event=\(String(describing: change.event)), hasSession=\(change.session != nil)")
                     continuation.yield(change.session.map { .authenticated($0.makeAuthenticatedUser()) } ?? .signedOut)
                 }
             }

@@ -87,6 +87,7 @@ struct CreditsExhaustedFullScreenView: View {
                         .padding(.horizontal, BrandSpacing.large)
                         .padding(.bottom, BrandSpacing.xLarge)
                 }
+                .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
             }
 
             // CTA section - fixed at bottom
@@ -106,6 +107,7 @@ struct CreditsExhaustedFullScreenView: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.bottom, BrandSpacing.xLarge)
             .padding(.top, BrandSpacing.medium)
+            .frame(maxWidth: UIDevice.isIPad ? 500 : .infinity)
             .background(
                 palette.background
                     .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: -4)

@@ -59,7 +59,7 @@ struct PreOnboardingMiniPlayer: View {
                     artworkWithProgressRing
                 }
                 .frame(height: artworkDiameter)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(maxWidth: UIDevice.isIPad ? IPadLayout.miniPlayerMaxWidth : .infinity, alignment: .center)
                 .padding(.horizontal, BrandSpacing.medium)
                 // Swipe-to-dismiss support
                 .offset(y: dragOffset)

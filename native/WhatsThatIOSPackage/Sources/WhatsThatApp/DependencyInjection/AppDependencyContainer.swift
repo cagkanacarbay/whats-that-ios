@@ -402,11 +402,11 @@ public extension AppDependencyContainer {
             return
         }
 
-        // Fetch discoveries to check count (we need >= 3 to unlock)
-        // Fetching 3 is enough - if we get 3, user has at least 3
+        // Fetch discoveries to check count (we need > discoveryLimit to detect returning users)
+        // Fetch limit+1 so that users with more than the limit return a count that exceeds it
         let discoveryCount: Int
         do {
-            let discoveries = try await discoveryRepository.fetchDiscoveries(limit: 3, before: nil)
+            let discoveries = try await discoveryRepository.fetchDiscoveries(limit: IntroModeConstants.discoveryLimit + 1, before: nil)
             discoveryCount = discoveries.count
         } catch {
             print("[IntroState] Failed to fetch discoveries, skipping sanity check: \(error)")

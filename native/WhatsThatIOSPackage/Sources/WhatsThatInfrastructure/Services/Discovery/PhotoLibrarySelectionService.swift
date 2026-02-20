@@ -1,4 +1,5 @@
 #if canImport(UIKit) && canImport(PhotosUI)
+import ImageIO
 import Photos
 @preconcurrency import PhotosUI
 import UIKit
@@ -110,6 +111,11 @@ public final class PhotoLibrarySelectionService: NSObject, DiscoverySelectionSer
                     }
                 }
 
+                // Fallback: extract GPS from EXIF metadata in raw image data
+                if location == nil {
+                    location = Self.extractLocationFromImageData(data)
+                }
+
                 if let image = UIImage(data: data) {
                     let media = DiscoveryCapturedMedia(
                         data: data,
@@ -162,6 +168,30 @@ private extension PhotoLibrarySelectionService {
         guard let continuation else { return }
         continuation.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
         self.continuation = nil
+    }
+
+    static func extractLocationFromImageData(_ data: Data) -> DiscoveryLocation? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              let latitude = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let longitude = gps[kCGImagePropertyGPSLongitude] as? Double else {
+            return nil
+        }
+
+        let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String
+        let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+        let signedLat = (latRef == "S") ? -latitude : latitude
+        let signedLon = (lonRef == "W") ? -longitude : longitude
+
+        return DiscoveryLocation(
+            latitude: signedLat,
+            longitude: signedLon,
+            country: nil,
+            locality: nil,
+            streetName: nil,
+            closestPlace: nil
+        )
     }
 }
 #endif

@@ -31,10 +31,10 @@ struct SignUpForm: View {
     @State private var password: String = ""
     @State private var confirmPassword: String = ""
     @State private var agreedToTerms: Bool = false
-    @State private var agreedToSocialTerms: Bool = false
     @State private var isLoading: Bool = false
     @State private var didAttemptSubmit: Bool = false
-    @State private var didAttemptSocialAuth: Bool = false
+    @State private var didAttemptWithoutTerms: Bool = false
+    @State private var termsShakeCount: CGFloat = 0
     // Focus handling to show validation only after leaving a field
     @FocusState private var emailFocused: Bool
     @FocusState private var passwordFocused: Bool
@@ -93,21 +93,27 @@ struct SignUpForm: View {
                 Toggle(isOn: $agreedToTerms) {
                     Text(termsAgreementAttributedString)
                         .font(.adaptiveSystem(size: 14, weight: .medium))
-                        .foregroundStyle(bodyColor)
-                        .tint(primaryColor)
+                        .foregroundStyle(shouldShowTermsError ? Color.red.opacity(0.85) : bodyColor)
+                        .tint(shouldShowTermsError ? Color.red.opacity(0.85) : primaryColor)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .toggleStyle(SwitchToggleStyle(tint: primaryColor))
-                if shouldShowTermsError {
-                    Text("You must agree before continuing.")
-                        .font(.adaptiveSystem(size: 12, weight: .medium))
-                        .foregroundStyle(Color.red.opacity(0.85))
-                        .animation(nil, value: shouldShowTermsError)
+                .keyframeAnimator(initialValue: CGFloat.zero, trigger: termsShakeCount) { content, xOffset in
+                    content.offset(x: xOffset)
+                } keyframes: { _ in
+                    SpringKeyframe(8, duration: 0.08)
+                    SpringKeyframe(-6, duration: 0.08)
+                    SpringKeyframe(4, duration: 0.08)
+                    SpringKeyframe(-2, duration: 0.08)
+                    SpringKeyframe(0, duration: 0.08)
+                }
+                .sensoryFeedback(.error, trigger: termsShakeCount)
+                .onChange(of: agreedToTerms) { _, agreed in
+                    if agreed { didAttemptWithoutTerms = false }
                 }
             }
 
-            // Compact vertical spacing around CTA + social auth (half-size gaps)
             VStack(spacing: BrandSpacing.medium) {
                 BrandPrimaryButton(
                     title: isLoading || isPerformingAction ? "Signing up..." : "Sign up",
@@ -118,37 +124,13 @@ struct SignUpForm: View {
                 .disabled(isPerformingAction || isLoading || !isFormValid)
                 .padding(.top, -BrandSpacing.small)
 
-                DividerWithLabel(label: "or")
-
-                VStack(spacing: BrandSpacing.small) {
-                    Toggle(isOn: $agreedToSocialTerms) {
-                        Text(socialAuthAgreementAttributedString)
-                            .font(.adaptiveSystem(size: 14, weight: .medium))
-                            .foregroundStyle(bodyColor)
-                            .tint(primaryColor)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .toggleStyle(SwitchToggleStyle(tint: primaryColor))
-
-                    if shouldShowSocialTermsError {
-                        Text("You must agree before continuing.")
-                            .font(.adaptiveSystem(size: 12, weight: .medium))
-                            .foregroundStyle(Color.red.opacity(0.85))
-                            .animation(nil, value: shouldShowSocialTermsError)
-                    }
-
-                    BrandSocialButton(kind: .google, isDisabled: isPerformingAction || !agreedToSocialTerms) {
-                        handleSocialAuth(using: onGoogle)
-                    }
-                    BrandSocialButton(kind: .apple, isDisabled: isPerformingAction || !agreedToSocialTerms) {
-                        handleSocialAuth(using: onApple)
-                    }
+                BrandSocialButton(kind: .google, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onGoogle)
                 }
-                // Set divider-to-text gap to half of the button-to-divider spacing (medium → half = small)
-                .padding(.top, -BrandSpacing.small)
+                BrandSocialButton(kind: .apple, isDisabled: isPerformingAction) {
+                    handleSocialAuth(using: onApple)
+                }
 
-                // Slightly smaller gap to the account switch row
                 HStack(spacing: 4) {
                     Text("Already have an account?")
                         .font(.adaptiveBody())
@@ -201,11 +183,7 @@ struct SignUpForm: View {
     }
 
     private var shouldShowTermsError: Bool {
-        didAttemptSubmit && !agreedToTerms
-    }
-
-    private var shouldShowSocialTermsError: Bool {
-        didAttemptSocialAuth && !agreedToSocialTerms
+        (didAttemptSubmit || didAttemptWithoutTerms) && !agreedToTerms
     }
 
     private func submit() {
@@ -213,6 +191,7 @@ struct SignUpForm: View {
 
         // Perform full validation only on submit; avoid doing it per‑keystroke.
         guard EmailValidator.isValid(email), PasswordValidator.validate(password).isStrong, confirmPassword == password, agreedToTerms else {
+            if !agreedToTerms { withAnimation(.default) { termsShakeCount += 1 } }
             return
         }
         isLoading = true
@@ -225,11 +204,12 @@ struct SignUpForm: View {
     private func handleSocialAuth(
         using handler: (@escaping (Result<Void, AuthError>) -> Void) -> Void
     ) {
-        didAttemptSocialAuth = true
-
-        guard agreedToSocialTerms else {
+        guard agreedToTerms else {
+            didAttemptWithoutTerms = true
+            withAnimation(.default) { termsShakeCount += 1 }
             return
         }
+        didAttemptWithoutTerms = false
 
         isLoading = true
         handler { result in
@@ -278,23 +258,6 @@ struct SignUpForm: View {
         return result
     }
 
-    private var socialAuthAgreementAttributedString: AttributedString {
-        var result = AttributedString("I agree to the ")
-
-        var terms = AttributedString("Terms and Conditions")
-        terms.link = AppConfiguration.termsAndConditionsURL
-        terms.underlineStyle = .single
-        result.append(terms)
-
-        result.append(AttributedString(" and "))
-
-        var privacy = AttributedString("Privacy Policy")
-        privacy.link = AppConfiguration.privacyPolicyURL
-        privacy.underlineStyle = .single
-        result.append(privacy)
-
-        return result
-    }
 }
 
 enum SignUpField {

@@ -31,6 +31,7 @@ struct DiscoveryAudioControls: View {
     
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.postPurchaseConfig) private var postPurchaseConfig
+    @Environment(\.creditsViewModelFactory) private var creditsViewModelFactoryFromEnv
 
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     private let queueStore: AudioGuidesQueueStore
@@ -275,7 +276,7 @@ struct DiscoveryAudioControls: View {
     // MARK: - Credits Sheet Helpers
     
     private func presentCreditsSheet() {
-        guard let factory = makeCreditsViewModel else { return }
+        guard let factory = makeCreditsViewModel ?? creditsViewModelFactoryFromEnv else { return }
         let creditsViewModel = factory()
         presentedCreditsViewModel = creditsViewModel
         creditsSheetDetent = .fraction(0.8)
@@ -381,9 +382,14 @@ struct DiscoveryAudioControls: View {
         case .ready:
             voiceoverController.togglePlayback(for: discovery)
         case .empty:
-            // Show confirmation for new generation
-            withAnimation {
-                showGenerateConfirmation = true
+            // Refresh credit balance before showing confirmation
+            Task {
+                if let store = creditBalanceStore {
+                    creditBalance = await store.getCached()
+                }
+                withAnimation {
+                    showGenerateConfirmation = true
+                }
             }
         case .failed:
             // Retry immediately without confirmation

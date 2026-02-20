@@ -172,3 +172,22 @@ public extension View {
         environment(\.audioServices, container)
     }
 }
+
+// MARK: - Credits ViewModel Factory Environment Key
+
+private struct CreditsViewModelFactoryKey: EnvironmentKey {
+    static let defaultValue: (() -> CreditsViewModel)? = nil
+}
+
+public extension EnvironmentValues {
+    var creditsViewModelFactory: (() -> CreditsViewModel)? {
+        get { self[CreditsViewModelFactoryKey.self] }
+        set { self[CreditsViewModelFactoryKey.self] = newValue }
+    }
+}
+
+public extension View {
+    func creditsViewModelFactory(_ factory: (() -> CreditsViewModel)?) -> some View {
+        environment(\.creditsViewModelFactory, factory)
+    }
+}

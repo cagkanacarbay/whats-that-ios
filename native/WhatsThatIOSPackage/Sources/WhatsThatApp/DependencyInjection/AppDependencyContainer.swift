@@ -387,6 +387,10 @@ public extension AppDependencyContainer {
     /// Resolves intro state for returning users on fresh install/new device.
     /// Fetches balance and discovery count from server, then runs sanity check.
     /// Should be called once after user binding during app startup.
+    func refreshCreditBalance() async {
+        _ = try? await creditBalanceStore.refresh(force: true)
+    }
+
     func resolveIntroStateIfNeeded() async {
         // Only run if intro is not already complete locally
         guard await !FreeCreditsAlertTracker.shared.hasShownCreditsExhaustedAlert else {

@@ -164,6 +164,7 @@ struct MainTabView: View {
         }
         .tint(colorScheme == .dark ? BrandColors.logo : BrandColors.Light.tabSelected)
         .audioServices(audioServices)
+        .creditsViewModelFactory(coordinator.makeCreditsViewModel)
         // Creation flow presented as a fullScreenCover modal (driven by coordinator)
         .fullScreenCover(item: $coordinator.activeFlowType, onDismiss: {
             coordinator.handleModalDismissCompleted()

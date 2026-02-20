@@ -26,6 +26,7 @@ public final class AppRootViewModel: ObservableObject {
     private let complianceUseCase: ComplianceUseCase
     private let userAppVersion: String
     private let resolveIntroState: () async -> Void
+    private let refreshCreditBalance: () async -> Void
 
     private var currentFlags = OnboardingFlags()
     private var latestSession: AuthSession = .signedOut
@@ -52,7 +53,8 @@ public final class AppRootViewModel: ObservableObject {
         voiceoverPreferencesStore: VoiceoverPreferencesStore,
         complianceUseCase: ComplianceUseCase,
         userAppVersion: String = Bundle.main.appVersion,
-        resolveIntroState: @escaping () async -> Void = {}
+        resolveIntroState: @escaping () async -> Void = {},
+        refreshCreditBalance: @escaping () async -> Void = {}
     ) {
         self.authUseCase = authUseCase
         self.onboardingUseCase = onboardingUseCase
@@ -62,6 +64,7 @@ public final class AppRootViewModel: ObservableObject {
         self.complianceUseCase = complianceUseCase
         self.userAppVersion = userAppVersion
         self.resolveIntroState = resolveIntroState
+        self.refreshCreditBalance = refreshCreditBalance
 
         Task(priority: .utility) {
             await DiscoveryAssetCache.shared.purgeExpiredEntries()
@@ -334,6 +337,9 @@ public final class AppRootViewModel: ObservableObject {
 
                 // 3. Resolve intro state for returning users (reinstall/new device)
                 await self.resolveIntroState()
+
+                // 3b. Fetch credit balance for the signed-in user
+                await self.refreshCreditBalance()
 
                 // 4. Now load flags with correct user binding
                 let flags = await onboardingUseCase.flags()

@@ -532,7 +532,7 @@ private struct PreOnboardingHeaderView: View {
                         .font(.adaptiveSystem(size: 28, weight: .bold))
                         .foregroundStyle(palette.textPrimary)
 
-                    Text("The world is full of stories")
+                    Text("This could be yours in minutes")
                         .font(.adaptiveSystem(size: 14, weight: .medium))
                         .foregroundStyle(palette.textSecondary)
                 }

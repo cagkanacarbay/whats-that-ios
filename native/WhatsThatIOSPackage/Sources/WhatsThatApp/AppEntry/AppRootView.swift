@@ -148,6 +148,9 @@ public struct AppRootView: View {
             resolveIntroState: {
                 await container.resolveIntroStateIfNeeded()
             },
+            refreshCreditBalance: {
+                await container.refreshCreditBalance()
+            },
             sampleDiscoveryService: sampleDiscoveryService,
             makeOnboardingVoiceoverController: makeOnboardingVoiceoverController
         )

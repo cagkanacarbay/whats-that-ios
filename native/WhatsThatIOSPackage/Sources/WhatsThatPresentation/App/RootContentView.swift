@@ -44,6 +44,7 @@ public struct RootContentView: View {
     private let voiceoverPreferencesStore: VoiceoverPreferencesStore
     private let complianceUseCase: ComplianceUseCase
     private let resolveIntroState: () async -> Void
+    private let refreshCreditBalance: () async -> Void
     private let sampleDiscoveryService: SampleDiscoveryService?
     private let makeOnboardingVoiceoverController: (() -> VoiceoverPlaybackController)?
     #if DEBUG
@@ -78,6 +79,7 @@ public struct RootContentView: View {
         complianceUseCase: ComplianceUseCase,
         setCreditBalance: @escaping (Int) async -> Void = { _ in },
         resolveIntroState: @escaping () async -> Void = {},
+        refreshCreditBalance: @escaping () async -> Void = {},
         sampleDiscoveryService: SampleDiscoveryService? = nil,
         makeOnboardingVoiceoverController: (() -> VoiceoverPlaybackController)? = nil
     ) {
@@ -138,6 +140,7 @@ public struct RootContentView: View {
         self.voiceoverPreferencesStore = voiceoverPreferencesStore
         self.complianceUseCase = complianceUseCase
         self.resolveIntroState = resolveIntroState
+        self.refreshCreditBalance = refreshCreditBalance
         self.sampleDiscoveryService = sampleDiscoveryService
         self.makeOnboardingVoiceoverController = makeOnboardingVoiceoverController
 
@@ -158,7 +161,8 @@ public struct RootContentView: View {
                 clearAllUserData: composedClearAll,
                 voiceoverPreferencesStore: voiceoverPreferencesStore,
                 complianceUseCase: complianceUseCase,
-                resolveIntroState: resolveIntroState
+                resolveIntroState: resolveIntroState,
+                refreshCreditBalance: refreshCreditBalance
             )
         )
     }

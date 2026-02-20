@@ -423,15 +423,22 @@ public extension VoiceoverPlaybackController {
 
             if normalized.status == .ready, let _ = normalized.audioURL {
                 clearPending(discovery.id)
-                // Optimistic decrement was correct - no need to update credit balance
+                // Update credit balance with server-returned value if available
+                if let serverBalance = normalized.creditBalance {
+                    await self.creditBalanceStore?.set(serverBalance)
+                }
                 // Notify that generation completed (for toast) - don't affect playback state
                 await MainActor.run {
                     self.onGenerationComplete?(discovery)
                 }
             } else if normalized.status == .failed {
                 clearPending(discovery.id)
-                // Generation failed - refresh credit balance from server (handles refunds)
-                _ = try? await self.creditBalanceStore?.refresh(force: true)
+                // Update credit balance - prefer server-returned value, fall back to refresh
+                if let serverBalance = normalized.creditBalance {
+                    await self.creditBalanceStore?.set(serverBalance)
+                } else {
+                    _ = try? await self.creditBalanceStore?.refresh(force: true)
+                }
                 // Only set error message, don't affect playback state
                 await MainActor.run {
                     self.errorMessage = normalized.errorReason

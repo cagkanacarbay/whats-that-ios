@@ -171,6 +171,7 @@ public struct RootContentView: View {
             mainContent
             passwordResetOverlay
             complianceOverlay
+            emailVerificationOverlay
         }
         .modifier(RootContentPaddingModifier(flowState: viewModel.flowState))
         .animation(.easeInOut, value: viewModel.flowState)
@@ -328,6 +329,15 @@ public struct RootContentView: View {
         }
         .onChange(of: viewModel.flowState) { previous, current in
             guard previous != current else { return }
+            // Clear verification overlay instantly (no animation) so it doesn't
+            // linger during the flowState transition and block touches.
+            if viewModel.isVerifyingEmail, case .authentication = previous {
+                var transaction = Transaction()
+                transaction.animation = nil
+                withTransaction(transaction) {
+                    viewModel.clearVerifyingEmail()
+                }
+            }
             if case .authentication = current {
                 switch previous {
                 case .main, .postOnboarding:
@@ -662,6 +672,24 @@ public struct RootContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var emailVerificationOverlay: some View {
+        if viewModel.isVerifyingEmail {
+            ZStack {
+                (colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 20) {
+                    EmailVerificationSpinner()
+                    Text("Signing you in...")
+                        .font(.body)
+                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                }
+            }
+            .zIndex(3)
+        }
+    }
+
     private func handlePasswordResetURL(_ url: URL) {
         guard let targetURL = extractPasswordResetURL(from: url) else { return }
         let tokenIdentifier = passwordResetTokenIdentifier(for: targetURL)
@@ -775,5 +803,39 @@ public struct RootContentView: View {
                 }
             }
         }
+    }
+}
+
+private struct EmailVerificationSpinner: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            BrandColors.spinner.opacity(0.1),
+                            BrandColors.spinner
+                        ]),
+                        center: .center,
+                        startAngle: .degrees(0),
+                        endAngle: .degrees(360)
+                    ),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .frame(width: 80, height: 80)
+                .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                .animation(
+                    .linear(duration: 1.2).repeatForever(autoreverses: false),
+                    value: isAnimating
+                )
+            Image("LaunchLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 48, height: 48)
+        }
+        .onAppear { isAnimating = true }
     }
 }

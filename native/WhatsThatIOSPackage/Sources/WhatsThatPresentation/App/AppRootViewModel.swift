@@ -6,6 +6,7 @@ import WhatsThatShared
 public final class AppRootViewModel: ObservableObject {
     @Published public private(set) var flowState: AppFlowState = .loading
     @Published public private(set) var isPerformingAuthAction = false
+    @Published public private(set) var isVerifyingEmail = false
     @Published public private(set) var passwordResetUser: AuthenticatedUser?
 
     // Compliance state
@@ -256,14 +257,26 @@ public final class AppRootViewModel: ObservableObject {
     }
 
     public func verifyEmail(from url: URL) async -> AuthError? {
+        isVerifyingEmail = true
         do {
             try await authUseCase.verifyEmailFromLink(url: url)
+            // Don't clear isVerifyingEmail here — keep the overlay visible
+            // until the auth session update transitions the flow state.
+            // RootContentView clears it via clearVerifyingEmail() on flow state change.
             return nil
         } catch let error as AuthError {
+            isVerifyingEmail = false
             return error
         } catch {
+            isVerifyingEmail = false
             return .unknown
         }
+    }
+
+    /// Called by RootContentView when the flow state transitions away from authentication,
+    /// ensuring the verification overlay stays visible until the actual screen transition.
+    public func clearVerifyingEmail() {
+        isVerifyingEmail = false
     }
 
     // MARK: - Private

@@ -382,8 +382,45 @@ public final actor SupabaseAuthService: AuthService {
     }
 
     public func verifyEmailFromLink(url: URL) async throws {
+        // Progressive retry with increasing delays: immediate → 1s → 2s → 4s → 8s.
+        // The token_hash is not consumed on failure, so retrying is safe and idempotent.
+        // This handles transient failures (e.g. network hiccups, client not fully ready after backgrounding).
+        let retryDelaysNanoseconds: [UInt64] = [
+            1_000_000_000,  // 1s
+            2_000_000_000,  // 2s
+            4_000_000_000,  // 4s
+            8_000_000_000,  // 8s
+        ]
+
+        // Attempt 1: immediate
+        do {
+            try await performEmailVerification(from: url)
+            return
+        } catch {
+            supabaseAuthLogger.info("Email verification attempt 1 failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        // Attempts 2–5: progressive delays
+        for (index, delay) in retryDelaysNanoseconds.enumerated() {
+            let attemptNumber = index + 2
+            supabaseAuthLogger.info("Email verification retrying (attempt \(attemptNumber)) after \(delay / 1_000_000_000)s delay...")
+            try await Task.sleep(nanoseconds: delay)
+            do {
+                try await performEmailVerification(from: url)
+                supabaseAuthLogger.info("Email verification succeeded on attempt \(attemptNumber)")
+                return
+            } catch {
+                supabaseAuthLogger.info("Email verification attempt \(attemptNumber) failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        supabaseAuthLogger.error("Email verification failed after all retry attempts")
+        throw DomainAuthError.emailVerificationFailed
+    }
+
+    private func performEmailVerification(from url: URL) async throws {
         let params = parseSupabaseParameters(from: url)
-        
+
         // Handle token_hash verification (most common for email confirmation)
         if let tokenHash = params["token_hash"],
            !tokenHash.isEmpty,
@@ -406,10 +443,10 @@ public final actor SupabaseAuthService: AuthService {
                 return
             } catch {
                 supabaseAuthLogger.error("Email verification failed: \(error.localizedDescription, privacy: .public)")
-                throw DomainAuthError.unknown
+                throw DomainAuthError.emailVerificationFailed
             }
         }
-        
+
         // Handle PKCE code exchange
         if let code = params["code"], !code.isEmpty {
             do {
@@ -418,10 +455,10 @@ public final actor SupabaseAuthService: AuthService {
                 return
             } catch {
                 supabaseAuthLogger.error("Email verification code exchange failed: \(error.localizedDescription, privacy: .public)")
-                throw DomainAuthError.unknown
+                throw DomainAuthError.emailVerificationFailed
             }
         }
-        
+
         // Handle access_token + refresh_token (alternative format)
         if let accessToken = params["access_token"],
            let refreshToken = params["refresh_token"],
@@ -433,12 +470,12 @@ public final actor SupabaseAuthService: AuthService {
                 return
             } catch {
                 supabaseAuthLogger.error("Email verification session setup failed: \(error.localizedDescription, privacy: .public)")
-                throw DomainAuthError.unknown
+                throw DomainAuthError.emailVerificationFailed
             }
         }
-        
+
         supabaseAuthLogger.error("Email verification link missing required tokens")
-        throw DomainAuthError.unknown
+        throw DomainAuthError.emailVerificationFailed
     }
 
     private func mapSignInError(_ error: Error) -> DomainAuthError {

@@ -86,9 +86,19 @@ public final class VoiceoverPlaybackController: ObservableObject {
     private var progressStore: VoiceoverProgressStore?
     private var discoveryStore: DiscoveryStore?
     private var miniPlayerPresence: MiniPlayerPresenceStore?
-    
-    /// Called when voiceover generation completes successfully (for toast notification)
-    public var onGenerationComplete: ((DiscoverySummary) -> Void)?
+
+    // MARK: - Background Stream Support
+    /// Background stream tasks for discoveries streaming while something else is playing
+    private var backgroundStreamTasks: [Int64: Task<Void, Never>] = [:]
+    /// Accumulated audio data for background streams (not connected to AVPlayer)
+    private var backgroundStreamData: [Int64: Data] = [:]
+    /// Metadata received from background streams
+    private var backgroundStreamMetadata: [Int64: VoiceoverStreamMetadata] = [:]
+    /// Loaders registered for promoted background streams — the background stream feeds data here
+    private var promotedLoaders: [Int64: StreamingAudioResourceLoader] = [:]
+    /// Queue of streams waiting when concurrent limit is reached
+    private var streamQueue: [(DiscoverySummary, VoiceoverPreferences)] = []
+    private let maxConcurrentStreams = 3
 
     public init(
         repository: any DiscoveryVoiceoverRepository,
@@ -201,7 +211,7 @@ public extension VoiceoverPlaybackController {
         log.debug("[togglePlayback] Asset status: \(String(describing: asset?.status))")
 
         switch asset?.status {
-        case .ready?:
+        case .ready?, .streamingReady?:
             if case let .playing(id) = playbackState, id == discovery.id {
                 log.debug("[togglePlayback] Already playing this discovery, pausing")
                 pause()
@@ -212,8 +222,16 @@ public extension VoiceoverPlaybackController {
                 resume()
                 return
             }
+
+            // For .streamingReady with an active background stream, promote to foreground
+            if asset?.status == .streamingReady, backgroundStreamTasks[discovery.id] != nil {
+                log.debug("[togglePlayback] Promoting background stream to foreground for id=\(discovery.id)")
+                promoteBackgroundToForeground(for: discovery)
+                return
+            }
+
             guard let readyAsset = asset else { return }
-            
+
             // Set up queue navigation context for Previous/Next buttons
             // Update if:
             // - Current item is changing (user is playing something new)
@@ -221,14 +239,15 @@ public extension VoiceoverPlaybackController {
             if let queueStore = queueStore,
                queueStore.current != discovery.id || queueStore.baseList.isEmpty {
                 // Get discovery IDs from discoveryQueueProvider (all discoveries from feed)
-                // Filter to only include discoveries with READY audio guides
+                // Filter to only include discoveries with READY or STREAMING READY audio guides
                 let audioReadyIds: [Int64]
                 if let provider = discoveryQueueProvider {
                     // Use all discoveries from feed (maintains proper order)
                     let allDiscoveries = provider()
                     // Filter to only audio-ready items
                     audioReadyIds = allDiscoveries.compactMap { disc -> Int64? in
-                        guard let asset = assetStates[disc.id], asset.status == .ready else {
+                        guard let asset = assetStates[disc.id],
+                              asset.status == .ready || asset.status == .streamingReady else {
                             return nil
                         }
                         return disc.id
@@ -239,22 +258,22 @@ public extension VoiceoverPlaybackController {
                     audioReadyIds = [discovery.id]
                     log.debug("[togglePlayback] No discoveryQueueProvider, using single item")
                 }
-                
+
                 queueStore.playNow(discovery.id, recentering: audioReadyIds)
                 log.debug("[togglePlayback] Queue after playNow: current=\(queueStore.current ?? -1), baseList.count=\(queueStore.baseList.count)")
             }
-            
+
             log.debug("[togglePlayback] Asset ready, calling play()")
             play(discovery: discovery, asset: readyAsset)
         case .processing?:
             log.debug("[togglePlayback] Asset processing, setting state to preparing")
             playbackState = .preparing(discoveryId: discovery.id)
         case .failed?, .none?, .missing?:
-            log.debug("[togglePlayback] Asset failed/none/missing, requesting voiceover")
-            requestVoiceover(for: discovery, preferences: resolvedPreferences)
+            log.debug("[togglePlayback] Asset failed/none/missing, generating voiceover")
+            generateVoiceover(for: discovery, preferences: resolvedPreferences)
         case nil:
-            log.debug("[togglePlayback] No asset found, requesting voiceover")
-            requestVoiceover(for: discovery, preferences: resolvedPreferences)
+            log.debug("[togglePlayback] No asset found, generating voiceover")
+            generateVoiceover(for: discovery, preferences: resolvedPreferences)
         }
     }
 
@@ -319,125 +338,465 @@ public extension VoiceoverPlaybackController {
         return discovery
     }
 
-    func requestVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
-        log.debug("[requestVoiceover] CALLED for id=\(discovery.id), title='\(discovery.title)'")
-        
-        // Optimistically set processing state immediately to update UI without waiting for Task scheduling
-        // Use activePreferences as a best guess; the Task will update with resolved preferences shortly.
-        self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
-            discoveryId: discovery.id,
-            status: .processing,
-            audioURL: nil,
-            provider: nil,
-            ttsModel: preferences?.ttsModel ?? self.activePreferences.ttsModel,
-            voiceModelId: preferences?.voiceModelId ?? self.activePreferences.voiceModelId,
-            fileName: nil,
-            fileExtension: nil,
-            requestedAt: Date(),
-            updatedAt: Date(),
-            errorReason: nil,
-            wasExistingResponse: false,
-            wasRefunded: false
+    // MARK: - Unified Generation
+
+    func generateVoiceover(for discovery: DiscoverySummary, preferences: VoiceoverPreferences? = nil) {
+        let resolvedPrefs = preferences ?? activePreferences
+        log.debug("[generateVoiceover] Called for id=\(discovery.id), playbackActive=\(self.playbackState.isActive)")
+
+        // Enforce concurrent stream limit
+        let activeStreamCount = (playTask != nil ? 1 : 0) + backgroundStreamTasks.count
+        if activeStreamCount >= maxConcurrentStreams {
+            log.debug("[generateVoiceover] At max concurrent streams (\(activeStreamCount)), queueing id=\(discovery.id)")
+            streamQueue.append((discovery, resolvedPrefs))
+            // Still set processing state for UI
+            assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                discoveryId: discovery.id, status: .processing, audioURL: nil,
+                provider: nil, ttsModel: resolvedPrefs.ttsModel,
+                voiceModelId: resolvedPrefs.voiceModelId, fileName: nil, fileExtension: nil,
+                requestedAt: Date(), updatedAt: Date(), errorReason: nil,
+                wasExistingResponse: false, wasRefunded: false
+            )
+            markPending(discovery.id)
+            return
+        }
+
+        // Set processing state immediately
+        assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+            discoveryId: discovery.id, status: .processing, audioURL: nil,
+            provider: nil, ttsModel: resolvedPrefs.ttsModel,
+            voiceModelId: resolvedPrefs.voiceModelId, fileName: nil, fileExtension: nil,
+            requestedAt: Date(), updatedAt: Date(), errorReason: nil,
+            wasExistingResponse: false, wasRefunded: false
         )
         markPending(discovery.id)
-        
-        Task { [weak self] in
-            guard let self else {
-                log.error("[requestVoiceover] self is nil, aborting")
-                return
-            }
-            let resolvedPreferences: VoiceoverPreferences
-            if let preferences {
-                resolvedPreferences = preferences
-                await self.preferencesStore?.save(preferences)
-                await MainActor.run {
-                    self.activePreferences = preferences
-                }
-            } else if let store = self.preferencesStore {
-                let loaded = await store.load(
-                    defaultVoiceModelId: self.activePreferences.voiceModelId,
-                    defaultTtsModel: self.activePreferences.ttsModel
-                )
-                resolvedPreferences = loaded
-                await MainActor.run {
-                    self.activePreferences = loaded
-                }
-            } else {
-                resolvedPreferences = self.activePreferences
-            }
 
-            log.debug("[requestVoiceover] voiceModelId='\(resolvedPreferences.voiceModelId)', ttsModel='\(resolvedPreferences.ttsModel)'")
-            guard !resolvedPreferences.voiceModelId.isEmpty else {
-                log.error("[requestVoiceover] voiceModelId is EMPTY, showing error")
-                await MainActor.run {
-                    self.errorMessage = "Choose a voice to generate audio."
-                }
-                return
-            }
+        if playbackState.isActive {
+            // Something is playing — stream in background only
+            log.debug("[generateVoiceover] Playback active, streaming in background for id=\(discovery.id)")
+            startBackgroundStream(for: discovery, preferences: resolvedPrefs)
+        } else {
+            // Nothing playing — auto-play via foreground stream
+            log.debug("[generateVoiceover] Playback idle, auto-playing for id=\(discovery.id)")
+            startForegroundStream(for: discovery, preferences: resolvedPrefs)
+        }
+    }
+
+    /// Starts a foreground stream connected to AVPlayer (auto-play path)
+    private func startForegroundStream(for discovery: DiscoverySummary, preferences: VoiceoverPreferences) {
+        playbackState = .preparing(discoveryId: discovery.id)
+        currentDiscovery = discovery
+        errorMessage = nil
+        position = 0
+        duration = nil
+        miniPlayerPresence?.undismiss()
+
+        playTask?.cancel()
+        playTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runStreamingSession(for: discovery, preferences: preferences, isForeground: true)
+            await MainActor.run { self.processStreamQueue() }
+        }
+    }
+
+    /// Starts a background stream (accumulates data, no player)
+    private func startBackgroundStream(for discovery: DiscoverySummary, preferences: VoiceoverPreferences) {
+        backgroundStreamData[discovery.id] = Data()
+        backgroundStreamTasks[discovery.id]?.cancel()
+        backgroundStreamTasks[discovery.id] = Task { [weak self] in
+            guard let self else { return }
+            await self.runStreamingSession(for: discovery, preferences: preferences, isForeground: false)
             await MainActor.run {
-                self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
-                    discoveryId: discovery.id,
-                    status: .processing,
-                    audioURL: nil,
-                    provider: nil,
-                    ttsModel: resolvedPreferences.ttsModel,
-                    voiceModelId: resolvedPreferences.voiceModelId,
-                    fileName: nil,
-                    fileExtension: nil,
-                    requestedAt: Date(),
-                    updatedAt: Date(),
-                    errorReason: nil,
-                    wasExistingResponse: false,
-                    wasRefunded: false
-                )
-                // NOTE: We intentionally do NOT set currentDiscovery or playbackState here.
-                // Generation should not affect the mini player in any way - it should only
-                // update the assetStates for UI feedback (e.g., showing "Generating..." status).
+                self.backgroundStreamTasks.removeValue(forKey: discovery.id)
+                self.processStreamQueue()
             }
-            markPending(discovery.id)
-            startPollingIfNeeded()
+        }
+    }
 
-            // Optimistically decrement credit balance before making the request
-            // If the request fails, we'll refresh to get the correct balance (handles refunds)
-            await self.creditBalanceStore?.adjust(by: -1)
-
-            log.debug("[requestVoiceover] CALLING repository.requestVoiceover for id=\(discovery.id)")
-            let asset = await self.repository.requestVoiceover(
-                for: discovery.id,
-                voiceModelId: resolvedPreferences.voiceModelId,
-                ttsModel: resolvedPreferences.ttsModel
+    /// Core streaming session logic shared by foreground and background paths
+    private func runStreamingSession(for discovery: DiscoverySummary, preferences: VoiceoverPreferences, isForeground: Bool) async {
+        // Resolve preferences
+        let resolvedPreferences: VoiceoverPreferences
+        if let store = self.preferencesStore {
+            let loaded = await store.load(
+                defaultVoiceModelId: preferences.voiceModelId,
+                defaultTtsModel: preferences.ttsModel
             )
-            log.debug("[requestVoiceover] repository.requestVoiceover RETURNED status=\(String(describing: asset.status)), audioURL=\(asset.audioURL?.absoluteString ?? "nil"), errorReason=\(asset.errorReason ?? "nil")")
+            resolvedPreferences = loaded
+            await MainActor.run { self.activePreferences = loaded }
+        } else {
+            resolvedPreferences = preferences
+        }
 
-            let normalized = normalize(asset)
+        guard !resolvedPreferences.voiceModelId.isEmpty else {
             await MainActor.run {
-                self.applyFetchedAsset(normalized)
-            }
-            Task { [weak self] in
-                await self?.refreshCacheFlag(for: normalized)
-            }
-
-            if normalized.status == .failed && normalized.wasExistingResponse {
-                self.prefetch(for: [discovery.id])
-            }
-
-            if normalized.status == .ready, let _ = normalized.audioURL {
-                clearPending(discovery.id)
-                // Optimistic decrement was correct - no need to update credit balance
-                // Notify that generation completed (for toast) - don't affect playback state
-                await MainActor.run {
-                    self.onGenerationComplete?(discovery)
+                self.errorMessage = "Choose a voice to generate audio."
+                if isForeground {
+                    self.playbackState = .failed(discoveryId: discovery.id, message: "Choose a voice to generate audio.")
                 }
-            } else if normalized.status == .failed {
-                clearPending(discovery.id)
-                // Generation failed - refresh credit balance from server (handles refunds)
+            }
+            return
+        }
+
+        // Optimistically decrement credit
+        await self.creditBalanceStore?.adjust(by: -1)
+
+        let loader: StreamingAudioResourceLoader? = isForeground ? StreamingAudioResourceLoader() : nil
+        var accumulatedData = Data()
+        var streamMetadata: VoiceoverStreamMetadata?
+        var playerStarted = false
+        let minBytesBeforePlay = 16_384 // 16KB
+
+        let stream = self.repository.streamVoiceover(
+            for: discovery.id,
+            voiceModelId: resolvedPreferences.voiceModelId,
+            ttsModel: resolvedPreferences.ttsModel
+        )
+
+        for await event in stream {
+            guard !Task.isCancelled else { break }
+
+            switch event {
+            case .metadata(let meta):
+                streamMetadata = meta
+                log.debug("[generateVoiceover] Got metadata for id=\(discovery.id): fileName=\(meta.fileName)")
+                if let balance = meta.creditBalance {
+                    await self.creditBalanceStore?.set(balance)
+                }
+                if !isForeground {
+                    await MainActor.run { self.backgroundStreamMetadata[discovery.id] = meta }
+                }
+
+            case .audioData(let data):
+                accumulatedData.append(data)
+                loader?.appendData(data)
+
+                if isForeground {
+                    // Foreground: start player when buffer threshold reached
+                    if !playerStarted && accumulatedData.count >= minBytesBeforePlay {
+                        playerStarted = true
+                        log.debug("[generateVoiceover] Starting player with \(accumulatedData.count) bytes for id=\(discovery.id)")
+                        await MainActor.run {
+                            self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                                discoveryId: discovery.id, status: .streamingReady, audioURL: nil,
+                                provider: streamMetadata?.provider, ttsModel: resolvedPreferences.ttsModel,
+                                voiceModelId: resolvedPreferences.voiceModelId, fileName: nil,
+                                fileExtension: streamMetadata?.fileExtension ?? "mp3",
+                                requestedAt: nil, updatedAt: Date(), errorReason: nil,
+                                wasExistingResponse: streamMetadata?.wasExisting ?? false,
+                                wasRefunded: streamMetadata?.wasRefunded ?? false
+                            )
+                        }
+                        await self.startStreamingPlayer(loader: loader!, discovery: discovery)
+                    }
+                } else {
+                    // Background: accumulate data and update status at threshold
+                    await MainActor.run {
+                        self.backgroundStreamData[discovery.id] = accumulatedData
+                        // Feed promoted loader if this stream was promoted to foreground
+                        self.promotedLoaders[discovery.id]?.appendData(data)
+                    }
+                    if !playerStarted && accumulatedData.count >= minBytesBeforePlay {
+                        playerStarted = true
+                        log.debug("[generateVoiceover] Background stream ready for id=\(discovery.id) (\(accumulatedData.count) bytes)")
+                        await MainActor.run {
+                            self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                                discoveryId: discovery.id, status: .streamingReady, audioURL: nil,
+                                provider: streamMetadata?.provider, ttsModel: resolvedPreferences.ttsModel,
+                                voiceModelId: resolvedPreferences.voiceModelId, fileName: nil,
+                                fileExtension: streamMetadata?.fileExtension ?? "mp3",
+                                requestedAt: nil, updatedAt: Date(), errorReason: nil,
+                                wasExistingResponse: streamMetadata?.wasExisting ?? false,
+                                wasRefunded: streamMetadata?.wasRefunded ?? false
+                            )
+                        }
+                    }
+                }
+
+            case .completed(let completedAsset):
+                // Handle JSON fallback: server returned existing voiceover as JSON instead of streaming
+                if completedAsset.status == .processing {
+                    // Voiceover already being generated by another request — let polling track it
+                    log.debug("[generateVoiceover] Server says already processing for id=\(discovery.id), deferring to polling")
+                    loader?.markComplete()
+                    await MainActor.run {
+                        // Keep .processing status, polling will update to .ready
+                        self.assetStates[discovery.id] = completedAsset
+                        if let balance = completedAsset.creditBalance {
+                            Task { await self.creditBalanceStore?.set(balance) }
+                        }
+                        if isForeground {
+                            self.playbackState = .idle
+                        }
+                        self.backgroundStreamData.removeValue(forKey: discovery.id)
+                        self.backgroundStreamMetadata.removeValue(forKey: discovery.id)
+                        self.startPollingIfNeeded()
+                    }
+                    break
+                }
+
+                if completedAsset.status == .ready && completedAsset.audioURL != nil && accumulatedData.isEmpty {
+                    // Existing ready voiceover returned as JSON with signed URL — apply directly
+                    log.debug("[generateVoiceover] Server returned existing ready voiceover for id=\(discovery.id)")
+                    loader?.markComplete()
+                    await MainActor.run {
+                        self.applyFetchedAsset(completedAsset)
+                        if let balance = completedAsset.creditBalance {
+                            Task { await self.creditBalanceStore?.set(balance) }
+                        }
+                        self.clearPending(discovery.id)
+                        self.backgroundStreamData.removeValue(forKey: discovery.id)
+                        self.backgroundStreamMetadata.removeValue(forKey: discovery.id)
+                    }
+                    // Auto-play the existing voiceover if foreground
+                    if isForeground {
+                        let resolvedAsset = await MainActor.run { self.normalizedAsset(for: discovery.id) }
+                        if let asset = resolvedAsset {
+                            await MainActor.run { self.play(discovery: discovery, asset: asset) }
+                        }
+                    }
+                    break
+                }
+
+                // Normal streaming completion: audio data was accumulated
+                // Start player if we never hit the threshold (small audio)
+                if isForeground && !playerStarted && !accumulatedData.isEmpty {
+                    playerStarted = true
+                    await self.startStreamingPlayer(loader: loader!, discovery: discovery)
+                }
+                loader?.markComplete()
+                log.debug("[generateVoiceover] Stream completed for id=\(discovery.id), total=\(accumulatedData.count) bytes")
+
+                // Cache the accumulated audio data
+                let fileName = streamMetadata?.fileName ?? completedAsset.fileName ?? "voiceover.mp3"
+                if !accumulatedData.isEmpty {
+                    do {
+                        _ = try await self.voiceoverCache.store(
+                            data: accumulatedData,
+                            discoveryId: discovery.id,
+                            fileName: fileName
+                        )
+                    } catch {
+                        log.error("[generateVoiceover] Cache store failed: \(error.localizedDescription)")
+                    }
+                }
+
+                // Update asset state to ready
+                let readyAsset = DiscoveryVoiceoverAsset(
+                    discoveryId: discovery.id, status: .ready, audioURL: nil,
+                    provider: streamMetadata?.provider ?? completedAsset.provider,
+                    ttsModel: streamMetadata?.ttsModel ?? completedAsset.ttsModel ?? resolvedPreferences.ttsModel,
+                    voiceModelId: streamMetadata?.voiceModelId ?? completedAsset.voiceModelId ?? resolvedPreferences.voiceModelId,
+                    fileName: fileName,
+                    fileExtension: streamMetadata?.fileExtension ?? completedAsset.fileExtension ?? "mp3",
+                    requestedAt: nil, updatedAt: Date(), errorReason: nil,
+                    wasExistingResponse: streamMetadata?.wasExisting ?? completedAsset.wasExistingResponse,
+                    wasRefunded: streamMetadata?.wasRefunded ?? completedAsset.wasRefunded,
+                    creditBalance: streamMetadata?.creditBalance ?? completedAsset.creditBalance
+                )
+                await MainActor.run {
+                    self.assetStates[discovery.id] = readyAsset
+                    self.downloadedIds.insert(discovery.id)
+                    self.clearPending(discovery.id)
+                    // Mark promoted loader complete — full data has been fed
+                    self.promotedLoaders.removeValue(forKey: discovery.id)?.markComplete()
+                    // Clean up background data if this was a background stream
+                    self.backgroundStreamData.removeValue(forKey: discovery.id)
+                    self.backgroundStreamMetadata.removeValue(forKey: discovery.id)
+                }
+
+            case .failed(let reason):
+                loader?.markComplete()
+                log.error("[generateVoiceover] Stream failed for id=\(discovery.id): \(reason)")
+
                 _ = try? await self.creditBalanceStore?.refresh(force: true)
-                // Only set error message, don't affect playback state
                 await MainActor.run {
-                    self.errorMessage = normalized.errorReason
+                    self.clearPending(discovery.id)
+                    self.promotedLoaders.removeValue(forKey: discovery.id)?.markComplete()
+                    self.backgroundStreamData.removeValue(forKey: discovery.id)
+                    self.backgroundStreamMetadata.removeValue(forKey: discovery.id)
+                    self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                        discoveryId: discovery.id, status: .failed, audioURL: nil,
+                        provider: nil, ttsModel: resolvedPreferences.ttsModel,
+                        voiceModelId: resolvedPreferences.voiceModelId, fileName: nil,
+                        fileExtension: nil, requestedAt: nil, updatedAt: Date(),
+                        errorReason: reason, wasExistingResponse: false, wasRefunded: true
+                    )
+                    if isForeground && !playerStarted {
+                        self.playbackState = .failed(discoveryId: discovery.id, message: reason)
+                        self.errorMessage = reason
+                    }
                 }
             }
-            // No else case needed - we don't modify playbackState during generation
+        }
+
+        // Stream exited without .completed or .failed (task cancelled / client disconnect).
+        // The backend continues processing independently — cache what we have, keep playable
+        // status, and start polling so the UI discovers when the full version becomes .ready.
+        if Task.isCancelled && streamMetadata != nil {
+            loader?.markComplete()
+            let fileName = streamMetadata?.fileName ?? "voiceover.mp3"
+            let hadPlayableData = !accumulatedData.isEmpty
+            log.debug("[generateVoiceover] Stream cancelled for id=\(discovery.id), bytes=\(accumulatedData.count), deferring to polling")
+
+            // Cache accumulated audio so it's available for immediate playback later
+            if hadPlayableData {
+                do {
+                    _ = try await self.voiceoverCache.store(
+                        data: accumulatedData,
+                        discoveryId: discovery.id,
+                        fileName: fileName
+                    )
+                } catch {
+                    log.error("[generateVoiceover] Cache store on cancel failed: \(error.localizedDescription)")
+                }
+            }
+
+            await MainActor.run {
+                let current = self.assetStates[discovery.id]
+                if current?.status == .streamingReady || current?.status == .processing {
+                    // Keep .streamingReady if we had playable data (UI shows "play"),
+                    // otherwise .processing (UI shows "generating")
+                    let resolvedStatus: DiscoveryVoiceoverStatus = hadPlayableData ? .streamingReady : .processing
+                    self.assetStates[discovery.id] = DiscoveryVoiceoverAsset(
+                        discoveryId: discovery.id, status: resolvedStatus, audioURL: nil,
+                        provider: streamMetadata?.provider ?? current?.provider,
+                        ttsModel: streamMetadata?.ttsModel ?? current?.ttsModel ?? resolvedPreferences.ttsModel,
+                        voiceModelId: streamMetadata?.voiceModelId ?? current?.voiceModelId ?? resolvedPreferences.voiceModelId,
+                        fileName: fileName, fileExtension: streamMetadata?.fileExtension ?? current?.fileExtension,
+                        requestedAt: current?.requestedAt, updatedAt: Date(), errorReason: nil,
+                        wasExistingResponse: current?.wasExistingResponse ?? false,
+                        wasRefunded: false
+                    )
+                }
+                self.promotedLoaders.removeValue(forKey: discovery.id)?.markComplete()
+                self.backgroundStreamData.removeValue(forKey: discovery.id)
+                self.backgroundStreamMetadata.removeValue(forKey: discovery.id)
+                self.startPollingIfNeeded()
+            }
+        }
+    }
+
+    /// Promotes a background stream to foreground playback (user tapped a .streamingReady item)
+    private func promoteBackgroundToForeground(for discovery: DiscoverySummary) {
+        log.debug("[promoteBackgroundToForeground] Promoting id=\(discovery.id)")
+
+        // Stop current playback
+        playTask?.cancel()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        teardownObservers()
+
+        // Set up player state
+        playbackState = .preparing(discoveryId: discovery.id)
+        currentDiscovery = discovery
+        errorMessage = nil
+        position = 0
+        duration = nil
+        miniPlayerPresence?.undismiss()
+
+        // Get accumulated data
+        let existingData = backgroundStreamData[discovery.id] ?? Data()
+        let bgTaskStillRunning = backgroundStreamTasks.removeValue(forKey: discovery.id) != nil
+
+        // Create a loader and feed it the accumulated data
+        let loader = StreamingAudioResourceLoader()
+        if !existingData.isEmpty {
+            loader.appendData(existingData)
+        }
+
+        if bgTaskStillRunning {
+            // Register loader so the background stream feeds new chunks directly to it.
+            // The background task continues running — NOT cancelled.
+            promotedLoaders[discovery.id] = loader
+            log.debug("[promoteBackgroundToForeground] Registered promoted loader for id=\(discovery.id)")
+        }
+
+        playTask = Task { [weak self] in
+            guard let self else { return }
+
+            // Start the player with what we have
+            await self.startStreamingPlayer(loader: loader, discovery: discovery)
+
+            if bgTaskStillRunning {
+                // Background stream keeps running and feeds data via promotedLoaders.
+                // Wait for it to finish — it marks the loader complete on .completed/.failed.
+                while !Task.isCancelled {
+                    let status = await MainActor.run { self.assetStates[discovery.id]?.status }
+                    if status == .ready || status == .failed { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                }
+                // Loader was already marked complete by the background stream's event handler.
+                // Clean up in case it wasn't (e.g. unexpected exit).
+                await MainActor.run { self.promotedLoaders.removeValue(forKey: discovery.id)?.markComplete() }
+            } else {
+                // Background task already completed
+                loader.markComplete()
+            }
+            await MainActor.run { self.processStreamQueue() }
+        }
+    }
+
+    /// Processes the stream queue — starts next stream if under the limit
+    private func processStreamQueue() {
+        let activeCount = (playTask != nil ? 1 : 0) + backgroundStreamTasks.count
+        guard activeCount < maxConcurrentStreams, !streamQueue.isEmpty else { return }
+
+        let (discovery, prefs) = streamQueue.removeFirst()
+        log.debug("[processStreamQueue] Dequeuing id=\(discovery.id), active=\(activeCount)")
+
+        if playbackState.isActive {
+            startBackgroundStream(for: discovery, preferences: prefs)
+        } else {
+            startForegroundStream(for: discovery, preferences: prefs)
+        }
+    }
+
+    /// Sets up AVPlayer with the streaming resource loader. Called only after initial audio data is buffered.
+    private func startStreamingPlayer(loader: StreamingAudioResourceLoader, discovery: DiscoverySummary) async {
+        let streamingURL = URL(string: "\(StreamingAudioResourceLoader.scheme)://discovery/\(discovery.id)")!
+        let asset = AVURLAsset(url: streamingURL)
+        asset.resourceLoader.setDelegate(loader, queue: loader.loaderQueue)
+
+        let playerItem = AVPlayerItem(asset: asset)
+        playerItem.preferredForwardBufferDuration = 2
+
+        await prepareAudioSession()
+        await MainActor.run {
+            teardownObservers()
+
+            playerItemStatusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+                guard let self else { return }
+                switch item.status {
+                case .readyToPlay:
+                    Task { @MainActor in
+                        await self.handleReadyToPlay(item: item, discovery: discovery)
+                    }
+                case .failed:
+                    Task { @MainActor in
+                        log.error("[startStreamingPlayer] Player item failed: \(item.error?.localizedDescription ?? "unknown")")
+                        self.handlePlayerFailure(error: item.error, discovery: discovery, attemptedRefresh: true)
+                    }
+                default:
+                    break
+                }
+            }
+
+            endPlaybackObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: playerItem,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in self.handlePlaybackEnded() }
+            }
+
+            addTimeObserver()
+            player.replaceCurrentItem(with: playerItem)
+            player.play()
+            updateNowPlayingPlaybackState()
+            refreshNowPlayingInfo()
+            log.debug("[startStreamingPlayer] Player started for id=\(discovery.id)")
         }
     }
 
@@ -479,6 +838,13 @@ public extension VoiceoverPlaybackController {
 
     func seek(to seconds: TimeInterval, completion: (() -> Void)? = nil) {
         print("[VoiceoverPlaybackController.seek] Called with seconds=\(seconds), duration=\(String(describing: duration))")
+        // Block forward seek during streaming (allow backward seek / seek-to-zero)
+        if seconds > (position ?? 0),
+           let discoveryId = currentDiscovery?.id,
+           assetStates[discoveryId]?.status == .streamingReady {
+            completion?()
+            return
+        }
         guard let duration, duration > 0 else {
             print("[VoiceoverPlaybackController.seek] EARLY RETURN - duration is nil or 0")
             completion?()
@@ -548,8 +914,13 @@ public extension VoiceoverPlaybackController {
     
     /// Seek forward/backward by a number of seconds
     func seek(by seconds: TimeInterval) {
+        // Block forward seek during streaming
+        if seconds > 0, let discoveryId = currentDiscovery?.id,
+           assetStates[discoveryId]?.status == .streamingReady {
+            return
+        }
         guard let duration = self.duration, duration > 0 else { return }
-        
+
         let currentTime = player.currentTime().seconds
         let newTime = max(0, min(duration, currentTime + seconds))
         
@@ -570,8 +941,13 @@ public extension VoiceoverPlaybackController {
     
     /// Seek to a specific fraction of the track (0.0 to 1.0)
     func seek(toFraction fraction: Double) {
+        // Block forward seek during streaming
+        if let discoveryId = currentDiscovery?.id,
+           assetStates[discoveryId]?.status == .streamingReady {
+            return
+        }
         guard let duration = self.duration, duration > 0 else { return }
-        
+
         let newTime = duration * max(0, min(1, fraction))
         seek(to: newTime)
     }
@@ -628,7 +1004,12 @@ extension VoiceoverPlaybackController {
             // Protect .processing status - only overwrite with terminal states (.ready or .failed)
             if existing.status == .processing {
                 if normalized.status != .ready && normalized.status != .failed {
-                    // Keep the current .processing state, don't overwrite with .none or .processing
+                    return
+                }
+            }
+            // Protect .streamingReady - only allow .ready and .failed to overwrite
+            if existing.status == .streamingReady {
+                if normalized.status != .ready && normalized.status != .failed {
                     return
                 }
             }
@@ -651,7 +1032,7 @@ extension VoiceoverPlaybackController {
     }
 
     public func normalize(_ asset: DiscoveryVoiceoverAsset) -> DiscoveryVoiceoverAsset {
-        if asset.status == .processing {
+        if asset.status == .processing || asset.status == .streamingReady {
             let lastUpdate = asset.updatedAt ?? asset.requestedAt
             if let lastUpdate, Date().timeIntervalSince(lastUpdate) > processingStaleThreshold {
                 return DiscoveryVoiceoverAsset(
@@ -697,8 +1078,19 @@ extension VoiceoverPlaybackController {
     func play(discovery: DiscoverySummary, asset: DiscoveryVoiceoverAsset) {
         log.debug("[play] Starting playback for id=\(discovery.id), title='\(discovery.title)'")
         log.debug("[play] Discovery imagePath=\(discovery.imagePath ?? "nil")")
-        
+
         playTask?.cancel()
+
+        // Immediately update state so UI transitions without waiting for async work
+        player.pause()
+        teardownObservers()
+        playbackState = .preparing(discoveryId: discovery.id)
+        currentDiscovery = discovery
+        errorMessage = nil
+        position = 0
+        duration = nil
+        miniPlayerPresence?.undismiss()
+
         playTask = Task { [weak self] in
             guard let self else { return }
             guard let audioURL = await self.resolvePlayableURL(for: asset) else {
@@ -709,20 +1101,8 @@ extension VoiceoverPlaybackController {
                 }
                 return
             }
-            
-            log.debug("[play] Got audioURL, setting currentDiscovery and state")
 
-            await MainActor.run {
-                log.debug("[play] Setting currentDiscovery to id=\(discovery.id), title='\(discovery.title)'")
-                self.playbackState = .preparing(discoveryId: discovery.id)
-                self.currentDiscovery = discovery
-                self.errorMessage = nil
-                self.position = 0
-                self.duration = nil
-                // Un-dismiss mini player when new track starts
-                self.miniPlayerPresence?.undismiss()
-                log.debug("[play] currentDiscovery set. id=\(self.currentDiscovery?.id ?? -1), title='\(self.currentDiscovery?.title ?? "nil")'")
-            }
+            log.debug("[play] Got audioURL, configuring player")
 
             await self.prepareAudioSession()
             await self.configurePlayer(with: audioURL, discovery: discovery)
@@ -1146,10 +1526,11 @@ extension VoiceoverPlaybackController {
               let fileName = asset.fileName,
               let url = asset.audioURL else { return }
 
-        if let _ = await voiceoverCache.cachedFileURL(discoveryId: asset.discoveryId, fileName: fileName) {
-            _ = await MainActor.run {
-                downloadedIds.insert(asset.discoveryId)
-            }
+        // Only skip download if marked as fully downloaded (in downloadedIds).
+        // A cache file may exist from a cancelled stream with partial data — re-download to replace it.
+        let isFullyDownloaded = await MainActor.run { downloadedIds.contains(asset.discoveryId) }
+        if isFullyDownloaded,
+           let _ = await voiceoverCache.cachedFileURL(discoveryId: asset.discoveryId, fileName: fileName) {
             return
         }
 
@@ -1255,7 +1636,7 @@ extension VoiceoverPlaybackController {
 
     var pendingProcessingIds: [Int64] {
         let processing = assetStates
-            .filter { $0.value.status == .processing }
+            .filter { $0.value.status == .processing || $0.value.status == .streamingReady }
             .map(\.key)
         return Array(Set(processing).union(pendingIds))
     }

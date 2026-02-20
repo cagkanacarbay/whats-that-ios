@@ -42,21 +42,6 @@ public final class AudioServicesContainer: ObservableObject {
     /// Shared playback controller (created with container dependencies)
     public let playbackController: VoiceoverPlaybackController
     
-    // MARK: - Toast State
-
-    /// Queue of toasts to show when generation completes (stacked card effect)
-    @Published public var pendingGenerationToasts: [GenerationCompleteToast] = []
-
-    /// Convenience property for the current (frontmost) toast
-    public var pendingGenerationToast: GenerationCompleteToast? {
-        pendingGenerationToasts.first
-    }
-    
-    /// Number of pending toasts (for stacked card visual)
-    public var pendingToastCount: Int {
-        pendingGenerationToasts.count
-    }
-    
     // MARK: - Init
     
     public init(
@@ -93,48 +78,8 @@ public final class AudioServicesContainer: ObservableObject {
             miniPlayerPresence: miniPlayerPresence
         )
         
-        // Wire up generation complete callback to show toast
-        playbackController.onGenerationComplete = { [weak self] discovery in
-            self?.showGenerationCompleteToast(for: discovery)
-        }
     }
-    
-    // MARK: - Toast Actions
-    
-    /// Shows a generation complete toast for the given discovery (adds to stack)
-    public func showGenerationCompleteToast(for discovery: DiscoverySummary) {
-        // Avoid duplicates
-        guard !pendingGenerationToasts.contains(where: { $0.discovery.id == discovery.id }) else { return }
-        pendingGenerationToasts.append(GenerationCompleteToast(discovery: discovery))
-    }
-    
-    /// Dismisses the current (frontmost) toast, revealing the next one
-    public func dismissGenerationToast() {
-        guard !pendingGenerationToasts.isEmpty else { return }
-        pendingGenerationToasts.removeFirst()
-    }
-    
-    /// Handles "Play Now" action from toast
-    public func handleToastPlayNow() {
-        guard let toast = pendingGenerationToast else { return }
-        playbackController.togglePlayback(for: toast.discovery)
-        dismissGenerationToast()
-    }
-    
-    /// Handles "Play Next" action from toast
-    public func handleToastPlayNext() {
-        guard let toast = pendingGenerationToast else { return }
-        queueStore.playNext(toast.discovery.id)
-        dismissGenerationToast()
-    }
-    
-    /// Handles "Add to Queue" action from toast
-    public func handleToastAddToQueue() {
-        guard let toast = pendingGenerationToast else { return }
-        queueStore.addToEnd(toast.discovery.id)
-        dismissGenerationToast()
-    }
-    
+
     // MARK: - User Data Clearing
     
     /// Clears all user-specific audio/playback data. Called during sign-out.
@@ -145,9 +90,6 @@ public final class AudioServicesContainer: ObservableObject {
         // Clear all queue and progress state
         queueStore.clearAll()
         progressStore.clearAll()
-        
-        // Clear pending toasts
-        pendingGenerationToasts.removeAll()
         
         // Clear cached audio files
         await fileCache.clearAll()

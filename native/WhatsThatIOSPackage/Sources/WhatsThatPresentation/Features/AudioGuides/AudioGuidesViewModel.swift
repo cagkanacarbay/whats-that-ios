@@ -69,6 +69,7 @@ public final class AudioGuidesViewModel: ObservableObject {
     private var hasMore: Bool = true
     private var didInitialPrefetch: Bool = false
     private var cancellables = Set<AnyCancellable>()
+    private var previousAssetStatuses: [Int64: DiscoveryVoiceoverStatus] = [:]
     
     // MARK: - Dependencies
     
@@ -461,28 +462,34 @@ public final class AudioGuidesViewModel: ObservableObject {
     
     public func requestCreation(for discovery: DiscoverySummary) {
         let state = rowStateProvider.rowState(for: discovery.id)
-        
+
         switch state.voiceoverStatus {
         case .empty:
             // Show confirmation alert for new creation
             discoveryForAlert = discovery
             showCreateAlert = true
         case .failed:
-            // Retry immediately
-            voiceoverController.requestVoiceover(for: discovery)
+            // Retry with streaming playback
+            voiceoverController.generateVoiceover(
+                for: discovery,
+                preferences: voiceoverController.activePreferences
+            )
         default:
             break
         }
     }
-    
+
     public func confirmCreation() {
         log.debug("[confirmCreation] CALLED, discoveryForAlert=\(self.discoveryForAlert?.id ?? -1)")
         guard let discovery = discoveryForAlert else {
             log.error("[confirmCreation] discoveryForAlert is nil, aborting")
             return
         }
-        log.debug("[confirmCreation] Calling voiceoverController.requestVoiceover for id=\(discovery.id)")
-        voiceoverController.requestVoiceover(for: discovery)
+        log.debug("[confirmCreation] Calling voiceoverController.generateVoiceover for id=\(discovery.id)")
+        voiceoverController.generateVoiceover(
+            for: discovery,
+            preferences: voiceoverController.activePreferences
+        )
         discoveryForAlert = nil
     }
     
@@ -533,7 +540,17 @@ public final class AudioGuidesViewModel: ObservableObject {
                 guard let self else { return }
                 self.rowStateProvider.invalidateAll()
                 self.rowStateVersion += 1
-                
+
+                // Track fresh ready transitions (for gold accent indicator)
+                for (id, asset) in assetStates {
+                    let prev = self.previousAssetStatuses[id]
+                    if asset.status == .ready,
+                       prev != nil, prev != .ready {
+                        self.rowStateProvider.trackReadyTransition(for: id, wasNonReady: true)
+                    }
+                    self.previousAssetStatuses[id] = asset.status
+                }
+
                 // Insert any newly-ready voiceovers into baseList
                 self.insertNewlyReadyVoiceovers(assetStates: assetStates)
             }

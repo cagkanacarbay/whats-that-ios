@@ -86,7 +86,7 @@ public struct InProgressItem: Identifiable, Equatable {
 // MARK: - Completion Toast
 
 /// Model for a discovery completion toast notification.
-/// Similar to GenerationCompleteToast but for discovery creation.
+/// Toast notification model for discovery creation completion.
 public struct DiscoveryCompletionToast: Identifiable, Equatable {
     public let id: UUID
     public let discovery: DiscoverySummary

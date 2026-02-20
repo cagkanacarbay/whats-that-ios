@@ -99,6 +99,7 @@ private struct HeroPlayerContentView: View {
     }
     
     private var durationString: String {
+        if isCurrentStreamingReady { return "--:--" }
         guard let duration = controller.duration else { return "--:--" }
         let minutes = Int(duration) / 60
         let secs = Int(duration) % 60
@@ -121,6 +122,11 @@ private struct HeroPlayerContentView: View {
     private var canPlayPrevious: Bool {
         // Always allow previous if playing (for restart functionality)
         controller.position > 3.0 || queueStore.hasPrevious
+    }
+
+    private var isCurrentStreamingReady: Bool {
+        guard let id = controller.currentDiscovery?.id else { return false }
+        return controller.assetStates[id]?.status == .streamingReady
     }
     
     /// Returns the first audio-ready discovery ID from assetStates
@@ -483,15 +489,21 @@ private struct HeroPlayerContentView: View {
     private func seekButton(direction: SeekDirection) -> some View {
         let imageName = direction == .forward ? "goforward.5" : "gobackward.5"
         let seconds: TimeInterval = direction == .forward ? 5 : -5
-        
+        let isDisabledByStreaming = direction == .forward && isCurrentStreamingReady
+
         Button(action: { controller.seek(by: seconds) }) {
             Image(systemName: imageName)
                 .font(.system(size: UIDevice.isIPad ? 32 : (isCompact ? 20 : 24)))
                 .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
         }
+        .opacity(isDisabledByStreaming ? 0.3 : 1.0)
+        .disabled(isDisabledByStreaming)
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.3)
-                .onEnded { _ in startAcceleratedSeek(direction: direction) }
+                .onEnded { _ in
+                    guard !isDisabledByStreaming else { return }
+                    startAcceleratedSeek(direction: direction)
+                }
         )
         .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
             if !pressing { stopAcceleratedSeek() }

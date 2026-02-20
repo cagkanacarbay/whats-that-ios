@@ -158,7 +158,7 @@ struct MainTabView: View {
                     self.selectedTab = .discoveries
                 },
                 onGenerateAudio: { summary in
-                    self.audioServices.playbackController.requestVoiceover(for: summary)
+                    self.audioServices.playbackController.generateVoiceover(for: summary)
                 }
             )
         }

@@ -11,37 +11,43 @@ public struct AudioGuideRowState: Equatable {
     public let isQueued: Bool
     public let isPlaying: Bool
     public let progress: Double?
-    
+    public let isFreshlyReady: Bool
+
     public init(
         discoveryId: Int64,
         voiceoverStatus: AudioGuideRowStatus,
         isQueued: Bool,
         isPlaying: Bool,
-        progress: Double?
+        progress: Double?,
+        isFreshlyReady: Bool = false
     ) {
         self.discoveryId = discoveryId
         self.voiceoverStatus = voiceoverStatus
         self.isQueued = isQueued
         self.isPlaying = isPlaying
         self.progress = progress
+        self.isFreshlyReady = isFreshlyReady
     }
 }
 
 /// Status of an audio guide based on normalized voiceover asset
 public enum AudioGuideRowStatus: Equatable {
     case ready(duration: TimeInterval?)
+    case streamingReady  // Playable but still loading
     case generating
     case generationQueued  // Rate limiting: waiting in local queue
     case failed
     case empty
     case checking  // Loading voiceover status from server
-    
+
     /// Returns true if the guide can be played
     public var isPlayable: Bool {
-        if case .ready = self { return true }
-        return false
+        switch self {
+        case .ready, .streamingReady: return true
+        default: return false
+        }
     }
-    
+
     /// Returns true if generation can be triggered
     public var canTriggerGeneration: Bool {
         switch self {
@@ -67,6 +73,12 @@ public final class AudioGuideRowStateProvider: ObservableObject {
     
     /// Discovery IDs that are currently being checked for voiceover status
     private var checkingIds: Set<Int64> = []
+
+    /// Discovery IDs that were recently marked ready (for gold accent indicator)
+    private var freshlyReadyIds: Set<Int64> = []
+
+    /// IDs that were previously in a non-ready state (for detecting transitions)
+    private var previouslyNonReady: Set<Int64> = []
     
     public init(
         voiceoverController: VoiceoverPlaybackController,
@@ -130,18 +142,37 @@ public final class AudioGuideRowStateProvider: ObservableObject {
             invalidate(discoveryId: id)
         }
     }
+
+    /// Whether a discovery was freshly marked ready (for gold accent)
+    public func isFreshlyReady(_ discoveryId: Int64) -> Bool {
+        freshlyReadyIds.contains(discoveryId)
+    }
+
+    /// Track a transition to ready status (called when assetStates change)
+    public func trackReadyTransition(for discoveryId: Int64, wasNonReady: Bool) {
+        guard wasNonReady else { return }
+        freshlyReadyIds.insert(discoveryId)
+        invalidate(discoveryId: discoveryId)
+        // Auto-remove after 5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            self.freshlyReadyIds.remove(discoveryId)
+            self.invalidate(discoveryId: discoveryId)
+        }
+    }
     
     // MARK: - Computation
     
     private func computeRowState(for discoveryId: Int64) -> AudioGuideRowState {
         let status = computeStatus(for: discoveryId)
-        
+
         return AudioGuideRowState(
             discoveryId: discoveryId,
             voiceoverStatus: status,
             isQueued: queueStore.isQueued(discoveryId),
             isPlaying: queueStore.isPlaying(discoveryId),
-            progress: progressStore.position(for: discoveryId)
+            progress: progressStore.position(for: discoveryId),
+            isFreshlyReady: freshlyReadyIds.contains(discoveryId)
         )
     }
     
@@ -162,9 +193,9 @@ public final class AudioGuideRowStateProvider: ObservableObject {
         
         switch asset.status {
         case .ready:
-            // Try to get duration from the asset (if available)
-            // Duration is typically only known after playback begins
             return .ready(duration: nil)
+        case .streamingReady:
+            return .streamingReady
         case .processing:
             return .generating
         case .failed:

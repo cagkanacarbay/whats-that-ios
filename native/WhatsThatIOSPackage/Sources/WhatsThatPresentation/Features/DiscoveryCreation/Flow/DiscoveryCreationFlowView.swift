@@ -149,7 +149,7 @@ struct DiscoveryCreationFlowView: View {
                         dismissModal()
                     },
                     onGenerateAudio: { summary in
-                        audioServices.playbackController.requestVoiceover(for: summary)
+                        audioServices.playbackController.generateVoiceover(for: summary)
                     },
                     isInModal: true
                 )

@@ -59,6 +59,7 @@ private struct MiniPlayerContentView: View {
     
     // Swipe to dismiss state
     @State private var dragOffset: CGFloat = 0
+    @State private var streamingRingRotation = Angle.zero
     private let dismissThreshold: CGFloat = 50
     
     // MARK: - Computed Properties
@@ -77,6 +78,11 @@ private struct MiniPlayerContentView: View {
         return false
     }
     
+    private var isCurrentStreamingReady: Bool {
+        guard let id = controller.currentDiscovery?.id else { return false }
+        return controller.assetStates[id]?.status == .streamingReady
+    }
+
     private var canPlayNext: Bool {
         queueStore.hasNext
     }
@@ -155,6 +161,19 @@ private struct MiniPlayerContentView: View {
         }
         .onAppear {
             log.debug("[MiniPlayer] onAppear - discovery: \(discovery?.title ?? "nil"), state: \(String(describing: controller.playbackState))")
+            if isCurrentStreamingReady {
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                    streamingRingRotation = .degrees(360)
+                }
+            }
+        }
+        .onChange(of: isCurrentStreamingReady) { _, isStreaming in
+            if isStreaming {
+                streamingRingRotation = .zero
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                    streamingRingRotation = .degrees(360)
+                }
+            }
         }
     }
     
@@ -251,12 +270,14 @@ private struct MiniPlayerContentView: View {
             }
             .disabled(!canPlayNext)
             
-            // Fwd 5s
+            // Fwd 5s (disabled during streaming)
             Button(action: { controller.seek(by: 5) }) {
                 Image(systemName: "goforward.5")
                     .font(.adaptiveSystem(size: 18))
                     .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
             }
+            .opacity(isCurrentStreamingReady ? 0.3 : 1.0)
+            .disabled(isCurrentStreamingReady)
         }
     }
     
@@ -274,16 +295,27 @@ private struct MiniPlayerContentView: View {
                 .rotationEffect(Angle(degrees: 126))
                 .frame(width: artworkDiameter, height: artworkDiameter)
             
-            // Progress Ring (Open Arc)
-            Circle()
-                .trim(from: 0.0, to: progress * 0.8)
-                .stroke(
-                    BrandColors.logo,
-                    style: StrokeStyle(lineWidth: progressLineWidth, lineCap: .round)
-                )
-                .rotationEffect(Angle(degrees: 126))
-                .frame(width: artworkDiameter, height: artworkDiameter)
-            
+            // Progress Ring (Open Arc) — indeterminate during streaming
+            if isCurrentStreamingReady {
+                Circle()
+                    .trim(from: 0.0, to: 0.3)
+                    .stroke(
+                        BrandColors.logo,
+                        style: StrokeStyle(lineWidth: progressLineWidth, lineCap: .round)
+                    )
+                    .rotationEffect(streamingRingRotation)
+                    .frame(width: artworkDiameter, height: artworkDiameter)
+            } else {
+                Circle()
+                    .trim(from: 0.0, to: progress * 0.8)
+                    .stroke(
+                        BrandColors.logo,
+                        style: StrokeStyle(lineWidth: progressLineWidth, lineCap: .round)
+                    )
+                    .rotationEffect(Angle(degrees: 126))
+                    .frame(width: artworkDiameter, height: artworkDiameter)
+            }
+
             // Artwork Image
             artworkImage
         }

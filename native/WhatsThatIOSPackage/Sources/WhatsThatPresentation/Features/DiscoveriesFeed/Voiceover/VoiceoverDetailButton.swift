@@ -91,7 +91,7 @@ struct VoiceoverDetailButton: View {
                 return .generating
             case .failed:
                 return .retry
-            case .ready:
+            case .ready, .streamingReady:
                 if isCurrentDiscoveryPlaying {
                     return .playing
                 }
@@ -100,8 +100,6 @@ struct VoiceoverDetailButton: View {
                 }
                 return .readyToPlay
             case .missing, .none:
-                return .create
-            @unknown default:
                 return .create
             }
         }
@@ -173,7 +171,7 @@ struct VoiceoverDetailButton: View {
         switch state {
         case .retry, .create:
             controller.setCurrentDiscovery(discovery)
-            controller.requestVoiceover(for: discovery)
+            controller.generateVoiceover(for: discovery)
         case .playing, .paused, .readyToPlay:
             controller.setCurrentDiscovery(discovery)
             controller.togglePlayback(for: discovery)

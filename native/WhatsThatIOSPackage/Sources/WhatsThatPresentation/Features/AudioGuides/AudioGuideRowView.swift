@@ -19,7 +19,8 @@ struct AudioGuideRowView<MenuContent: View>: View {
     @ViewBuilder let menuContent: () -> MenuContent
     
     @Environment(\.colorScheme) var colorScheme
-    
+    @State private var streamingRotation = Angle.zero
+
     // MARK: - Computed Properties
     
     private var isReady: Bool {
@@ -38,7 +39,7 @@ struct AudioGuideRowView<MenuContent: View>: View {
         switch state.voiceoverStatus {
         case .empty, .failed, .generating, .generationQueued, .checking:
             return 0.5
-        case .ready:
+        case .ready, .streamingReady:
             return 1.0
         }
     }
@@ -87,6 +88,15 @@ struct AudioGuideRowView<MenuContent: View>: View {
         .background(
             backgroundColor.cornerRadius(12)
         )
+        .overlay(alignment: .leading) {
+            if state.isFreshlyReady {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(BrandColors.logo)
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+                    .transition(.opacity)
+            }
+        }
         .opacity(contentOpacity)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -95,6 +105,21 @@ struct AudioGuideRowView<MenuContent: View>: View {
         .onLongPressGesture(minimumDuration: 0.4) {
             if isReady {
                 onOpenPlayer()
+            }
+        }
+        .onAppear {
+            if case .streamingReady = state.voiceoverStatus {
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    streamingRotation = .degrees(360)
+                }
+            }
+        }
+        .onChange(of: state.voiceoverStatus) { newStatus in
+            if case .streamingReady = newStatus {
+                streamingRotation = .zero
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    streamingRotation = .degrees(360)
+                }
             }
         }
     }
@@ -167,6 +192,19 @@ struct AudioGuideRowView<MenuContent: View>: View {
                 Image(systemName: "sparkles")
                     .font(.headline)
                     .foregroundColor(.white)
+            case .streamingReady:
+                Color.black.opacity(0.3)
+                ZStack {
+                    Circle()
+                        .trim(from: 0, to: 0.7)
+                        .stroke(BrandColors.logo, lineWidth: 2)
+                        .frame(width: 28, height: 28)
+                        .rotationEffect(streamingRotation)
+                    Image(systemName: "play.fill")
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .offset(x: 1)
+                }
             case .ready:
                 EmptyView()
             }
@@ -180,12 +218,16 @@ struct AudioGuideRowView<MenuContent: View>: View {
         HStack(spacing: 6) {
             switch state.voiceoverStatus {
             case .ready:
-                if let duration = durationString {
+                if state.isFreshlyReady {
+                    Text("Ready")
+                        .font(.adaptiveSystem(size: 14, weight: .medium))
+                        .foregroundColor(BrandColors.logo)
+                } else if let duration = durationString {
                     Text(duration)
                         .font(.adaptiveSystem(size: 14))
                         .foregroundColor(BrandTheme.palette(for: colorScheme).textSecondary)
                 }
-                
+
                 // Show "Queued" chip if in queue but not playing
                 if state.isQueued && !state.isPlaying {
                     Text("Queued")
@@ -197,6 +239,11 @@ struct AudioGuideRowView<MenuContent: View>: View {
                         .clipShape(Capsule())
                 }
                 
+            case .streamingReady:
+                Text("Ready")
+                    .font(.adaptiveSystem(size: 14, weight: .medium))
+                    .foregroundColor(BrandColors.logo)
+
             case .generating:
                 Text("Generating...")
                     .font(.adaptiveSystem(size: 14))
@@ -275,12 +322,11 @@ struct AudioGuideRowView<MenuContent: View>: View {
     
     private func handleTap() {
         switch state.voiceoverStatus {
-        case .ready:
+        case .ready, .streamingReady:
             onPlay()
         case .empty, .failed:
             onCreate?()
         case .generating, .generationQueued, .checking:
-            // No action while generating or checking
             break
         }
     }

@@ -13,6 +13,8 @@ struct DiscoveryAudioControls: View {
         switch asset.status {
         case .ready:
             return .ready(duration: nil)
+        case .streamingReady:
+            return .streamingReady
         case .processing:
             return .generating
         case .failed:
@@ -68,6 +70,9 @@ struct DiscoveryAudioControls: View {
         scrollProgress * 12
     }
     
+    // Streaming animation state
+    @State private var streamingRotation = Angle.zero
+
     // Feedback state for queue buttons
     @State private var showPlayNextConfirmation = false
     @State private var showAddToEndConfirmation = false
@@ -189,7 +194,7 @@ struct DiscoveryAudioControls: View {
                 if (creditBalance ?? 1) > 0 {
                     Button("Cancel", role: .cancel) { }
                     Button("Generate") {
-                        voiceoverController.requestVoiceover(for: discovery)
+                        voiceoverController.generateVoiceover(for: discovery)
                     }
                     .keyboardShortcut(.defaultAction)
                 } else {
@@ -331,7 +336,12 @@ struct DiscoveryAudioControls: View {
                     case .ready:
                         Image(systemName: "play.fill")
                             .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .bold))
-                            .offset(x: 2) // Optical center adjustment
+                            .offset(x: 2)
+                            .transition(.scale.combined(with: .opacity))
+                    case .streamingReady:
+                        Image(systemName: "play.fill")
+                            .font(.system(size: UIDevice.isIPad ? 22 : 16, weight: .bold))
+                            .offset(x: 2)
                             .transition(.scale.combined(with: .opacity))
                     case .generating, .generationQueued, .checking:
                         ProgressView()
@@ -346,7 +356,32 @@ struct DiscoveryAudioControls: View {
                 }
             }
             .foregroundColor(.white)
-            .id(isPlaying ? "playing" : String(describing: voiceoverStatus)) // Unique ID for transitions
+            .id(isPlaying ? "playing" : String(describing: voiceoverStatus))
+        }
+        .overlay {
+            if case .streamingReady = voiceoverStatus, !isPlaying {
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(Color.white.opacity(0.7), lineWidth: 2)
+                    .frame(width: UIDevice.isIPad ? 48 : 36, height: UIDevice.isIPad ? 48 : 36)
+                    .rotationEffect(streamingRotation)
+            }
+        }
+        .onAppear {
+            if case .streamingReady = voiceoverStatus {
+                startStreamingAnimation()
+            }
+        }
+        .onChange(of: voiceoverStatus) { newStatus in
+            if case .streamingReady = newStatus {
+                startStreamingAnimation()
+            }
+        }
+        .onChange(of: isPlaying) { _, nowPlaying in
+            // Restart spinning when playback stops but status is still streamingReady
+            if !nowPlaying, case .streamingReady = voiceoverStatus {
+                startStreamingAnimation()
+            }
         }
     }
     
@@ -357,7 +392,7 @@ struct DiscoveryAudioControls: View {
                 Text("Pause")
             } else {
                 switch voiceoverStatus {
-                case .ready:
+                case .ready, .streamingReady:
                     Text("Play")
                 case .generating, .generationQueued:
                     Text("Generating...")
@@ -372,13 +407,20 @@ struct DiscoveryAudioControls: View {
         .foregroundColor(palette.textPrimary)
     }
     
+    private func startStreamingAnimation() {
+        streamingRotation = .zero
+        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+            streamingRotation = .degrees(360)
+        }
+    }
+
     private func handleMainAction() {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.prepare()
         generator.impactOccurred()
         
         switch voiceoverStatus {
-        case .ready:
+        case .ready, .streamingReady:
             voiceoverController.togglePlayback(for: discovery)
         case .empty:
             // Show confirmation for new generation
@@ -387,7 +429,7 @@ struct DiscoveryAudioControls: View {
             }
         case .failed:
             // Retry immediately without confirmation
-            voiceoverController.requestVoiceover(for: discovery)
+            voiceoverController.generateVoiceover(for: discovery)
         default:
             break
         }
@@ -397,7 +439,7 @@ struct DiscoveryAudioControls: View {
         switch voiceoverStatus {
         case .generating, .generationQueued, .checking:
             return true
-        default:
+        case .ready, .streamingReady, .empty, .failed:
             return false
         }
     }

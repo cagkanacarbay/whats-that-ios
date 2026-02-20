@@ -30,6 +30,7 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
     private let configuration: AppConfiguration
     private let urlSession: URLSession
     private let signedURLTTL: TimeInterval
+    private let voiceoverFileCache: VoiceoverFileCache
     private var cache: [Int64: CacheEntry] = [:]
 
     private static func makeDecoder() -> JSONDecoder {
@@ -69,12 +70,14 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
         client: SupabaseClient,
         configuration: AppConfiguration,
         urlSession: URLSession = .shared,
-        signedURLTTL: TimeInterval = 60 * 60 * 24 * 7
+        signedURLTTL: TimeInterval = 60 * 60 * 24 * 7,
+        voiceoverFileCache: VoiceoverFileCache = .shared
     ) {
         self.client = client
         self.configuration = configuration
         self.urlSession = urlSession
         self.signedURLTTL = signedURLTTL
+        self.voiceoverFileCache = voiceoverFileCache
     }
 
     // Backward-compatible initializer for existing call sites
@@ -214,6 +217,7 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
 
         let body = VoiceoverRequestBody(
             discovery_id: discoveryId,
@@ -266,6 +270,20 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             }
 
             if (200..<300).contains(httpResponse.statusCode) {
+                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+
+                if contentType.contains("audio/mpeg") {
+                    // DIRECT AUDIO PATH: MP3 bytes in body, metadata in headers
+                    return await handleDirectAudioResponse(
+                        data: data,
+                        headers: httpResponse,
+                        discoveryId: discoveryId,
+                        ttsModel: ttsModel,
+                        voiceModelId: voiceModelId
+                    )
+                }
+
+                // EXISTING JSON PATH
                 do {
                     let response = try Self.decoder.decode(VoiceoverEdgeResponse.self, from: data)
                     let asset = mapAsset(
@@ -361,6 +379,72 @@ public actor SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             return 0
         }
     }
+
+    public nonisolated func streamVoiceover(
+        for discoveryId: Int64,
+        voiceModelId: String,
+        ttsModel: String
+    ) -> AsyncStream<VoiceoverStreamEvent> {
+        AsyncStream { continuation in
+            let task = Task { [client, configuration] in
+                guard let supabaseURL = configuration.supabaseURL else {
+                    continuation.yield(.failed("Missing Supabase configuration"))
+                    continuation.finish()
+                    return
+                }
+
+                guard let accessToken = client.auth.currentSession?.accessToken else {
+                    continuation.yield(.failed("Not authenticated"))
+                    continuation.finish()
+                    return
+                }
+
+                let baseURL = SupabaseDiscoveryAnalysisClient.functionsBaseURL(from: supabaseURL)
+                let requestURL = baseURL.appendingPathComponent("generate-voiceover")
+
+                var request = URLRequest(url: requestURL)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+
+                let body = VoiceoverRequestBody(
+                    discovery_id: discoveryId,
+                    voice_model_id: voiceModelId,
+                    tts_model: ttsModel
+                )
+
+                do {
+                    request.httpBody = try JSONEncoder().encode(body)
+                } catch {
+                    continuation.yield(.failed(error.localizedDescription))
+                    continuation.finish()
+                    return
+                }
+
+                let delegate = VoiceoverStreamURLSessionDelegate(
+                    continuation: continuation,
+                    discoveryId: discoveryId,
+                    ttsModel: ttsModel,
+                    voiceModelId: voiceModelId
+                )
+
+                let session = URLSession(
+                    configuration: .default,
+                    delegate: delegate,
+                    delegateQueue: nil
+                )
+
+                let dataTask = session.dataTask(with: request)
+                dataTask.resume()
+
+                continuation.onTermination = { @Sendable _ in
+                    dataTask.cancel()
+                    session.invalidateAndCancel()
+                }
+            }
+        }
+    }
 }
 
 private func date(from string: String?) -> Date? {
@@ -446,6 +530,51 @@ private extension SupabaseVoiceoverRepository {
         }
     }
 
+    func handleDirectAudioResponse(
+        data: Data,
+        headers: HTTPURLResponse,
+        discoveryId: Int64,
+        ttsModel: String,
+        voiceModelId: String
+    ) async -> DiscoveryVoiceoverAsset {
+        let fileName = headers.value(forHTTPHeaderField: "X-File-Name") ?? "voiceover.mp3"
+        let fileExtension = headers.value(forHTTPHeaderField: "X-File-Extension") ?? "mp3"
+        let provider = headers.value(forHTTPHeaderField: "X-Provider")
+        let headerTtsModel = headers.value(forHTTPHeaderField: "X-TTS-Model") ?? ttsModel
+        let headerVoiceModelId = headers.value(forHTTPHeaderField: "X-Voice-Model-Id") ?? voiceModelId
+        let wasExisting = headers.value(forHTTPHeaderField: "X-Was-Existing") == "true"
+        let wasRefunded = headers.value(forHTTPHeaderField: "X-Was-Refunded") == "true"
+        let creditBalance: Int? = headers.value(forHTTPHeaderField: "X-Credit-Balance").flatMap { Int($0) }
+
+        // Store audio bytes directly in file cache
+        do {
+            _ = try await voiceoverFileCache.store(data: data, discoveryId: discoveryId, fileName: fileName)
+            supabaseVoiceoverLogger.info("Stored direct audio bytes in cache: \(data.count) bytes for discovery \(discoveryId)")
+        } catch {
+            supabaseVoiceoverLogger.error("Failed to cache direct audio: \(error.localizedDescription, privacy: .public)")
+        }
+
+        let asset = DiscoveryVoiceoverAsset(
+            discoveryId: discoveryId,
+            status: .ready,
+            audioURL: nil,
+            provider: provider,
+            ttsModel: headerTtsModel,
+            voiceModelId: headerVoiceModelId,
+            fileName: fileName,
+            fileExtension: fileExtension,
+            requestedAt: nil,
+            updatedAt: Date(),
+            errorReason: nil,
+            wasExistingResponse: wasExisting,
+            wasRefunded: wasRefunded,
+            creditBalance: creditBalance
+        )
+
+        cache[discoveryId] = CacheEntry(asset: asset, updatedAt: Date(), expiresAt: nil)
+        return asset
+    }
+
     func decodeErrorMessage(data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             return nil
@@ -457,6 +586,208 @@ private extension SupabaseVoiceoverRepository {
             return error
         }
         return nil
+    }
+}
+
+// MARK: - Streaming URLSession Delegate
+
+final class VoiceoverStreamURLSessionDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let continuation: AsyncStream<VoiceoverStreamEvent>.Continuation
+    private let discoveryId: Int64
+    private let ttsModel: String
+    private let voiceModelId: String
+    private var didEmitMetadata = false
+    private var receivedAudioData = false
+    /// Accumulated JSON body when server returns application/json instead of streaming audio
+    private var jsonAccumulator = Data()
+
+    init(
+        continuation: AsyncStream<VoiceoverStreamEvent>.Continuation,
+        discoveryId: Int64,
+        ttsModel: String,
+        voiceModelId: String
+    ) {
+        self.continuation = continuation
+        self.discoveryId = discoveryId
+        self.ttsModel = ttsModel
+        self.voiceModelId = voiceModelId
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            continuation.yield(.failed("Invalid response"))
+            continuation.finish()
+            return
+        }
+
+        // Handle non-success status
+        if httpResponse.statusCode == 402 {
+            completionHandler(.cancel)
+            continuation.yield(.failed("insufficient_credits"))
+            continuation.finish()
+            return
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            completionHandler(.cancel)
+            continuation.yield(.failed("Server error: \(httpResponse.statusCode)"))
+            continuation.finish()
+            return
+        }
+
+        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+
+        // If server returned JSON instead of audio, it's a non-streaming response (existing voiceover, etc.)
+        if contentType.contains("application/json") {
+            // Let data accumulate — we'll parse JSON in didCompleteWithError
+            completionHandler(.allow)
+            return
+        }
+
+        // Parse metadata from X-headers
+        let metadata = VoiceoverStreamMetadata(
+            voiceoverId: httpResponse.value(forHTTPHeaderField: "X-Voiceover-Id"),
+            fileName: httpResponse.value(forHTTPHeaderField: "X-File-Name") ?? "voiceover.mp3",
+            fileExtension: httpResponse.value(forHTTPHeaderField: "X-File-Extension") ?? "mp3",
+            provider: httpResponse.value(forHTTPHeaderField: "X-Provider"),
+            ttsModel: httpResponse.value(forHTTPHeaderField: "X-TTS-Model") ?? ttsModel,
+            voiceModelId: httpResponse.value(forHTTPHeaderField: "X-Voice-Model-Id") ?? voiceModelId,
+            creditBalance: httpResponse.value(forHTTPHeaderField: "X-Credit-Balance").flatMap { Int($0) },
+            wasExisting: httpResponse.value(forHTTPHeaderField: "X-Was-Existing") == "true",
+            wasRefunded: httpResponse.value(forHTTPHeaderField: "X-Was-Refunded") == "true"
+        )
+        didEmitMetadata = true
+        continuation.yield(.metadata(metadata))
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        if didEmitMetadata {
+            receivedAudioData = true
+            continuation.yield(.audioData(data))
+        } else {
+            // Accumulating a JSON response body
+            jsonAccumulator.append(data)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            if (error as NSError).code == NSURLErrorCancelled {
+                continuation.finish()
+            } else {
+                continuation.yield(.failed(error.localizedDescription))
+                continuation.finish()
+            }
+            return
+        }
+
+        if didEmitMetadata {
+            // Streaming path completed successfully
+            // Build a minimal completed asset — the caller will construct the full asset from metadata + cached data
+            let asset = DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .ready,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: Date(),
+                errorReason: nil,
+                wasExistingResponse: false,
+                wasRefunded: false
+            )
+            continuation.yield(.completed(asset))
+        } else {
+            // JSON path — server returned JSON instead of streaming audio.
+            // Parse the response to determine if this is an existing ready voiceover,
+            // an already-processing voiceover, or an error.
+            handleJSONResponse()
+        }
+        continuation.finish()
+    }
+
+    /// Parses a JSON response from the server when it doesn't stream audio.
+    /// This happens when the voiceover already exists (ready or processing).
+    private func handleJSONResponse() {
+        guard let json = try? JSONSerialization.jsonObject(with: jsonAccumulator) as? [String: Any] else {
+            continuation.yield(.failed("Invalid server response"))
+            return
+        }
+
+        let status = (json["status"] as? String)?.lowercased()
+        let creditBalance = json["credit_balance"] as? Int
+        let wasExisting = json["was_existing"] as? Bool ?? false
+        let wasRefunded = json["was_refunded"] as? Bool ?? false
+        let errorReason = json["error_reason"] as? String
+
+        if status == "ready" {
+            // Voiceover already exists and is ready — emit as completed
+            let audioURLString = json["audio_url"] as? String
+            let fileName = json["file_name"] as? String
+            let fileExtension = json["file_extension"] as? String
+            let provider = json["provider"] as? String
+            let serverTtsModel = json["tts_model"] as? String
+            let serverVoiceModelId = json["voice_model_id"] as? String
+
+            let asset = DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .ready,
+                audioURL: audioURLString.flatMap { URL(string: $0) },
+                provider: provider,
+                ttsModel: serverTtsModel ?? ttsModel,
+                voiceModelId: serverVoiceModelId ?? voiceModelId,
+                fileName: fileName,
+                fileExtension: fileExtension,
+                requestedAt: nil,
+                updatedAt: Date(),
+                errorReason: nil,
+                wasExistingResponse: wasExisting,
+                wasRefunded: wasRefunded,
+                creditBalance: creditBalance
+            )
+            continuation.yield(.completed(asset))
+        } else if status == "processing" {
+            // Voiceover is already being generated by another request.
+            // Emit as completed with .processing status — the controller's polling
+            // mechanism will track it to .ready.
+            let asset = DiscoveryVoiceoverAsset(
+                discoveryId: discoveryId,
+                status: .processing,
+                audioURL: nil,
+                provider: nil,
+                ttsModel: ttsModel,
+                voiceModelId: voiceModelId,
+                fileName: nil,
+                fileExtension: nil,
+                requestedAt: nil,
+                updatedAt: Date(),
+                errorReason: nil,
+                wasExistingResponse: wasExisting,
+                wasRefunded: wasRefunded,
+                creditBalance: creditBalance
+            )
+            continuation.yield(.completed(asset))
+        } else if status == "failed" {
+            // Server-side failure
+            continuation.yield(.failed(errorReason ?? "voiceover_failed"))
+        } else {
+            // Unknown status — check for error fields
+            if let errorMessage = json["error"] as? String ?? json["message"] as? String {
+                continuation.yield(.failed(errorMessage))
+            } else {
+                continuation.yield(.failed("Unexpected server response"))
+            }
+        }
     }
 }
 
@@ -566,9 +897,11 @@ public struct SupabaseVoiceoverRepository: DiscoveryVoiceoverRepository {
             wasRefunded: false
         )
     }
-    
+
     public func countUserVoiceovers() async -> Int {
         0
     }
+
+    // Uses default protocol extension fallback
 }
 #endif

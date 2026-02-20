@@ -57,24 +57,14 @@ struct UnifiedToastOverlay: View {
     }
     
     // MARK: - Combined Toast State
-    
-    /// Which type of toast to show (audio guide toasts take priority)
-    private enum FrontToastType {
-        case audioGuide(GenerationCompleteToast)
-        case discovery(DiscoveryCompletionToast)
-    }
-    
-    /// Get the front toast (audio guide priority) and total count
-    private var toastState: (front: FrontToastType?, totalCount: Int) {
-        let audioToasts = audioServices.pendingGenerationToasts
+
+    /// Get the front discovery toast and total count
+    private var toastState: (front: DiscoveryCompletionToast?, totalCount: Int) {
         let discoveryToasts = sessionManager.pendingCompletionToasts
-        let total = audioToasts.count + discoveryToasts.count
-        
-        // Audio guide toasts take priority (more immediately actionable)
-        if let audioToast = audioToasts.first {
-            return (.audioGuide(audioToast), total)
-        } else if let discoveryToast = discoveryToasts.first {
-            return (.discovery(discoveryToast), total)
+        let total = discoveryToasts.count
+
+        if let discoveryToast = discoveryToasts.first {
+            return (discoveryToast, total)
         }
         return (nil, 0)
     }
@@ -84,12 +74,11 @@ struct UnifiedToastOverlay: View {
     private func audioState(for discoveryId: Int64, wasGenerating: Bool) -> DiscoveryCompletionToastView.AudioButtonState {
         if let asset = audioServices.playbackController.assetStates[discoveryId] {
             switch asset.status {
-            case .ready:
+            case .ready, .streamingReady:
                 return .ready
             case .processing:
                 return .generating
             case .failed:
-                // Generation failed - show retry button
                 return .notGenerated
             default:
                 return wasGenerating ? .generating : .notGenerated
@@ -102,46 +91,25 @@ struct UnifiedToastOverlay: View {
     
     var body: some View {
         let (front, totalCount) = toastState
-        
-        if let frontToast = front {
-            Group {
-                switch frontToast {
-                case .audioGuide(let toast):
-                    audioGuideToastContent(toast: toast)
-                case .discovery(let toast):
-                    discoveryToastContent(toast: toast)
+
+        if let toast = front {
+            discoveryToastContent(toast: toast)
+                .overlay(alignment: .topTrailing) {
+                    if totalCount > 1 {
+                        pendingCountBadge(count: totalCount)
+                            .offset(x: -8, y: -8)
+                    }
                 }
-            }
-            // Unified badge showing combined count (top-right corner)
-            .overlay(alignment: .topTrailing) {
-                if totalCount > 1 {
-                    pendingCountBadge(count: totalCount)
-                        .offset(x: -8, y: -8)
-                }
-            }
-            .padding(.bottom, bottomPadding)
-            .frame(maxWidth: UIDevice.isIPad ? IPadLayout.toastMaxWidth : .infinity)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .transition(.opacity)
-            .zIndex(10)
+                .padding(.bottom, bottomPadding)
+                .frame(maxWidth: UIDevice.isIPad ? IPadLayout.toastMaxWidth : .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .transition(.opacity)
+                .zIndex(10)
         }
     }
-    
+
     // MARK: - Toast Content Views
-    
-    @ViewBuilder
-    private func audioGuideToastContent(toast: GenerationCompleteToast) -> some View {
-        GenerationCompleteToastView(
-            toast: toast,
-            onPlayNow: { audioServices.handleToastPlayNow() },
-            onPlayNext: { audioServices.handleToastPlayNext() },
-            onAddToQueue: { audioServices.handleToastAddToQueue() },
-            onDismiss: { audioServices.dismissGenerationToast() }
-        )
-        .id("audio-\(toast.id)")
-        .animation(.easeInOut(duration: 0.25), value: toast.id)
-    }
-    
+
     @ViewBuilder
     private func discoveryToastContent(toast: DiscoveryCompletionToast) -> some View {
         let currentAudioState = audioState(

@@ -162,7 +162,7 @@ final class CreationFlowCoordinator: ObservableObject {
                 await storeObserver?.upsert(summary)
             }
             if generateAudio {
-                audioServices?.playbackController.requestVoiceover(for: summary)
+                audioServices?.playbackController.generateVoiceover(for: summary)
             }
         }
         sessionManager.onDiscoveryFailed = { _, _ in }

@@ -140,7 +140,13 @@ serve(async req => {
       return jsonResponse(baseHeaders, { error: 'invalid_payload', message: 'voice_model_id is required.' }, 422);
     }
 
-    const voiceOptions = await fetchVoiceOptions(supabaseAdmin, logger);
+    const acceptsAudio = req.headers.get('Accept')?.includes('audio/mpeg') ?? false;
+
+    const [voiceOptions, discoveryData] = await Promise.all([
+      fetchVoiceOptions(supabaseAdmin, logger),
+      fetchDiscoveryData(supabaseAdmin, discoveryId, userId, logger),
+    ]);
+
     logger.debug('Voice options fetched', { count: voiceOptions.length });
     const voice = voiceOptions.find(
       option => option.tts_model === ttsModel && option.voice_model_id === voiceModelId
@@ -154,7 +160,7 @@ serve(async req => {
       );
     }
 
-    const { title, description } = await fetchDiscoveryData(supabaseAdmin, discoveryId, userId, logger);
+    const { title, description } = discoveryData;
     if (!description) {
       return jsonResponse(baseHeaders, { error: 'not_found', message: 'Discovery not found.' }, 404);
     }
@@ -314,118 +320,280 @@ serve(async req => {
       // creditBalance already set from RPC result (no extra fetch needed)
     }
 
-    const { audioBuffer, upstreamStatus, upstreamError } = await callFishAudio(
-      sanitizedText,
-      row.voice_model_id,
-      row.tts_model,
-      logger
-    );
-    if (!audioBuffer) {
-      logger.error('Fish Audio returned failure', {
+    if (acceptsAudio) {
+      // STREAMING DIRECT AUDIO PATH: Pipe Fish Audio response stream to client
+      const streamingResult = await callFishAudioStreaming(
+        sanitizedText,
+        row.voice_model_id,
+        row.tts_model,
+        logger
+      );
+
+      if (!streamingResult.response) {
+        logger.error('Fish Audio streaming returned failure', {
+          discoveryId,
+          voiceoverId: row.id,
+          upstreamStatus: streamingResult.upstreamStatus,
+          upstreamError: streamingResult.upstreamError,
+        });
+        await handleFailure(
+          supabaseAdmin,
+          row,
+          streamingResult.upstreamError || 'fish_audio_failed',
+          userId,
+          logger
+        );
+        const status = streamingResult.upstreamStatus && [429, 502, 503].includes(streamingResult.upstreamStatus) ? streamingResult.upstreamStatus : 500;
+        return jsonResponse(
+          baseHeaders,
+          {
+            ...row,
+            status: 'failed',
+            error_reason: streamingResult.upstreamError || 'voiceover_failed',
+            audio_url: null,
+            audio_url_expires_at: null,
+            was_refunded: true,
+            was_existing: wasExistingResponse,
+            credit_balance: await fetchCreditBalance(supabaseAdmin, userId, logger),
+          },
+          status
+        );
+      }
+
+      creditBalance = creditBalance ?? await fetchCreditBalance(supabaseAdmin, userId, logger);
+
+      // Decouple Fish Audio consumption from client connection.
+      // Read Fish Audio manually so client disconnect does NOT abort the download.
+      const fishBody = streamingResult.response!.body!;
+      const reader = fishBody.getReader();
+      const accumulatedChunks: Uint8Array[] = [];
+      let fishReadError: string | null = null;
+      let clientClosed = false;
+
+      // Client-facing stream: pushes chunks opportunistically, survives disconnect
+      let clientController: ReadableStreamDefaultController<Uint8Array> | null = null;
+      const clientStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          clientController = controller;
+        },
+        cancel() {
+          clientClosed = true;
+          logger.info('Client disconnected during streaming', { discoveryId, voiceoverId: row.id });
+        },
+      });
+
+      // Consume ALL Fish Audio chunks regardless of client state
+      const consumeFishAudio = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = new Uint8Array(value);
+            accumulatedChunks.push(chunk);
+
+            // Forward to client if still connected
+            if (!clientClosed && clientController) {
+              try {
+                clientController.enqueue(chunk);
+              } catch {
+                clientClosed = true;
+              }
+            }
+          }
+          // Close client stream if still connected
+          if (!clientClosed && clientController) {
+            try { clientController.close(); } catch { /* already closed */ }
+          }
+        } catch (err) {
+          fishReadError = err instanceof Error ? err.message : String(err);
+          logger.error('Fish Audio stream read error', { discoveryId, voiceoverId: row.id, error: fishReadError });
+          if (!clientClosed && clientController) {
+            try { clientController.error(new Error(fishReadError)); } catch { /* already closed */ }
+          }
+        }
+      };
+
+      // Start consuming immediately (runs as microtask)
+      const consumePromise = consumeFishAudio();
+
+      // Background: after Fish Audio is fully consumed, upload to storage and mark ready
+      EdgeRuntime.waitUntil(
+        consumePromise.then(async () => {
+          if (fishReadError) {
+            await handleFailure(supabaseAdmin, row, `stream_error: ${fishReadError}`, userId, logger);
+            return;
+          }
+
+          const totalLength = accumulatedChunks.reduce((sum, c) => sum + c.length, 0);
+          if (totalLength === 0) {
+            await handleFailure(supabaseAdmin, row, 'empty_audio_stream', userId, logger);
+            return;
+          }
+
+          const audioBuffer = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of accumulatedChunks) {
+            audioBuffer.set(chunk, offset);
+            offset += chunk.length;
+          }
+
+          logger.info('Stream complete, uploading to storage', {
+            discoveryId, voiceoverId: row.id, bytes: totalLength, clientDisconnected: clientClosed,
+          });
+
+          const uploadResult = await uploadAudio(supabaseAdmin, row.discovery_id, row.file_name, audioBuffer, logger);
+          if (!uploadResult.success) {
+            logger.error('Background upload failed after stream', { discoveryId, voiceoverId: row.id, error: uploadResult.error });
+            // Don't mark failed — DB row stays processing, stale timeout will handle it
+            return;
+          }
+
+          const { error: updateReadyError } = await supabaseAdmin
+            .from('discovery_voiceovers')
+            .update({ status: 'ready', error_reason: null, updated_at: new Date().toISOString() })
+            .eq('id', row.id);
+
+          if (updateReadyError) {
+            logger.error('Failed to mark ready after stream', { errorMessage: updateReadyError.message });
+          } else {
+            logger.info('Background upload and mark-ready completed', { discoveryId, voiceoverId: row.id });
+          }
+        }).catch(err => logger.error('Background stream handler error', { error: err instanceof Error ? err.message : String(err) }))
+      );
+
+      logger.info('Returning streaming audio response', { discoveryId, voiceoverId: row.id });
+
+      return new Response(clientStream, {
+        status: 200,
+        headers: {
+          ...baseHeaders,
+          'Content-Type': 'audio/mpeg',
+          'Transfer-Encoding': 'chunked',
+          'X-Voiceover-Id': String(row.id),
+          'X-Discovery-Id': String(row.discovery_id),
+          'X-Voiceover-Status': 'processing',
+          'X-Credit-Balance': String(creditBalance ?? ''),
+          'X-Was-Refunded': 'false',
+          'X-Was-Existing': String(wasExistingResponse),
+          'X-File-Name': row.file_name,
+          'X-File-Extension': row.file_extension,
+          'X-Provider': row.provider,
+          'X-TTS-Model': row.tts_model,
+          'X-Voice-Model-Id': row.voice_model_id,
+        },
+      });
+
+    } else {
+      // NON-STREAMING PATH: Buffer entire audio, then return
+      const { audioBuffer, upstreamStatus, upstreamError } = await callFishAudio(
+        sanitizedText,
+        row.voice_model_id,
+        row.tts_model,
+        logger
+      );
+      if (!audioBuffer) {
+        logger.error('Fish Audio returned failure', {
+          discoveryId,
+          voiceoverId: row.id,
+          upstreamStatus,
+          upstreamError,
+        });
+        await handleFailure(
+          supabaseAdmin,
+          row,
+          upstreamError || 'fish_audio_failed',
+          userId,
+          logger
+        );
+        const status = upstreamStatus && [429, 502, 503].includes(upstreamStatus) ? upstreamStatus : 500;
+        return jsonResponse(
+          baseHeaders,
+          {
+            ...row,
+            status: 'failed',
+            error_reason: upstreamError || 'voiceover_failed',
+            audio_url: null,
+            audio_url_expires_at: null,
+            was_refunded: true,
+            was_existing: wasExistingResponse,
+            credit_balance: await fetchCreditBalance(supabaseAdmin, userId, logger),
+          },
+          status
+        );
+      }
+      logger.info('Fish Audio returned successfully', { discoveryId, voiceoverId: row.id, bytes: audioBuffer.byteLength });
+      // EXISTING JSON PATH: Upload first, then return signed URL
+      const uploadResult = await uploadAudio(
+        supabaseAdmin,
+        row.discovery_id,
+        row.file_name,
+        audioBuffer,
+        logger
+      );
+      logger.info('Uploaded audio to storage', { discoveryId, voiceoverId: row.id, success: uploadResult.success, error: uploadResult.error, path: `${row.discovery_id}/${row.file_name}` });
+      if (!uploadResult.success) {
+        await handleFailure(
+          supabaseAdmin,
+          row,
+          uploadResult.error ?? 'upload_failed',
+          userId,
+          logger
+        );
+        return jsonResponse(
+          baseHeaders,
+          {
+            ...row,
+            status: 'failed',
+            error_reason: uploadResult.error ?? 'upload_failed',
+            audio_url: null,
+            audio_url_expires_at: null,
+            was_refunded: true,
+            was_existing: wasExistingResponse,
+            credit_balance: await fetchCreditBalance(supabaseAdmin, userId, logger),
+          },
+          500
+        );
+      }
+
+      const { data: readyRow, error: updateReadyError } = await supabaseAdmin
+        .from('discovery_voiceovers')
+        .update({ status: 'ready', error_reason: null, updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+        .select()
+        .single();
+
+      if (updateReadyError || !readyRow) {
+        logger.error('Failed to mark ready', { errorMessage: updateReadyError?.message });
+        return jsonResponse(
+          baseHeaders,
+          { error: 'server_error', message: 'Unable to finalize voiceover.' },
+          500
+        );
+      }
+
+      const { audioUrl, expiresAt } = await signAudioUrl(supabaseAdmin, readyRow as VoiceoverRow, logger);
+      creditBalance = creditBalance ?? await fetchCreditBalance(supabaseAdmin, userId, logger);
+
+      logger.info('Voiceover marked ready and signed URL issued', {
         discoveryId,
         voiceoverId: row.id,
-        upstreamStatus,
-        upstreamError,
+        audioUrlPresent: Boolean(audioUrl),
+        expiresAt,
       });
-    } else {
-      logger.info('Fish Audio returned successfully', { discoveryId, voiceoverId: row.id, bytes: audioBuffer.byteLength });
-    }
 
-    if (!audioBuffer) {
-      await handleFailure(
-        supabaseAdmin,
-        row,
-        upstreamError || 'fish_audio_failed',
-        userId,
-        logger
-      );
-      const status = upstreamStatus && [429, 502, 503].includes(upstreamStatus) ? upstreamStatus : 500;
       return jsonResponse(
         baseHeaders,
         {
-          ...row,
-          status: 'failed',
-          error_reason: upstreamError || 'voiceover_failed',
-          audio_url: null,
-          audio_url_expires_at: null,
-          was_refunded: true,
+          ...(readyRow as VoiceoverRow),
+          audio_url: audioUrl,
+          audio_url_expires_at: expiresAt,
+          was_refunded: false,
           was_existing: wasExistingResponse,
-          credit_balance: await fetchCreditBalance(supabaseAdmin, userId, logger),
+          credit_balance: creditBalance,
         },
-        status
+        200
       );
     }
-
-    const uploadResult = await uploadAudio(
-      supabaseAdmin,
-      row.discovery_id,
-      row.file_name,
-      audioBuffer,
-      logger
-    );
-    logger.info('Uploaded audio to storage', { discoveryId, voiceoverId: row.id, success: uploadResult.success, error: uploadResult.error, path: `${row.discovery_id}/${row.file_name}` });
-    if (!uploadResult.success) {
-      await handleFailure(
-        supabaseAdmin,
-        row,
-        uploadResult.error ?? 'upload_failed',
-        userId,
-        logger
-      );
-      return jsonResponse(
-        baseHeaders,
-        {
-          ...row,
-          status: 'failed',
-          error_reason: uploadResult.error ?? 'upload_failed',
-          audio_url: null,
-          audio_url_expires_at: null,
-          was_refunded: true,
-          was_existing: wasExistingResponse,
-          credit_balance: await fetchCreditBalance(supabaseAdmin, userId, logger),
-        },
-        500
-      );
-    }
-
-    const { data: readyRow, error: updateReadyError } = await supabaseAdmin
-      .from('discovery_voiceovers')
-      .update({ status: 'ready', error_reason: null, updated_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .select()
-      .single();
-
-    if (updateReadyError || !readyRow) {
-      logger.error('Failed to mark ready', { errorMessage: updateReadyError?.message });
-      return jsonResponse(
-        baseHeaders,
-        { error: 'server_error', message: 'Unable to finalize voiceover.' },
-        500
-      );
-    }
-
-    const { audioUrl, expiresAt } = await signAudioUrl(supabaseAdmin, readyRow as VoiceoverRow, logger);
-    creditBalance = creditBalance ?? await fetchCreditBalance(supabaseAdmin, userId, logger);
-
-    logger.info('Voiceover marked ready and signed URL issued', {
-      discoveryId,
-      voiceoverId: row.id,
-      audioUrlPresent: Boolean(audioUrl),
-      expiresAt,
-    });
-
-    return jsonResponse(
-      baseHeaders,
-      {
-        ...(readyRow as VoiceoverRow),
-        audio_url: audioUrl,
-        audio_url_expires_at: expiresAt,
-        was_refunded: false,
-        was_existing: wasExistingResponse,
-        credit_balance: creditBalance,
-      },
-      200
-    );
   } catch (error) {
     logger.error('Unhandled error', { errorMessage: error instanceof Error ? error.message : String(error) });
     return jsonResponse(baseHeaders, { error: 'server_error', message: 'Unexpected error.' }, 500);
@@ -621,6 +789,77 @@ async function callFishAudio(
   }
 
   return { audioBuffer: null, upstreamStatus: lastStatus, upstreamError: lastError };
+}
+
+async function callFishAudioStreaming(
+  text: string,
+  voiceModelId: string,
+  ttsModel: string,
+  logger: Logger
+): Promise<{ response: Response | null; upstreamStatus?: number; upstreamError?: string }> {
+  const startedAt = Date.now();
+  let lastError: string | undefined;
+  let lastStatus: number | undefined;
+
+  for (const backoff of BACKOFF_STEPS_MS) {
+    const attempt = BACKOFF_STEPS_MS.indexOf(backoff) + 1;
+    const elapsed = Date.now() - startedAt;
+    if (elapsed + backoff >= EDGE_BUDGET_MS) {
+      break;
+    }
+    if (backoff > 0) {
+      await delay(backoff);
+    }
+    const remainingBudget = EDGE_BUDGET_MS - (Date.now() - startedAt);
+    const signal = AbortSignal.timeout(Math.max(1_000, remainingBudget));
+    logger.info('Calling Fish Audio (streaming)', {
+      attempt,
+      voiceModelId,
+      ttsModel,
+      remainingBudgetMs: remainingBudget
+    });
+    try {
+      const payload: Record<string, unknown> = {
+        text,
+        reference_id: voiceModelId,
+        format: 'mp3',
+        normalize: true,
+        chunk_length: 200,
+        tts_model: ttsModel,
+      };
+
+      const fishResponse = await fetch(FISH_TTS_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${FISH_AUDIO_API_KEY}`,
+          'Content-Type': 'application/msgpack',
+          model: ttsModel,
+        },
+        body: encode(payload),
+        signal,
+      });
+
+      if (!fishResponse.ok) {
+        lastStatus = fishResponse.status;
+        const errorText = await safeReadText(fishResponse);
+        lastError = errorText || `fish_audio_${fishResponse.status}`;
+        logger.warn('Fish Audio streaming error', { status: fishResponse.status, message: lastError, attempt });
+        if ([429, 500, 502, 503].includes(fishResponse.status)) {
+          continue;
+        }
+        return { response: null, upstreamStatus: fishResponse.status, upstreamError: lastError };
+      }
+
+      // Return the raw response — caller will pipe body stream
+      return { response: fishResponse };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      logger.warn('Fish Audio streaming request failed', { errorMessage: lastError, attempt });
+      continue;
+    }
+  }
+
+  return { response: null, upstreamStatus: lastStatus, upstreamError: lastError };
 }
 
 async function safeReadText(response: Response): Promise<string | null> {

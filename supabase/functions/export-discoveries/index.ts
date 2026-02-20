@@ -21,12 +21,21 @@ Deno.serve(async (req: Request) => {
             auth: { persistSession: false },
         });
 
-        // Fetch discoveries for gemini-3-flash-preview model
-        const { data: discoveries, error: dbError } = await supabase
+        // Parse optional after_id parameter for incremental sync
+        const url = new URL(req.url);
+        const afterId = url.searchParams.get("after_id");
+
+        // Fetch all discoveries, optionally after a given ID
+        let query = supabase
             .from("discoveries")
-            .select("id, title, short_description, description, image_url, country, locality, street_name, closest_place, created_at")
-            .eq("model", "gemini-3-flash-preview")
+            .select("id, title, short_description, description, image_url, country, locality, street_name, closest_place, created_at, system_prompt_version, user_prompt_version, model")
             .order("id", { ascending: true });
+
+        if (afterId) {
+            query = query.gt("id", parseInt(afterId));
+        }
+
+        const { data: discoveries, error: dbError } = await query;
 
         if (dbError) {
             throw new Error(`Database error: ${dbError.message}`);

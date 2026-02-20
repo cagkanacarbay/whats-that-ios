@@ -2,310 +2,525 @@
 
 ## The Problem
 
-An audit of the 25 most recent dev discoveries found that **every single one** exhibits a "name-drop and move on" pattern: the narrative introduces an interesting person, event, idea, or cultural practice, mentions it in 1-2 sentences, and then skips to something else entirely.
+An audit of the 25 most recent dev discoveries (IDs 181-221) found that the vast majority exhibit a "name-drop and move on" pattern: the narrative introduces an interesting person, event, idea, or cultural practice, mentions it in 1-2 sentences, and then skips to something else entirely.
 
-- 4/25 scored **severe** (museum placard energy)
-- 13/25 scored **moderate** (multiple interesting threads opened and abandoned)
-- 8/25 scored **minor** (mostly focused, occasional drops)
+- 4/25 scored **severe** (museum placard energy — multiple objects or topics listed with no development)
+- 12/25 scored **moderate** (multiple interesting threads opened and abandoned)
+- 9/25 scored **minor** (mostly focused, occasional drops)
 - 0/25 were clean
 
-**Average severity: 1.9 / 3.** This is structural, not occasional.
+**Average severity: 1.8 / 3.** This is structural, not occasional.
 
 ### Why It Happens
 
-The prompt currently pulls in five directions at once within 260-330 words:
+The Attract/Engage/Flip structure, the cold start rule, and the show-don't-tell principle are all good ideas that should work together. But the prompt currently lets them pull apart instead of reinforcing each other:
 
-1. **Attract** (first H2) — hook with a sharp fact
-2. **Engage** (middle H2s) — "deepen that lens while touching others"
-3. **Flip** (final H2) — switch to a different IPOP dimension
-4. **Cold start "obvious first" rule** — cover the most obvious identity
-5. **Show don't tell** — each fact needs concrete detail, not labels
-
-The result: ~60-80 words per section, spread across 3-5 topics. Every topic gets mentioned; none gets developed. The narrative reads like a confident tour guide speed-walking through a museum — pointing at things and saying "that's interesting" without stopping.
+- **Attract** hooks with a sharp fact — good. But there's no instruction that the Engage sections should *develop that same story*. The model interprets Engage as "now talk about something else."
+- **Engage** says "deepen that lens while touching others" — the "touching others" becomes the dominant behavior. Each Engage section introduces a new mini-topic instead of developing the story.
+- **Flip** is a perspective change on the same subject — good in theory. But when the middle sections already scattered across 3 topics, the flip just adds topic #4.
+- **Cold start** determines WHAT the subject should be (the obvious identity). This is about subject selection, not about adding more content.
+- **Show don't tell** is about HOW we write — concrete detail, not abstract labels. It shouldn't create pressure to cover more topics.
 
 ### What We Want Instead
 
-The user listens to one discovery and thinks: *"That's fascinating — tell me more."* They take another photo. We pick up where we left off and go deeper. Then another photo, another layer. Each discovery is satisfying on its own but creates a pull toward more.
+The core issue is **not breadth vs depth.** The issue is **shallow breadth** — name-dropping interesting things without giving them enough space to develop.
 
-This means:
-- **Each discovery goes deep on ONE thread** — not five shallow ones
-- **Other interesting threads get planted as breadcrumbs** — tantalizing 1-sentence hints woven into the narrative
-- **Consecutive photos build a layered story** — breadcrumbs from discovery 1 become the deep thread of discovery 2
-- **The flip section stays** — it's the final H2, a different IPOP angle on the same subject (not a new topic)
+Both of these are good:
+
+**Mode A — Single-story deep dive.** The photo is a door to one specific story. We tell that story fully. Good for: rich historical events, specific people, moments where the photo directly depicts a particular event.
+- Example: A painting of Jan Sobieski at the Battle of Vienna → just tell the story of that battle. Pre-war conditions, the siege, Sobieski's arrival, the outcome. All sections develop parts of one story.
+
+**Mode B — Multi-aspect exploration.** The subject is broad — a palace, a church, a square. We cover several aspects, but give each one sufficient attention to develop. Not one sentence per aspect, but a few sentences that give the listener a real sense of each.
+- Example: Venice's Secret Arsenal (#191) — covers state monopoly on violence across four angles. Each section develops its angle. The thread holds.
+- Example: Basilica of St. James (#182) — covers St. James iconography, the specific technique of this relief, and a legend connected to this church. Different aspects, but each one gets enough room.
+
+The key insight from discoveries that work: **whatever you mention, give it enough space to develop.** Don't name-drop. 3-5 topics are fine IF each gets real attention. But a response that goes truly deep on one story can be more powerful. We want the prompt to enable both modes, and let the subject matter guide which is right.
+
+What makes a discovery feel good:
+- The listener finishes feeling they learned something real, not that they heard a list of interesting-sounding things
+- Each topic mentioned gets enough space to develop — a few sentences of real knowledge, not a one-liner and move on
+- Consecutive photos build layers — the first photo covers the obvious, subsequent photos can go deeper on one thread
 
 ---
 
-## Section-by-Section Analysis
+## Evidence: Problematic Phrases in the System Prompt, Backed by Real Discoveries
 
-### ROLE (Lines 19-21) — No change needed
-The role description is solid. "Specific, story-driven, and engaging" already implies depth.
+Each finding below identifies exact prompt text, explains why it's problematic, and provides **real quotes from real discoveries** that demonstrate the issue.
 
-### DELIVERABLES (Lines 23-25) — No change needed
-Format is fine.
+### Issue Group 1: "Touch Lightly" / "Touch Others" — Permission to Name-Drop
 
-### INPUT SIGNALS (Lines 27-33) — No change needed
-All signals are well-defined.
+Two separate lines in the prompt explicitly permit the model to mention topics without developing them:
 
-### IMAGE SOURCE & NARRATIVE STANCE (Lines 35-39) — No change needed
-This section works well and was a good addition.
+**Line 73:**
+```
+Engage (middle sections deepen that lens while touching others only when valuable)
+```
 
-### IDENTIFICATION STRATEGY (Lines 41-46) — No change needed
-"Favor specific over generic" is the right instinct.
+**Line 87:**
+```
+middle sections (Engage) deepen that lens and optionally touch lightly upon other lenses
+```
 
-### IPOP OVERVIEW (Lines 48-66) — No change needed
-The theory section is fine as reference material.
+"Touching others" is the root permission slip for shallow breadth. "Touch lightly upon" a person means naming them without telling their story. "Only when valuable" is no guard — the model always judges its own tangents as "valuable."
 
-### IPOP IN WHAT'S THAT (Lines 68-75) — NEEDS CHANGE
+#### Evidence from discoveries:
 
-**Current problem (Line 73):**
-> "Engage (middle sections deepen that lens **while touching others only when valuable**)"
+**#185 (Doge Alvise Mocenigo) — Napoleon name-dropped in one sentence:**
+> "Within twenty years of his death, the independent Republic of Venice would finally fall to Napoleon."
 
-This "touching others" language is the root permission slip for breadth. The middle sections should **stay on the primary thread**, not branch to other lenses. Other lenses should only appear if they organically serve the primary thread's story.
+Napoleon gets one sentence at the end of a section, then the text moves to describing ceremonial clothing. The fall of Venice to Napoleon is one of the most dramatic events in European history, reduced to a passing mention.
 
-**Proposed direction:**
-Rewrite to emphasize that Attract + Engage sections all serve ONE thread. The Engage sections go *deeper* into the same story — not wider into adjacent topics. The flip is the only deliberate lens change.
+**#189 (Vytautas the Great) — Battle of Grunwald name-dropped:**
+> "One of his greatest victories happened far from this castle at the Battle of Grunwald."
 
-### SPECIAL CASES (Lines 77-82) — No change needed
+One of the most important battles in European medieval history gets exactly one sentence.
 
-### PER-DISCOVERY IPOP BEHAVIOR (Lines 84-90) — NEEDS SIGNIFICANT CHANGE
+**#196 (Noble Steel) — Chomętowski name-dropped:**
+> "The inscription at the bottom of the case names Stanisław Chomętowski. He was a powerful leader in the early seventeen hundreds. For him, carrying a bulawa was like holding a scepter."
 
-**Current (Line 87):**
-> "middle sections (Engage) deepen that lens and optionally touch lightly upon other lenses"
+Chomętowski gets 2.5 sentences: he existed, he was powerful, his mace was important. No battles, no decisions, no story.
 
-This is the same "touching lightly" permission that leads to the name-drop pattern. "Touching lightly" on a person means naming them without telling their story. "Touching lightly" on an event means mentioning it without explaining what happened.
+**#194 (Freedom Monument) — "Famous sculptor" never named:**
+> "Only the intervention of a famous sculptor saved the structure. She argued that its artistic value was more important than its political message."
 
-**Proposed direction:**
-Replace the Attract/Engage/Flip structure description with a "One Thread Deep" model:
-- **Attract (H2 #1):** Hook with the sharpest fact from the primary thread. Name the subject.
-- **Engage (H2 #2-3, possibly #4):** Develop the SAME thread deeper. Tell the story. Give the details. Stay with it.
-- **Flip (final H2):** A different IPOP lens on the SAME subject — not a new topic. This is a perspective shift, not a topic shift.
+A "famous sculptor" who saved a national monument from Soviet demolition — never named, never developed.
 
-The key phrase should be: **"Stay with your thread. Develop it. If you mention something, earn it with at least 2-3 sentences of real substance."**
+**#202 (The Golden Siege) — The Holy League, then the Habsburgs:**
+> "The man on the horse is likely a high-ranking commander of the Holy League. This was a massive military alliance that included the Republic of Venice."
 
-### LENS PLAYBOOK (Lines 92-210) — NEEDS ADJUSTMENT
+Then immediately:
+> "The Habsburgs. They were the primary rivals of the Ottoman Empire for centuries."
 
-**Current problem:**
-The examples in each lens playbook show 3 bullet points per discovery, each covering a different sub-topic. This models breadth:
-- Longsword example: bullet 1 (blade shape), bullet 2 (steel production), bullet 3 (maintenance)
-- Frida Kahlo example: bullet 1 (specific moment), bullet 2 (painting elements), bullet 3 (life arc)
+Both get one sentence of context before the text moves on.
 
-The Frida Kahlo example is actually closer to what we want — it's one thread (Frida's personal story) developed across three angles. The longsword example is three separate mini-topics.
+**Note on #187 (Alexander the Great):** "Future Roman emperors and even Napoleon studied these features" is a name-drop, but the mention of Philip II ("His father, Philip the Second, was a brilliant general who conquered Greece first") is less problematic — this could work as a breadcrumb if used well, building on the existing story about Alexander rather than jumping away from it.
 
-**Proposed direction:**
-Revise the examples to show ONE thread developed across 3 bullets, with 1 breadcrumb hint. For example:
+---
 
-Longsword (Objects primary):
-- Bullet 1: Describe the visible blade — shape, fuller, crossguard. Explain how the fuller reduces weight without weakening the blade. A smith would fold the steel dozens of times.
-- Bullet 2: This specific style of crossguard dates to roughly 1250. Knights needed a wider guard as fighting shifted from horseback to foot combat. The pommel counterbalances the blade — hold your hand out flat and imagine the weight.
-- Bullet 3 (breadcrumb woven in): The scabbard is missing, but a sword like this would have been someone's most expensive possession — worth more than a house.
-- Flip: Who carried it — a knight, a town militia leader? The wear pattern on the grip suggests a right-handed fighter who actually used this blade.
+### Issue Group 2: Topic-Per-Section Pattern — Each H2 Introduces a New Topic
 
-vs. the current version which jumps: blade shape → steel production → maintenance. Three separate topics, none developed.
+This is the most critical structural issue. 16 of 25 discoveries exhibit it. The lens playbook examples teach this pattern: each example uses 3 bullets that each cover a different sub-topic with the same structure. The model replicates it faithfully.
 
-### FICTIONAL VIGNETTES (Lines 212-224) — No change needed
+**The problem isn't having multiple topics.** The problem is that ALL examples model the SAME approach — describe it → explain how it's made → broader context. Every Objects lens example follows this pattern. There's no variety. The model learns "this is how I should always structure responses" and replicates it mechanically.
 
-### WRITING THE FIRST H2 / ATTRACT HOOK (Lines 226-267) — MINOR TWEAK
+**Prompt examples that model this pattern (OBJECTS LENS — all 5 examples):**
 
-**Current state:** This section is excellent. The good/weak examples are among the best parts of the prompt.
+```
+Longsword (Lines 164-167):
+- Describe the blade's shape, fuller, crossguard, and pommel
+- Explain medieval steel production
+- Mention how such swords were sharpened, maintained, and eventually retired
+```
 
-**One addition needed:**
-The hook should come from the primary thread — the one thing the discovery will develop. Currently there's no explicit connection between "deliver something immediately" and "this should be the thread you're about to spend 260 words on." The hook can accidentally promise one thread and then the narrative develops another.
+Three topics: blade design → steel production → maintenance.
 
-**Proposed addition:**
-> "The hook must come from the thread you intend to develop. If your strongest hook is about a person, the discovery should be about that person. Do not hook with an event and then spend the body talking about architecture."
+```
+Terracotta Warrior (Lines 168-171):
+- Describe visible details: hairstyle, armour plates, facial expression
+- Explain how figures were moulded, assembled, and originally painted
+- Note differences between warriors and what that reveals about Qin military ranks
+```
 
-### CONTEXT-DRIVEN HEURISTICS (Lines 269-394) — NEEDS EXPANSION
+```
+Gold mask (Lines 172-175):
+- Describe the mask's hammered gold, stylised features
+- Explain how gold was mined, refined, and worked
+- Talk about how masks like this were worn in ceremonies
+```
 
-This section handles connections between discoveries. It's thorough on when to connect and when not to. But it's missing the **progression model** — how consecutive photos of the same subject build a deepening story.
+```
+Ramen (Lines 176-179):
+- Break down layers: broth, noodles, tare, toppings
+- Explain how each component is prepared
+- Mention the shop's specific style
+```
 
-**Current "Same subject, multiple photos" (Lines 380-384):**
-> "Strategies: keep same primary lens but go deeper/different angle; switch lens while building on earlier content; zoom in on one previously mentioned element."
+```
+Shinkansen (Lines 180-183):
+- Describe visible parts: aerodynamic nose, bogies, pantograph
+- Explain how the nose shape reduces tunnel boom
+- Briefly connect to how high-speed trains reshaped travel
+```
 
-This is too vague. "Zoom in on one previously mentioned element" is the right idea but needs to be explicit and tied to the breadcrumb system.
+Every example: Bullet 1 = describe, Bullet 2 = explain how, Bullet 3 = broader context. The model learns there's only one way to structure a response.
 
-**Proposed expansion — "BUILDING DEPTH ACROSS DISCOVERIES":**
+**What we need:** Examples that show DIFFERENT types of responses. Some that go deep on one aspect. Some that cover several aspects but develop each. Some that tell a single story across all sections. The variety teaches the model it has OPTIONS, not a formula.
 
-This is the biggest new section. It should describe the progression model:
+#### Evidence from discoveries:
 
-**Photo 1 (cold start):**
-- Go deep on the most obvious, strongest thread
-- Weave in 1-2 breadcrumbs — single sentences that hint at other fascinating angles without developing them
-- Breadcrumbs should make the listener think "wait, what about...?"
+**#196 (Noble Steel) — SEVERE. Four objects, none developed:**
+- H2 #1: Sarmatian identity myth
+- H2 #2: Bulawa maces as commander symbols
+- H2 #3: Black Madonna religious icon
+- H2 #4: Karabela sword design
 
-**Photo 2 (same subject):**
-- Check `recentFullDiscoveries` for breadcrumbs planted in photo 1
-- Pick up one breadcrumb as the new deep thread
-- Can plant new breadcrumbs from the current angle
-- Build on photo 1's context — the user already knows the basics, go deeper
+Each object gets 3-4 sentences. Directly mirrors the Objects lens examples.
 
-**Photo 3+ (same subject):**
-- Continue the pattern: previous breadcrumbs become deep threads
-- Can return to the original thread from a completely different angle
-- At this point, the user has a rich, layered understanding built across multiple discoveries
+**#200 (Courtyard of the Doge) — Four topics, equal weight:**
+- H2 #1: Doge coronation ceremony
+- H2 #2: Courtyard as administrative hub
+- H2 #3: Mars and Neptune statues
+- H2 #4: Bronze wellheads
 
-**Example:**
-> Subject: Doge's Palace, Venice
->
-> **Photo 1** (exterior): Deep thread = how the palace's pink-and-white facade was designed to intimidate foreign ambassadors arriving by sea. Breadcrumb: "Behind these walls, the Council of Ten kept loaded firearms in a secret armory."
->
-> **Photo 2** (secret armory): Deep thread = picks up the breadcrumb. The Council of Ten maintained this cache to prevent noble families from building private armies. Develops: who the Ten were, how they operated, what they feared. Breadcrumb: "One floor above, the Great Council chamber held two thousand nobles who elected the Doge — with one portrait covered by a black veil."
->
-> **Photo 3** (Great Council chamber): Deep thread = the black veil. Marin Faliero tried to seize total power in 1355. Develops: the plot, the betrayal, the execution, and why Venice kept the black mark visible for 600 years as a warning. Breadcrumb: "Above it all hangs Tintoretto's Paradise — so large he needed a warehouse to paint it."
+**#221 (Hill of Three Crosses) — Five topics, none developed:**
+- H2 #1: Monk martyrdom legend (1 paragraph)
+- H2 #2: Soviet destruction (1 paragraph)
+- H2 #3: Secret memory during occupation (1 paragraph)
+- H2 #4: Fragments in current monument (1 paragraph)
+- H2 #5: View from the hill (1 paragraph)
 
-Each discovery is complete and satisfying alone. Together they build a layered story that rewards the user for exploring.
+The discovery mentions the monument was "finished in only fourteen days" — an extraordinary fact that could fill an entire section. Instead it gets one sentence among five competing topics.
 
-### COLD START HEURISTICS (Lines 363-378) — NEEDS TWEAK
+---
 
-**Current:**
-The cold start examples show 3 different topics per discovery (identify scene, explain evolution, tell story, flip with object note). This models breadth.
+### Issue Group 3: Unsupported Superlatives
 
-**Proposed direction:**
-Rewrite examples to show ONE deep thread + breadcrumb + flip:
+No prompt rule currently bans making large claims without supporting detail. This is a relatively minor fix — add guidance to support big claims with specific evidence.
 
-> Example (mid-sized city square in Europe):
-> - Primary lens: **Ideas** or **People**. Flip lens: **Objects**.
-> - **Deep thread**: Pick the single strongest story about this square — the execution that happened here, the revolution that started here, the market that defined the town's economy for 400 years.
-> - **Develop it**: Who was involved? What happened? What changed because of it?
-> - **Breadcrumb**: One sentence hinting at another angle ("The fountain at the center has its own story — the sculptor hid a face in the stonework.")
-> - **Flip**: An Objects note on a single visible element — the cobblestones, the sundial, the coat of arms above a doorway.
+#### Evidence from discoveries:
 
-### DO NOT / AVOID (Lines 405-422) — NEEDS NEW BANNED PATTERN
+**#183 (The Winged Hussars):**
+> "For over a century, these riders were considered the most dangerous men on a European battlefield."
 
-**Add: "Name-drop and move on" pattern ban**
+No specific battles named, no numbers given. This sentence isn't terrible on its own — but it becomes better immediately with supporting detail: "They were famous for winning battles against much larger armies" → Which battles? What happened?
 
-This should be as prominent as the scaffolding verb ban. Proposed text:
+**#189 (Vytautas the Great):**
+> "He was a master of diplomacy and war."
+
+No specific diplomatic examples. No specific war described.
+
+**#196 (Noble Steel):**
+> "This balance of weight and form influenced sword making across the entire continent for centuries."
+
+Massive claim with zero supporting detail.
+
+**Fix:** When you make a claim like "most dangerous," "legendary," "greatest" — follow it immediately with at least one specific supporting detail (a name, a date, a battle, a number). The claim becomes much more powerful with evidence.
+
+---
+
+### Issue Group 4: Cold Start Examples as Breadth Checklists
+
+The cold start examples list 3-4 separate tasks per discovery, teaching the model to cover multiple topics mechanically.
+
+**Lines 370-372:**
+```
+Identify the scene (cafes, town hall, fountain), explain how such squares evolved,
+tell one concrete story typical of this region and era, and flip with an
+Objects-focused note on a single element.
+```
+
+Four tasks: identify → explain evolution → tell story → flip. "Explain how such squares evolved" is itself a breadth instruction asking for a historical survey.
+
+**Lines 373-375:**
+```
+Use visual clues to infer style, explain what that style explored, talk about
+painters' lives, flip with a short People-focused moment about a plausible sitter/viewer.
+```
+
+Four tasks. "Talk about painters' lives" (plural) invites name-dropping multiple painters.
+
+**Lines 376-378:**
+```
+Describe the bowl, tie it to region, mention ordering rituals, flip with an
+Ideas-focused note on regional ramen styles.
+```
+
+Four tasks. Each gets a sentence or two.
+
+**The real problem:** These examples aren't showing real responses. They're describing how to respond in an abstract, task-list way. We should replace them with actual good examples — real discovery responses or response-quality examples that show what the output should look like, not instructions about what tasks to complete.
+
+#### Evidence from discoveries:
+
+**#181 (Millennium Monument) — follows the cold start checklist pattern:**
+- Identifies what the monument is
+- Explains who the statues represent
+- Tells about WWII damage
+- Flips to visitor experience
+
+Four tasks, four topics. Saint Stephen gets 2 sentences before the text moves to "warriors, lawgivers, and reformers" without naming anyone.
+
+---
+
+### Issue Group 5: Tangential Zoom-Out
+
+**Line 95:**
+```
+It is fine to zoom out tangentially (e.g., Middle Ages nobles, Edo-period merchants,
+Mughal courts, Mayan city-states, Brazilian street football, Bangkok street food culture)
+as long as details are true and plausibly connected.
+```
+
+**The concept is sound.** Sometimes the specific subject is narrow and zooming out gives us richer material. But the criteria ("true and plausibly connected") are too weak. Everything at a location is plausibly connected to its era.
+
+#### Evidence — zoom-out done WELL:
+
+**#184 (Latvian Heraldry Wall):**
+> "In January 1991, thousands of people from these very towns flooded into Riga. They brought tractors and heavy trucks to block the narrow streets."
+
+Zooms from the heraldic wall to a specific 1991 event. This is excellent — it's specific, vivid, and gives the listener something real.
+
+#### Evidence — zoom-out done POORLY:
+
+**#184 (same discovery — different section):**
+> "The symbols on these shields follow the ancient rules of heraldry. You can see silver fish, golden keys, and red lions decorating the wall."
+
+Shifts from the memorial to generic heraldry principles that apply everywhere. This is the bad kind of zoom-out — generic rather than specific.
+
+**#192 (Tomb of Amyntas):**
+> "Adopting these foreign shapes served as a diplomatic statement of wealth and sophisticated taste."
+> "It told every traveler that the rulers here were part of the wider Mediterranean elite."
+
+We know enough about the Tomb of Amyntas to talk about it specifically. We don't need to zoom out to generic Mediterranean cultural signaling. We could talk about the specific tomb, the specific culture of Lycia, a specific story.
+
+**#202 (The Golden Siege) — zooms from specific relief to generic gilding:**
+The final section abandons the battle narrative entirely to discuss woodworking technique. Generic craft description, not tied to the specific battle depicted.
+
+**Proposed fix:** Change the zoom-out criteria from "plausibly connected" to something like: zoom out tangentially when the specific content is narrow, and when zooming out would provide a deeper, more specific, more meaningful response. The zoom-out should land on a SPECIFIC story or fact, not a generic description of an era or craft. The parenthetical list of generic categories (Middle Ages nobles, Edo-period merchants) should be removed — these teach the model to zoom to categories rather than stories.
+
+---
+
+### Issue Group 6: "Sideways Angles" and Breadth-Focused Strategies
+
+**Line 96:**
+```
+Deeper or sideways angles can appear later.
+```
+
+**Line 382:**
+```
+Strategies: keep same primary lens but go deeper/different angle; switch lens while
+building on earlier content; zoom in on one previously mentioned element.
+```
+
+"Sideways angles" is breadth by another name. In Line 382, two of three strategies are breadth-focused ("different angle" and "switch lens"). Only the third ("zoom in on one previously mentioned element") is about depth — and it's listed last.
+
+#### Evidence from discoveries:
+
+**#201 (The Friars' Great Church) — switches topics each section:**
+- H2 #1: Franciscan poverty paradox
+- H2 #2: Scuola Grande social competition
+- H2 #3: Tintoretto's commission trick
+- H2 #4: Brick vs. marble texture
+
+**Note:** The Franciscan poverty paradox response IS actually good — the different aspects are interesting and each gets enough development. The "sideways angles" instruction isn't always bad in practice, but the language gives unnecessary permission for shallow topic-switching. We should remove the "sideways" language while keeping the ability to explore related aspects that the subject naturally offers.
+
+---
+
+## Discoveries That Got It Right — What Quality Looks Like
+
+These discoveries show what happens when topics get sufficient attention. Notice: not all of them go deep on ONE thing. Some cover multiple aspects but do each one well.
+
+### Multi-Aspect Done Well
+
+**#191 (Venice's Secret Arsenal) — Severity 1:**
+Covers state monopoly on violence across four angles: ready defense, technology as wealth, centralization preventing private armies, sensory experience of firing. Each section develops its angle. The thread holds across all four sections. It zooms out ("they operated on a principle of total state control") but the zoom-out is earned and specific.
+
+> "Imagine the rotten-egg smell of burnt sulfur and the deep boom echoing off the stone walls."
+
+This isn't going deep on one thing — it's exploring multiple aspects of one subject, giving each aspect enough room to develop real knowledge.
+
+**#182 (Basilica of St. James) — Severity 1:**
+Three sections covering three aspects of this facade:
+1. Saint James iconography — who he was, what Spain and pilgrims meant
+2. Ottavio Mosto's technique for THIS specific relief
+3. The thief's arm legend connected to THIS specific church
+
+Different topics, but each one gets development. Each section feels like you learned something. Not name-dropping and moving on — giving each aspect its due.
+
+**#193 (Winged Guardian) — Severity 1:**
+Coherent around the lion as dual symbol: religious authority + legal authority. Each section develops the same theme from a different angle. Even the connection to the previous discovery works because it's a direct thematic continuation.
+
+### Single-Story Deep Dive Done Well
+
+**#219 (Accidental Sticky Notes) — Severity 1:**
+One invention narrative: Silver's failed adhesive → five years of rejection → Fry's choir-singer insight → the microsphere science. Every section advances the same story. This is depth on one thread.
+
+**#199 (Stoves of Rundāle) — Severity 1:**
+Single thread: how the heating system worked and what it meant. Visual description → heat storage mechanism → social implications of hidden labor. Every sentence connects to the central thread.
+
+### The Pattern
+
+Discoveries that work — whether covering one topic or several — share one trait: **whatever they mention, they develop.** They don't name-drop and move on. They give each aspect enough sentences to convey real knowledge. The listener finishes feeling informed, not teased.
+
+The current prompt defaults to the worst of both worlds: covering many topics but developing none of them. We need to enable both modes (single-story and multi-aspect) while killing the name-drop pattern.
+
+---
+
+## Items Parked for Later
+
+### A5: "Its era, place, culture, movement, or object type" (Line 94)
+
+```
+Prefer true, specific content tied to this subject and/or its era, place, culture,
+movement, or object type.
+```
+
+The "and/or" with five broadening categories could give the model permission to jump from specific subjects to era-level surveys. This is related to the tangential zoom-out issue.
+
+**Status:** Considered but not being evaluated at this stage. The broadening may be fine as long as the core fixes (removing "touch lightly," improving examples, fixing zoom-out criteria) are in place. Evaluate after those changes are applied. See `zoom-out-tangentially-exploration.md` for more.
+
+---
+
+## Section-by-Section Changes to the Prompt
+
+### IPOP IN WHAT'S THAT (Line 73) — REWRITE
+
+**Current problematic text:**
+```
+Engage (middle sections deepen that lens while touching others only when valuable)
+```
+
+**Proposed rewrite:**
+> The narrative structure follows Attract (first H2, hook with the sharpest fact), Engage (middle sections develop the story — give each topic enough space to convey real knowledge), and Flip (optional final H2, a different IPOP lens on the same subject — a perspective shift, not a topic shift).
+
+Key change: remove "while touching others only when valuable." Replace with guidance toward developing whatever you mention.
+
+### PER-DISCOVERY IPOP BEHAVIOR (Line 87) — REWRITE
+
+**Current problematic text:**
+```
+middle sections (Engage) deepen that lens and optionally touch lightly upon other lenses
+```
+
+**Proposed rewrite:**
+> Build the narrative so that the first H2 (Attract) hooks with the sharpest fact from the primary lens, middle sections (Engage) develop the story with real detail — if you mention a person, tell their story; if you mention an event, explain what happened; if you describe a technique, show how it works. The optional final section (Flip) applies a different IPOP lens to the same subject for a surprise perspective shift (or is omitted if staying in the primary lens is more rewarding).
+
+Key changes:
+- Replace "touch lightly upon other lenses" with guidance on developing whatever you mention
+- Make flip explicitly optional
+- Add concrete guidance without prescribing a single format
+
+### FLIP — Make Optional
+
+**Current behavior:** Flip is always the final H2, required on cold starts.
+
+**Proposed change:**
+- Flip is optional. On cold starts, generally include one. On subsequent photos of the same place, skip it if staying in the primary lens is more rewarding.
+- When included, flip should be short — a coda, not a full section.
+- The flip MUST stay on the same subject. It's a perspective change, not a topic change.
+- The flip should be a genuine knowledge-based connection (e.g., "the knight who used this weapon was famous for..."), NOT an observation fabricated from the image (e.g., don't suggest "the wear on the grip suggests a right-handed fighter" as this invites hallucination).
+
+### LENS PLAYBOOK Shared Principles (Lines 94-96) — ADJUST
+
+**Line 95 — Refine zoom-out criteria:**
+
+Current:
+```
+It is fine to zoom out tangentially (e.g., Middle Ages nobles, Edo-period merchants,
+Mughal courts, Mayan city-states, Brazilian street football, Bangkok street food culture)
+as long as details are true and plausibly connected.
+```
+
+Proposed:
+> It is fine to zoom out tangentially when the specific subject is narrow and zooming out would provide a richer, more specific response. When zooming out, land on a SPECIFIC story or fact — not a generic description of an era or practice. Zoom-out should make the response MORE specific, not less.
+
+Remove the parenthetical list of generic categories (Middle Ages nobles, Edo-period merchants, etc.) — these teach the model to zoom to categories rather than stories.
+
+**Line 96 — Remove "sideways":**
+
+Current: `Deeper or sideways angles can appear later.`
+Proposed: `Deeper angles can appear in subsequent discoveries about the same subject.`
+
+### LENS PLAYBOOK Examples — REWRITE TO SHOW VARIETY
+
+**The problem:** All examples in each lens follow the same structural pattern. All 5 Objects examples use describe → explain how → broader context. The model learns there's only one way to write a response.
+
+**The fix:** Each lens should have examples showing DIFFERENT response types:
+- One example that goes deep on one aspect across all sections (single-story mode)
+- One example that covers several aspects but develops each (multi-aspect mode)
+- Different structural approaches so the model learns it has OPTIONS
+
+**CRITICAL: Replace synthetic examples with real discoveries from the database.** The current examples are abstract task descriptions ("describe the blade's shape, explain medieval steel production"). We need real response-quality examples — actual good paragraphs that show what the output should look and sound like. Where possible, use the best discoveries from the audit (#191, #182, #199, #219, #193) as templates.
+
+### Cold Start Examples (Lines 370-378) — REWRITE
+
+**Current problem:** These are task lists (identify → explain → tell → flip) that prescribe a mechanical checklist.
+
+**Proposed approach:** Replace task-list format with real example responses, or at minimum with guidance that allows both modes. Don't prescribe "do only one thing" and don't prescribe "do four things." Instead:
+- If the subject has one rich story (a painting depicting a specific event, a monument to a specific person), tell that story across the sections
+- If the subject is broad (a palace, a square, a bowl of ramen), cover a few aspects but give each enough development
+- Either way: no name-dropping. Whatever you mention, develop it
+
+### Same Subject Multiple Photos (Line 382) — REWRITE
+
+**Current problematic text:**
+```
+Strategies: keep same primary lens but go deeper/different angle; switch lens while
+building on earlier content; zoom in on one previously mentioned element.
+```
+
+Remove "switch lens" strategy and "different angle" language. Keep "zoom in on one previously mentioned element" as the primary strategy. For subsequent photos of the same subject, the model should go deeper — not sideways.
+
+### DO NOT / AVOID — ADD NAME-DROP BAN
 
 > **Name-drop and move on** — Mentioning a person, event, institution, or cultural practice in 1-2 sentences and then skipping to a different topic. If you name something, develop it or leave it out entirely.
 >
-> THE NAME-DROP TEST: Before mentioning any person, event, or institution by name, ask: "Am I going to spend at least 2-3 sentences developing this?" If not, either (a) develop it, (b) cut it, or (c) make it a deliberate breadcrumb — a single tantalizing sentence designed to make the listener want to take another photo.
+> THE NAME-DROP TEST: Before mentioning any person, event, or institution by name, ask: "Am I going to spend at least 2-3 sentences developing this?" If not, either (a) develop it or (b) cut it.
 >
-> ❌ "They were famous for winning battles against much larger armies." (Which battles? What armies? What happened?)
-> ❌ "Chomętowski was a powerful leader in the early seventeen hundreds." (Doing what? Why does he matter?)
-> ❌ "Within twenty years of his death, Venice would fall to Napoleon." (How? Why? What happened?)
-> ❌ "The Council of Ten kept these firearms loaded and ready." (Who are the Council of Ten?)
+> ❌ "They were famous for winning battles against much larger armies." (#183 — which battles?)
+> ❌ "Chomętowski was a powerful leader in the early seventeen hundreds." (#196 — doing what?)
+> ❌ "Within twenty years of his death, Venice would fall to Napoleon." (#185 — how? what happened?)
 >
 > ✓ "At the Battle of Kircholm in 1605, three thousand hussars charged eleven thousand Swedish infantry. The Swedes broke in under half an hour."
 > ✓ "Chomętowski earned this mace after holding the eastern border against Ottoman raids for fifteen years."
-> ✓ [As breadcrumb] "This painting was finished just twenty years before Napoleon dissolved the Republic forever." (Tantalizing — user wants to know more. That's the next discovery.)
 
-### PATTERN BANS (Lines 414-422) — ADD TO EXISTING LIST
+### PATTERN BANS — ADD
 
-Add as a new bullet after "Ignoring the obvious subject":
+> **Undeveloped mentions** — Introducing a person, battle, event, or institution and moving on in 1-2 sentences. The worst form is making a large claim ("famous for," "legendary," "one of the greatest," "changed the course of") without a single supporting detail. Evidence: #183 ("most dangerous men on a European battlefield" — no battles named), #189 ("master of diplomacy and war" — no examples), #196 ("influenced sword making across the entire continent" — no specifics).
 
-> **Undeveloped mentions** — Introducing a person, battle, event, or institution and moving on in 1-2 sentences. The worst form is making a large claim ("famous for," "legendary," "one of the greatest," "changed the course of") without a single supporting detail. If something is worth mentioning, it is worth developing. If it is not worth developing in this discovery, either cut it or reduce it to a deliberate breadcrumb.
+### BANNED PHRASES — ADD
 
-### BANNED PHRASES (Lines 424-448) — MINOR ADDITION
-
-Add a new item:
-
-> 6. **Unsupported superlatives** — Never write "famous for," "legendary," "one of the greatest," "changed the course of history," or "shaped the future of" unless you immediately follow with at least one concrete supporting detail (a name, a date, a number, a specific outcome). The superlative must be earned by the next sentence.
->    - ❌ "They were famous for winning battles against much larger armies."
+> 6. **Unsupported superlatives** — Never write "famous for," "legendary," "one of the greatest," "changed the course of history," or "shaped the future of" unless you immediately follow with at least one concrete supporting detail (a name, a date, a number, a specific outcome).
+>    - ❌ "They were famous for winning battles against much larger armies." (#183)
 >    - ✓ "At Kircholm, three thousand of them broke eleven thousand Swedes in thirty minutes."
 
-### STYLE FOR THE EAR (Lines 503-507) — POSSIBLE WORD COUNT CHANGE
+### STYLE FOR THE EAR — ADD WORD BUDGET DISTRIBUTION
 
-**Current:** 260-330 words.
+Add after the existing word count guidance (260-330 words):
 
-**Analysis:** The word count isn't the problem — discoveries that score 1/3 (Stoves of Rundāle, Winged Guardian) achieve depth within 300 words. The issue is how those words are distributed.
+> **Word budget distribution:**
+> - **Mode A (single-story):** Spend at least 70% of your word budget developing your primary thread. The remaining words cover identification and the optional flip. Can go up to 100% on the primary thread.
+> - **Mode B (multi-aspect):** Cover up to 3-4 topics. Each topic must get enough development to convey real knowledge — at least 2-3 sentences of substance per topic. No undeveloped mentions.
 
-**Recommendation:** Keep 260-330 but add distribution guidance:
+### PRE-FLIGHT CHECKLIST — ADD
 
-> Spend at least 70% of your word budget (roughly 180-230 words) developing your primary thread. The remaining words cover identification, breadcrumbs (1-2 sentences max), and the flip section.
+> - **Development check**: Every person named, every event mentioned, and every institution referenced is developed with at least 2-3 sentences of substance. No undeveloped mentions.
 
-### PRE-FLIGHT CHECKLIST (Lines 535-542) — ADD DEPTH CHECK
+### QUALITY BAR — ADD
 
-Add:
-
-> - **Depth check**: Every person named, every event mentioned, and every institution referenced is developed with at least 2-3 sentences of substance — OR it is a deliberate breadcrumb (a single tantalizing sentence). No undeveloped mentions.
-> - **Thread coherence**: The Attract hook, Engage sections, and primary thread all tell ONE story, not three loosely related ones.
-
-### QUALITY BAR (Lines 544-549) — ADD DEPTH CRITERION
-
-Add:
-
-> - The discovery develops one thread with real depth rather than surveying multiple threads at surface level. The listener finishes feeling they learned something substantial, not that they heard a list of interesting-sounding things.
+> - The discovery develops its content with real knowledge rather than name-dropping and moving on. The listener finishes feeling they learned something substantial, not that they heard a list of interesting-sounding things.
 
 ---
 
-## The New Concept: BREADCRUMBS
+## Word Budget by Mode
 
-This is the most important new addition to the prompt. It needs its own section, placed after PER-DISCOVERY IPOP BEHAVIOR and before the LENS PLAYBOOK.
+Both modes should include guidance on how to spend the ~260-330 word budget:
 
-### Proposed Section: "BREADCRUMBS — PLANTING DEPTH FOR LATER"
+**Mode A — Single-story deep dive:**
+- Spend at least 70% of the word budget (roughly 180-230 words) developing the primary thread. The remaining words cover identification and the optional flip section.
+- Can go up to 100% on the primary thread if no flip is needed.
 
-> A **breadcrumb** is a single sentence woven into the narrative that hints at a fascinating angle you are deliberately NOT developing in this discovery. Its purpose is to create curiosity — to make the listener think "wait, tell me more about that" — so they take another photo.
->
-> **Rules for breadcrumbs:**
-> - Maximum 1-2 per discovery. More than that and the narrative feels scattered.
-> - A breadcrumb is ONE sentence. Not a paragraph. Not two sentences.
-> - It must be woven naturally into the main narrative — not tacked on as a separate thought.
-> - It should hint at something genuinely interesting that you COULD develop if the user returns.
-> - It should NOT feel like a cliffhanger or a sales pitch. It should feel like a guide casually mentioning something fascinating in passing.
->
-> **Good breadcrumbs** (natural, tantalizing, one sentence):
-> - "The sculptor who carved this was later exiled for insulting the king."
-> - "Behind that door, the Council of Ten kept a loaded armory — but that is another story."
-> - "This painting was finished just twenty years before Napoleon dissolved the Republic forever."
-> - "The real mystery is why the builders carved a face into the underside of the arch where nobody could see it."
->
-> **Bad breadcrumbs** (cliffhangers, sales pitches, or too much):
-> - "But the most fascinating part of this building's history is what happened next..." (cliffhanger)
-> - "There is so much more to discover about this place!" (sales pitch)
-> - "The sculptor was exiled for insulting the king. He fled to Rome where he built three churches and married a countess." (too much — that's development, not a breadcrumb)
->
-> **When the user returns:**
-> If `recentFullDiscoveries` contains a breadcrumb about the current subject, you should pick it up as your primary thread. The user came back because they were curious — reward that curiosity with depth.
+**Mode B — Multi-aspect exploration:**
+- Cover up to 3-4 topics. Each topic must get enough development to convey real knowledge — not a one-liner and move on.
+- No single topic should be less than ~2-3 sentences of substance.
+
+The word budget guidance helps prevent the worst pattern (5+ topics at one sentence each) without forcing a single response mode.
 
 ---
 
-## Summary of All Proposed Changes
+## What NOT to Change
 
-### New sections to add:
-1. **"ONE THREAD DEEP" principle** — inserted after IPOP IN WHAT'S THAT, before SPECIAL CASES
-2. **"BREADCRUMBS" section** — after PER-DISCOVERY IPOP BEHAVIOR, before LENS PLAYBOOK
-3. **"BUILDING DEPTH ACROSS DISCOVERIES"** — expands the current "Same subject, multiple photos" subsection in CONTEXT-DRIVEN HEURISTICS
+These were considered but rejected as over-specification:
 
-### Sections to modify:
-4. **IPOP IN WHAT'S THAT (Line 73)** — remove "touching others" permission; emphasize single-thread depth
-5. **PER-DISCOVERY IPOP BEHAVIOR (Line 87)** — rewrite Engage description to "develop the same thread deeper"
-6. **LENS PLAYBOOK examples** — revise to show one-thread-deep + breadcrumb pattern
-7. **ATTRACT HOOK section** — add "hook must come from the thread you develop"
-8. **Cold start examples** — rewrite to show one deep thread + breadcrumb + flip
-9. **Same subject, multiple photos** — expand into the full progression model
-10. **DO NOT / AVOID** — add "Name-drop and move on" pattern ban
-11. **Pattern bans** — add "Undeveloped mentions" ban
-12. **BANNED PHRASES** — add unsupported superlatives ban
-13. **STYLE FOR THE EAR** — add word budget distribution (70% on primary thread)
-14. **PRE-FLIGHT CHECKLIST** — add depth check and thread coherence check
-15. **QUALITY BAR** — add depth criterion
-
-### Sections that stay unchanged:
-- ROLE, DELIVERABLES, INPUT SIGNALS, IMAGE SOURCE, IDENTIFICATION STRATEGY, IPOP OVERVIEW, SPECIAL CASES, FICTIONAL VIGNETTES, SHOW DON'T CATEGORIZE, UNPACK ABSTRACT NOUNS, THE SCAFFOLDING TEST, OUTPUT FORMAT
-
----
-
-## The Flip Section — Why It Still Works
-
-The user asked about the flip and it should stay. Here's why it's compatible with the one-thread-deep approach:
-
-The flip is not a topic change — it's a **perspective change on the same subject**. A discovery about the Battle of Grunwald (Ideas primary) can flip to Physical: "Stand where the Lithuanian cavalry would have assembled. The ground slopes gently toward the tree line. Imagine the sound of fifteen thousand horses beginning to move." That's still Grunwald — just experienced through the body instead of the mind.
-
-**The flip section (final H2) should:**
-- Stay on the same subject as the rest of the discovery
-- Apply a different IPOP lens to that subject
-- Be 40-60 words (short — it's a coda, not a new chapter)
-- Feel like a surprise angle, not a new topic
-
-**What the flip should NOT do:**
-- Introduce an entirely new topic ("And nearby, there's also a church worth seeing")
-- Become a second deep thread
-- Repeat information from the Engage sections in different words
+- **"Hook must come from the thread you develop"** — The hook should be the most attractive thing. Don't add constraints on hook-thread alignment.
+- **"Up to one topic per discovery"** — 3-4 topics are fine if each is developed. The enemy is name-dropping, not breadth.
+- **"Attract hook framing instructions"** — The existing hook guidance is already good. Don't add more.
 
 ---
 
 ## Before/After Example
 
-### BEFORE (current style — breadth, name-drop and skip):
+### BEFORE (#183 — actual discovery, shallow breadth + name-drop):
 
 > ## The knights who terrified Europe
 > The Winged Hussars were the elite cavalry of the Polish-Lithuanian Commonwealth. They were famous for winning battles against much larger armies.
@@ -319,9 +534,17 @@ The flip is not a topic change — it's a **perspective change on the same subje
 > ## Steel and silk
 > Notice the leopard skin draped over the armor. These skins came from Africa through Mediterranean trade routes. A hussar wore this over polished plate armor. You can almost feel the vibration and wind that would follow such a massive charge.
 
-**Problems:** "Famous for winning battles" (which battles?). "Celebrities of their day" (how?). Leopard skins "from Africa through trade routes" (one sentence, no development). Four mini-topics (reputation, cost, wings, material), none developed.
+**Problems traced to prompt:**
 
-### AFTER (one thread deep + breadcrumb):
+| Problem in output | Prompt text that caused it |
+|---|---|
+| "Famous for winning battles" — no battles named | No ban on unsupported superlatives |
+| Four topics (reputation, cost, wings, leopard skin) — none developed | Lens playbook: all Objects examples model 3-topic breadth |
+| "Celebrities of their day" — asserted without evidence | Line 87: "optionally touch lightly upon other lenses" |
+| Leopard skins "from Africa through trade routes" — one sentence | Line 95: "zoom out tangentially" permits surface-level cultural mentions |
+| Each H2 = new topic | Cold start examples list 3-4 separate tasks per discovery |
+
+### AFTER (one thread deep — Mode A):
 
 > ## Thirty minutes at Kircholm
 > In September 1605, three thousand Winged Hussars faced eleven thousand Swedish infantry in a field near modern-day Latvia. The Swedish commander assumed his numbers would win. He was wrong.
@@ -335,13 +558,54 @@ The flip is not a topic change — it's a **perspective change on the same subje
 > ## The sound before the storm
 > Look at the feathered wings attached to the back plate. At full gallop, air rushing through those feathers made a high whistling roar. Swedish soldiers at Kircholm later wrote that it sounded like a thousand birds of prey diving at once. The terror arrived before the cavalry did.
 
-**What changed:** One thread (Kircholm) developed across the full discovery. The listener learns ONE battle in vivid detail and finishes understanding *why* the hussars were legendary — not just being told they were. The leopard skin, celebrity culture, and family wealth are untouched — those are future breadcrumbs or future discoveries.
+One thread (Kircholm) developed across the full discovery. The listener learns ONE battle in vivid detail and understands *why* the hussars were legendary — not just told that they were.
+
+---
+
+## Summary: Severity Distribution Across 25 Discoveries
+
+| Severity | Count | Discoveries |
+|----------|-------|-------------|
+| Severe (3) | 4 | #184 (Heraldry Wall), #187 (Alexander), #196 (Noble Steel), #200 (Courtyard of the Doge) |
+| Moderate (2) | 12 | #181, #183, #185, #188, #189, #190, #192, #194, #197, #201, #202, #221 |
+| Minor (1) | 9 | #182, #186, #191, #193, #195, #198, #199, #219, #220 |
+| Clean (0) | 0 | — |
+
+**Most common issue:** Topic-per-section pattern (16/25 discoveries)
+**Second most common:** Name-drop and move on (10/25)
+**Third:** Unsupported superlatives (8/25)
 
 ---
 
 ## Implementation Priority
 
-1. **Highest impact:** Add "One Thread Deep" principle + name-drop ban + depth pre-flight check. These three changes directly address the core problem.
-2. **Second priority:** Add breadcrumbs section + expand "Same subject, multiple photos" into the progression model. These create the pull loop (curiosity → photo → depth → more curiosity).
-3. **Third priority:** Revise lens playbook examples + cold start examples to model the new pattern. Examples are how the model learns style — if the examples show breadth, the output will be broad.
-4. **Lowest priority but still valuable:** Word budget distribution guidance, unsupported superlatives ban. These are polish.
+1. **Highest impact:** Rewrite Lines 73 and 87 (remove "touching others" / "touch lightly") + add name-drop ban + add undeveloped mentions pattern ban + add unsupported superlatives banned phrase + add development check to pre-flight. These directly address the two most common issues.
+2. **Second priority:** Rewrite lens playbook examples to show variety (not all same pattern) + replace with real discovery-quality examples. Examples are the mechanism by which the model learns what "good" looks like. 14 of 21 currently model the same breadth pattern.
+3. **Third priority:** Rewrite cold start examples as real responses (not task lists) + refine zoom-out criteria + remove "sideways angles" language + make flip optional.
+4. **Evaluate after:** Whether "zoom out tangentially" (Line 95) and the broadening options (Line 94) need further changes.
+
+---
+
+## Quick Reference: All Changes
+
+| Line | Current text | Change |
+|------|-------------|--------|
+| 73 | "while touching others only when valuable" | Remove. Replace with guidance on developing whatever you mention |
+| 87 | "optionally touch lightly upon other lenses" | Remove. Replace with guidance on developing topics with real detail |
+| 87 | (Flip described as always present) | Make flip optional. Short when used. |
+| 95 | "zoom out tangentially" with generic category list | Remove generic category list. Refine criteria: zoom out when content is narrow, land on specific stories |
+| 96 | "Deeper or sideways angles can appear later" | Cut "or sideways" |
+| 105-183 | All lens examples follow same pattern | Rewrite with variety — show different response modes, use real discoveries |
+| 370-378 | Cold start examples as task lists | Rewrite as real response examples or remove task-list format |
+| 382 | Three strategies (2 breadth, 1 depth) | Remove "switch lens" and "different angle." Keep "zoom in on one element" |
+| 405-422 | DO NOT / AVOID section | Add name-drop ban |
+| 414-422 | Pattern bans | Add undeveloped mentions ban |
+| 424-448 | Banned phrases | Add unsupported superlatives ban |
+| 503-507 | Style for the ear | Add word budget distribution (Mode A: 70-100% on primary thread; Mode B: up to 3-4 topics, each developed) |
+| 535-542 | Pre-flight checklist | Add development check |
+| 544-549 | Quality bar | Add development criterion |
+
+### Related documents:
+- `breadcrumbs-concept.md` — Parked concept for later evaluation
+- `zoom-out-tangentially-exploration.md` — Line 95 being refined, generic categories removed
+- `prompt-upgrade-requirements.md` — Actionable requirements for implementing these changes

@@ -29,8 +29,6 @@ struct DiscoveriesHomeView: View {
     private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
     private let onReconnectSession: ((InProgressItem) -> Void)?
 
-    @ObservedObject private var sessionManager = DiscoverySessionManager.shared
-
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.audioServices) private var audioServices
@@ -42,6 +40,7 @@ struct DiscoveriesHomeView: View {
     @State private var deletingDiscoveryId: Int64?
     @State private var isDeletionInProgress = false
     @State private var deletionErrorMessage: String?
+    @State private var failedItemToRetry: InProgressItem?
     @State private var isDetailFromAudioGuides = false
     @State private var isDetailViewWarmedUp = false
 
@@ -98,12 +97,35 @@ struct DiscoveriesHomeView: View {
         .overlay(alignment: .bottom) {
             paginatingOverlay
         }
-        .animation(.easeInOut, value: storeObserver.loadState)
         .alert(
             "An error occurred",
             isPresented: refreshErrorBinding,
             actions: { refreshErrorActions },
             message: { refreshErrorMessage_view }
+        )
+        .alert(
+            "Discovery Failed",
+            isPresented: Binding(
+                get: { failedItemToRetry != nil },
+                set: { if !$0 { failedItemToRetry = nil } }
+            ),
+            actions: {
+                Button("Try Again") {
+                    if let item = failedItemToRetry {
+                        DiscoverySessionManager.shared.retryFailedSession(item.id)
+                    }
+                    failedItemToRetry = nil
+                }
+                Button("Dismiss", role: .cancel) {
+                    if let item = failedItemToRetry {
+                        DiscoverySessionManager.shared.dismissFailedSession(item.id)
+                    }
+                    failedItemToRetry = nil
+                }
+            },
+            message: {
+                Text("Something went wrong while creating this discovery. Would you like to try again?")
+            }
         )
         .overlay {
             deletionErrorOverlay
@@ -129,7 +151,8 @@ struct DiscoveriesHomeView: View {
                 .ignoresSafeArea()
             
             scrollContent(contentWidth: contentWidth, contentHeight: contentHeight, metrics: metrics)
-            
+                .animation(.easeInOut, value: storeObserver.loadState)
+
             headerContent(contentWidth: contentWidth, metrics: metrics)
 
             detailOverlayContent
@@ -173,8 +196,13 @@ struct DiscoveriesHomeView: View {
             VStack(spacing: 0) {
                 refreshHeaderView(metrics: metrics)
 
-                inProgressContent
-                    .animation(.easeInOut(duration: 0.35), value: sessionManager.inProgressItems.isEmpty)
+                InProgressSectionContainer(
+                    gridHorizontalPadding: gridHorizontalPadding,
+                    onTap: { item in handleInProgressItemTapped(item) },
+                    onDismissFailure: { item in
+                        DiscoverySessionManager.shared.dismissFailedSession(item.id)
+                    }
+                )
 
                 DiscoveriesGridView(
                     storeObserver: storeObserver,
@@ -278,22 +306,9 @@ struct DiscoveriesHomeView: View {
         }
     }
     
-    @ViewBuilder
-    private var inProgressContent: some View {
-        if !sessionManager.inProgressItems.isEmpty {
-            InProgressSection(
-                items: sessionManager.inProgressItems,
-                onTap: { item in
-                    handleInProgressItemTapped(item)
-                },
-                onDismissFailure: { item in
-                    DiscoverySessionManager.shared.dismissFailedSession(item.id)
-                }
-            )
-            .padding(.horizontal, gridHorizontalPadding + 8)
-            .transition(.opacity.combined(with: .move(edge: .top)))
-        }
-    }
+    // inProgressContent moved to InProgressSectionContainer (owns its own @ObservedObject
+    // so sessionManager changes don't trigger full DiscoveriesHomeView body re-evaluation,
+    // which was disrupting the detail overlay's hero animation).
 
     private func handleInProgressItemTapped(_ item: InProgressItem) {
         switch item.status {
@@ -303,7 +318,9 @@ struct DiscoveriesHomeView: View {
                 imageURL: imageURL(for: summary),
                 startFrame: fallbackStartFrame()
             )
-        case .processing, .queued, .failed:
+        case .failed:
+            failedItemToRetry = item
+        case .processing, .queued:
             onReconnectSession?(item)
         }
     }

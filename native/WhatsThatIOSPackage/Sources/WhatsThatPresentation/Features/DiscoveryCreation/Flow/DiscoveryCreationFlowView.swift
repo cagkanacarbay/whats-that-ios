@@ -381,6 +381,7 @@ struct DiscoveryCreationFlowView: View {
             .transition(.opacity)
         case .analyzing:
             streamingStage
+                .id(viewModel.analysisSessionId)
                 .transition(.opacity)
         }
     }

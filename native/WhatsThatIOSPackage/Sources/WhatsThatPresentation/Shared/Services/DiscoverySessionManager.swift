@@ -148,14 +148,18 @@ public final class DiscoverySessionManager: ObservableObject {
     /// Currently active sessions (up to maxConcurrentSessions)
     private var activeSessions: [UUID: ActiveDiscoverySession] = [:]
 
+    /// Stored requests for failed sessions (enables retry)
+    private var failedRequests: [UUID: PendingDiscoveryRequest] = [:]
+
     /// Dependencies - injected after init
     private var analysisClient: DiscoveryAnalysisClient?
     private var historyRepository: DiscoveryHistoryRepository?
     private var creditBalanceStore: CreditBalanceStore?
     private var imageEncoder: DiscoveryImageEncodingService?
 
-    /// Callbacks for integration with MainTabView
-    public var onDiscoveryCompleted: ((DiscoverySummary, Bool) -> Void)?
+    /// Callbacks for integration with MainTabView.
+    /// Parameters: summary, generateAudioGuide, wasBackground (true when no subscriber was attached).
+    public var onDiscoveryCompleted: ((DiscoverySummary, Bool, Bool) -> Void)?
     public var onDiscoveryFailed: ((UUID, String) -> Void)?
 
     // MARK: - Init
@@ -270,6 +274,29 @@ public final class DiscoverySessionManager: ObservableObject {
     public func dismissFailedSession(_ id: UUID) {
         removeInProgressItem(id)
         sessionStatuses.removeValue(forKey: id)
+        failedRequests.removeValue(forKey: id)
+    }
+
+    /// Retry a failed session by resubmitting the original request.
+    /// Returns the new session ID, or nil if the failed request wasn't found.
+    @discardableResult
+    public func retryFailedSession(_ id: UUID) -> UUID? {
+        guard let request = failedRequests.removeValue(forKey: id) else {
+            print("[DiscoverySessionManager] Cannot retry - no stored request for \(id)")
+            return nil
+        }
+
+        // Remove the old failed state
+        removeInProgressItem(id)
+        sessionStatuses.removeValue(forKey: id)
+
+        // Resubmit as a new session
+        return startSession(
+            payload: request.payload,
+            media: request.media,
+            generateAudioGuide: request.generateAudioGuide,
+            flowType: request.flowType
+        )
     }
 
     /// Clear all pending sessions (e.g., on sign out).
@@ -282,6 +309,7 @@ public final class DiscoverySessionManager: ObservableObject {
         sessionStatuses.removeAll()
         pendingCompletionToasts.removeAll()
         inProgressItems.removeAll()
+        failedRequests.removeAll()
         print("[DiscoverySessionManager] Cleared all sessions")
     }
 
@@ -499,8 +527,10 @@ public final class DiscoverySessionManager: ObservableObject {
         }
         scheduleInProgressItemRemoval(request.id, delay: 2.5)
 
-        // IMPORTANT: Call onDiscoveryCompleted FIRST to trigger audio generation
-        onDiscoveryCompleted?(summary, request.generateAudioGuide)
+        // IMPORTANT: Call onDiscoveryCompleted FIRST to trigger audio generation.
+        // Pass wasBackground so callers can skip redundant upserts for foreground sessions
+        // (the VM → .onReceive → handleCompletedDiscovery path already handles upserts).
+        onDiscoveryCompleted?(summary, request.generateAudioGuide, !hadSubscriber)
 
         // Notify subscriber if attached
         if isActiveSession {
@@ -537,6 +567,9 @@ public final class DiscoverySessionManager: ObservableObject {
         updateInProgressItem(sessionId: request.id) { item in
             item.status = .failed(message)
         }
+
+        // Store request for potential retry
+        failedRequests[request.id] = request
 
         onDiscoveryFailed?(request.id, message)
 

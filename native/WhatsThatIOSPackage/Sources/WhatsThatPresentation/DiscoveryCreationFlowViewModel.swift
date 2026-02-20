@@ -71,6 +71,8 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
     }
     @Published private(set) var confirmationState: DiscoveryConfirmationState?
     @Published private(set) var analysisState: DiscoveryAnalysisState?
+    /// Incremented each time a new analysis session begins, used to force view re-creation.
+    @Published private(set) var analysisSessionId: Int = 0
     @Published private(set) var creditBalance: Int?
     @Published private(set) var error: FlowError?
     @Published private(set) var pushToken: String?
@@ -265,6 +267,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             streamedText: "",
             isStreaming: true
         )
+        analysisSessionId += 1
         analysisState = initialState
         flowState = .analyzing(initialState)
 
@@ -494,6 +497,7 @@ public final class DiscoveryCreationFlowViewModel: ObservableObject {
             isStreaming: true
         )
         withAnimation(.easeInOut(duration: 0.3)) {
+            analysisSessionId += 1
             flowState = .analyzing(initialState)
         }
 

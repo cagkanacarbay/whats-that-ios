@@ -157,9 +157,14 @@ final class CreationFlowCoordinator: ObservableObject {
     func configureSessionManager() {
         let audioServices = self.audioServices
         let storeObserver = self.storeObserver
-        sessionManager.onDiscoveryCompleted = { [weak audioServices, weak storeObserver] summary, generateAudio in
-            Task { @MainActor in
-                await storeObserver?.upsert(summary)
+        sessionManager.onDiscoveryCompleted = { [weak audioServices, weak storeObserver] summary, generateAudio, wasBackground in
+            if wasBackground {
+                // Only upsert for background completions. Foreground completions are
+                // handled by the VM → .onReceive → handleCompletedDiscovery path,
+                // which already upserts to storeObserver + audioServices.discoveryStore.
+                Task { @MainActor in
+                    await storeObserver?.upsert(summary)
+                }
             }
             if generateAudio {
                 audioServices?.playbackController.requestVoiceover(for: summary)

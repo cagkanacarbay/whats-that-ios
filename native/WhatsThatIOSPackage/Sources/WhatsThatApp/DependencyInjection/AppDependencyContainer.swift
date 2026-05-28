@@ -29,6 +29,9 @@ public struct AppDependencyContainer: Sendable {
     private let creditsStore: any CreditsStore
     private let creditBalanceStore: CreditBalanceStore
     private let locationService: DiscoveryLocationService
+    public let complianceUseCase: ComplianceUseCase
+    public let complianceLocalStore: ComplianceLocalStore
+    private let sampleDiscoveryRepository: SampleDiscoveryRepository
 #endif
 
 #if os(iOS)
@@ -45,7 +48,10 @@ public struct AppDependencyContainer: Sendable {
         creditsRepository: DiscoveryCreditsRepository,
         creditsStore: any CreditsStore,
         creditBalanceStore: CreditBalanceStore,
-        locationService: DiscoveryLocationService
+        locationService: DiscoveryLocationService,
+        complianceUseCase: ComplianceUseCase,
+        complianceLocalStore: ComplianceLocalStore,
+        sampleDiscoveryRepository: SampleDiscoveryRepository
     ) {
         self.configuration = configuration
         self.discoveryDeletionUseCase = DiscoveryDeletionUseCase(repository: discoveryRepository)
@@ -63,6 +69,9 @@ public struct AppDependencyContainer: Sendable {
         self.creditsStore = creditsStore
         self.creditBalanceStore = creditBalanceStore
         self.locationService = locationService
+        self.complianceUseCase = complianceUseCase
+        self.complianceLocalStore = complianceLocalStore
+        self.sampleDiscoveryRepository = sampleDiscoveryRepository
     }
 #else
     init(
@@ -210,6 +219,17 @@ public extension AppDependencyContainer {
             photoSavePreferencesStore: photoSavePreferencesStore,
             photoLibrarySaveService: photoLibrarySaveService
         )
+
+        // Compliance/Version Control
+        let appConfigRepository = SupabaseAppConfigRepository(client: client)
+        let complianceLocalStore = UserDefaultsComplianceLocalStore()
+        let complianceUseCase = ComplianceUseCase(
+            repository: appConfigRepository,
+            localStore: complianceLocalStore
+        )
+
+        // Sample discoveries for pre-onboarding
+        let sampleDiscoveryRepository = SampleDiscoveryRepository(client: client)
         #endif
 
         #if os(iOS)
@@ -226,7 +246,10 @@ public extension AppDependencyContainer {
             creditsRepository: creditsRepository,
             creditsStore: creditsStore,
             creditBalanceStore: creditBalanceStore,
-            locationService: locationService
+            locationService: locationService,
+            complianceUseCase: complianceUseCase,
+            complianceLocalStore: complianceLocalStore,
+            sampleDiscoveryRepository: sampleDiscoveryRepository
         )
 #else
         return AppDependencyContainer(
@@ -334,6 +357,24 @@ public extension AppDependencyContainer {
         )
     }
 
+    // MARK: - Pre-Onboarding Discovery Gallery
+
+    /// Returns the sample discovery service for fetching sample discoveries.
+    var sampleDiscoveryService: SampleDiscoveryService {
+        sampleDiscoveryRepository
+    }
+
+    /// Creates a VoiceoverPlaybackController for pre-onboarding use (read-only mode).
+    /// This is a simplified controller without preferences store binding.
+    @MainActor
+    func makeOnboardingVoiceoverPlaybackController() -> VoiceoverPlaybackController {
+        VoiceoverPlaybackController(
+            repository: voiceoverRepository,
+            voiceoverCache: VoiceoverFileCache.shared,
+            preferencesStore: nil
+        )
+    }
+
     func fetchCreditBalance() async -> Result<Int, Error> {
         do {
             let balance = try await creditBalanceStore.refreshIfStale()
@@ -341,6 +382,46 @@ public extension AppDependencyContainer {
         } catch {
             return .failure(error)
         }
+    }
+
+    /// Resolves intro state for returning users on fresh install/new device.
+    /// Fetches balance and discovery count from server, then runs sanity check.
+    /// Should be called once after user binding during app startup.
+    func refreshCreditBalance() async {
+        _ = try? await creditBalanceStore.refresh(force: true)
+    }
+
+    func resolveIntroStateIfNeeded() async {
+        // Only run if intro is not already complete locally
+        guard await !FreeCreditsAlertTracker.shared.hasShownCreditsExhaustedAlert else {
+            return
+        }
+
+        // Fetch balance from server
+        let balance: Int
+        do {
+            balance = try await creditBalanceStore.refresh(force: true)
+        } catch {
+            print("[IntroState] Failed to fetch balance, skipping sanity check: \(error)")
+            return
+        }
+
+        // Fetch discoveries to check count (we need > discoveryLimit to detect returning users)
+        // Fetch limit+1 so that users with more than the limit return a count that exceeds it
+        let discoveryCount: Int
+        do {
+            let discoveries = try await discoveryRepository.fetchDiscoveries(limit: IntroModeConstants.discoveryLimit + 1, before: nil)
+            discoveryCount = discoveries.count
+        } catch {
+            print("[IntroState] Failed to fetch discoveries, skipping sanity check: \(error)")
+            return
+        }
+
+        // Run the sanity check
+        _ = await FreeCreditsAlertTracker.shared.resolveIntroStateIfNeeded(
+            balance: balance,
+            discoveryCount: discoveryCount
+        )
     }
 
     #if DEBUG
@@ -420,6 +501,10 @@ public extension AppDependencyContainer {
         
         // Unbind free credits alert tracker (does NOT delete per-user data)
         await FreeCreditsAlertTracker.shared.unbind()
+
+        // Clear compliance cache (user-specific state)
+        await complianceUseCase.clearCache()
+        await complianceLocalStore.clearAll()
     }
 }
 #endif

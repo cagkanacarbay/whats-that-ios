@@ -17,8 +17,9 @@ struct DiscoveryConfirmationView: View {
     let onRequestCredits: (() -> Void)?
     let onShowLocationPermissions: () -> Void
     let onShowMissingUploadLocation: () -> Void
-    let onShowOutOfCredits: () -> Void
     @Binding var generateAudioGuide: Bool
+    /// When true, audio toggle is locked ON (intro mode).
+    var isAudioToggleLocked: Bool = false
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var bottomOverlayHeight: CGFloat = 0
@@ -197,7 +198,8 @@ struct DiscoveryConfirmationView: View {
                             onRequestCredits()
                         }
                     },
-                    generateAudioGuide: $generateAudioGuide
+                    generateAudioGuide: $generateAudioGuide,
+                    isAudioToggleLocked: isAudioToggleLocked
                 )
                 .padding(.top, previewBottomSpacing)
                 .padding(.horizontal, BrandSpacing.large)
@@ -273,11 +275,9 @@ struct DiscoveryConfirmationView: View {
     }
 
     private func handleOutOfCredits() {
-        if let onRequestCredits {
-            onRequestCredits()
-        } else {
-            onShowOutOfCredits()
-        }
+        // Call the credits handler if available; otherwise the ViewModel
+        // will show the full-screen credits exhausted view.
+        onRequestCredits?()
     }
 
     private func showLocationPermissionsAlert() {

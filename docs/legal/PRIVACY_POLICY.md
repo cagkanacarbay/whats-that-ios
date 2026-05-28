@@ -1,7 +1,7 @@
 # Privacy Policy — “What’s That?”
 
 Effective date: 8 January 2026
-Version: 1.0
+Version: 1.0.0
 
 This Privacy Policy explains how we collect, use, disclose, and protect information about you when you use the “What’s That?” mobile application and related services (the “Service”).
 
@@ -13,7 +13,7 @@ By using the Service, you acknowledge this Policy. If you do not agree, do not u
 2) What we collect
 We collect the types of data described below. Exact fields depend on how you use the Service and OS permissions you grant.
 
-- Account data: email address; authentication state (via Supabase). If you use Google Sign‑In, we receive an ID token that Supabase exchanges for a session; we do not receive your Google password.
+- Account data: email address; authentication state (via Supabase); records of which versions of our Terms of Service and Privacy Policy you have accepted and when. If you use Google Sign‑In, we receive an ID token that Supabase exchanges for a session; we do not receive your Google password.
 - Content you submit: photos you take or upload; text or other inputs. Photos may contain EXIF metadata (e.g., timestamp, GPS) if present. We may perform OCR/transcription and translation on text found in images to support analysis.
 - Location data (optional): precise or approximate location when you grant OS permission. We may also fetch nearby points of interest using your coordinates to improve context.
 - Push notifications: APNs device token (iOS); device name and platform to route notifications.

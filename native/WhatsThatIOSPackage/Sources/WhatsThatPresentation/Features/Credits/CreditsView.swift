@@ -5,18 +5,42 @@ import WhatsThatShared
 public struct CreditsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.audioServices) private var audioServices
     @StateObject private var viewModel: CreditsViewModel
     private let backButtonTitle: String
     private let onClose: (() -> Void)?
 
+    // Post-purchase configuration closures (optional)
+    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
+    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
+    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
+    private let fetchVoiceSampleURL: ((String) async -> URL?)?
+    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
+    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
+
+    @State private var showPostPurchaseConfig = false
+    @State private var shouldCloseAfterPostPurchaseConfig = false
+
     public init(
         viewModel: CreditsViewModel,
         backButtonTitle: String = "Back",
-        onClose: (() -> Void)? = nil
+        onClose: (() -> Void)? = nil,
+        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
+        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
+        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
+        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
+        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
+        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.backButtonTitle = backButtonTitle
         self.onClose = onClose
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
     }
 
     public var body: some View {
@@ -72,6 +96,59 @@ public struct CreditsView: View {
                 }
             }
         }
+        .onChange(of: viewModel.shouldShowPostPurchaseConfig) { _, shouldShow in
+            if shouldShow && hasPostPurchaseConfigClosures {
+                // Stop any playing audio before showing post-purchase configuration
+                audioServices?.playbackController.pause()
+                showPostPurchaseConfig = true
+                viewModel.shouldShowPostPurchaseConfig = false
+            }
+        }
+        .fullScreenCover(isPresented: $showPostPurchaseConfig, onDismiss: {
+            // Close the credits sheet AFTER fullScreenCover is fully dismissed
+            // to avoid race conditions with SwiftUI's dismiss handling
+            if shouldCloseAfterPostPurchaseConfig {
+                shouldCloseAfterPostPurchaseConfig = false
+                close()
+            }
+        }) {
+            if let loadVoiceoverPreferences,
+               let saveVoiceoverPreferences,
+               let fetchVoiceOptions,
+               let fetchVoiceSampleURL,
+               let loadIPoPPreferences,
+               let saveIPoPPreferences {
+                PostPurchaseConfigurationFlow(
+                    creditAmount: viewModel.purchasedCreditAmount ?? 10,
+                    loadVoiceoverPreferences: loadVoiceoverPreferences,
+                    saveVoiceoverPreferences: saveVoiceoverPreferences,
+                    fetchVoiceOptions: fetchVoiceOptions,
+                    fetchVoiceSampleURL: fetchVoiceSampleURL,
+                    loadIPoPPreferences: loadIPoPPreferences,
+                    saveIPoPPreferences: saveIPoPPreferences,
+                    onComplete: {
+                        // Mark config as completed now that user has finished the flow
+                        Task {
+                            await FreeCreditsAlertTracker.shared.markPostPurchaseConfigCompleted()
+                        }
+                        // Set flag to close after fullScreenCover dismisses, then dismiss it
+                        // Don't call close() here - calling dismiss while fullScreenCover is
+                        // dismissing causes race conditions that can skip the sheet's onDismiss
+                        shouldCloseAfterPostPurchaseConfig = true
+                        showPostPurchaseConfig = false
+                    }
+                )
+            }
+        }
+    }
+
+    private var hasPostPurchaseConfigClosures: Bool {
+        loadVoiceoverPreferences != nil &&
+        saveVoiceoverPreferences != nil &&
+        fetchVoiceOptions != nil &&
+        fetchVoiceSampleURL != nil &&
+        loadIPoPPreferences != nil &&
+        saveIPoPPreferences != nil
     }
 
     private var header: some View {

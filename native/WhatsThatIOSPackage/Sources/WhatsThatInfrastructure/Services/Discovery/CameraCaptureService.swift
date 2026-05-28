@@ -72,6 +72,8 @@ public final class CameraCaptureService: NSObject, DiscoveryCaptureService {
         return try await withCheckedThrowingContinuation { continuation in
             let picker = UIImagePickerController()
             picker.sourceType = .camera
+            picker.cameraCaptureMode = .photo
+            picker.cameraDevice = .rear
             picker.allowsEditing = false
             picker.delegate = self
 
@@ -97,6 +99,19 @@ public final class CameraCaptureService: NSObject, DiscoveryCaptureService {
             let isMovingFromParent = presenter.isMovingFromParent
             Self.debugLog("Using presenter=\(presenterType) hasWindow=\(hasWindow) isBeingDismissed=\(isBeingDismissed) isMovingFromParent=\(isMovingFromParent)")
             #endif
+
+            // Verify presenter is in a valid state to present.
+            // If the presenter is being dismissed or has no window, presentation will fail silently
+            // and leave isPresentingPicker stuck true, causing subsequent captures to abort.
+            if presenter.isBeingDismissed || presenter.isMovingFromParent || presenter.viewIfLoaded?.window == nil {
+                #if DEBUG
+                Self.debugLog("Presenter not in valid state for presentation, aborting capture")
+                #endif
+                continuation.resume(throwing: DiscoveryFlowCancellationError.userCancelled)
+                self.continuation = nil
+                self.activePicker = nil
+                return
+            }
 
             self.isPresentingPicker = true
             presenter.present(picker, animated: true)

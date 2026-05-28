@@ -183,11 +183,11 @@ final class DiscoveryDetailTransitionCoordinator: ObservableObject {
     func updateContentScrollOffset(_ offset: CGFloat) {
         guard snapshot.hasActiveOverlay else { return }
         // Update non-published gating value synchronously for immediate use.
+        // This is the only value the dismiss interactor reads (via contentDistanceForGating).
+        // We intentionally do NOT mirror this into snapshot.contentScrollOffset because
+        // that would publish on every scroll tick (~40+/s), triggering full body re-evaluations
+        // of DiscoveriesHomeView and disrupting the hero animation.
         self.contentDistanceForGating = offset
-        // Mirror into snapshot asynchronously to avoid publishing during view updates.
-        DispatchQueue.main.async { [weak self] in
-            self?.snapshot.contentScrollOffset = offset
-        }
     }
 
     func dismiss(reason: DismissReason = .backButton, animated: Bool = true) {

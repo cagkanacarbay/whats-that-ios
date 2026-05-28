@@ -42,7 +42,8 @@ struct IPoPPreferencesListView: View {
 
     var body: some View {
         List {
-            ForEach(Array(viewModel.orderedDraft.enumerated()), id: \.element.rawValue) { index, dimension in
+            ForEach(viewModel.orderedDraft, id: \.self) { dimension in
+                let index = viewModel.orderedDraft.firstIndex(of: dimension) ?? 0
                 HStack(alignment: .top, spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -94,10 +95,9 @@ struct IPoPPreferencesListView: View {
             .onMove(perform: viewModel.move)
         }
         .environment(\.editMode, .constant(.active))
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(palette.background)
-        .padding(.top, -BrandSpacing.small)
     }
 
     private func iconName(for dimension: IPoPDimension) -> String {
@@ -147,30 +147,23 @@ struct IPoPPreferencesSheet: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.top, BrandSpacing.large)
 
-            VStack(alignment: .leading, spacing: BrandSpacing.small) {
-                Text("Content Preferences")
-                    .font(.adaptiveSystem(size: 24, weight: .semibold))
+            VStack(spacing: BrandSpacing.small) {
+                Text("What makes a story great for you?")
+                    .font(.adaptiveSystem(size: 26, weight: .bold))
                     .foregroundStyle(Color.primary)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
-
-                Text("Put these in the order that matters to you. We’ll shape our answers based on your preferences.")
-                    .font(.adaptiveFootnote())
-                    .foregroundStyle(.secondary)
-                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .padding(.horizontal, BrandSpacing.large)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("I care about…")
-                        .font(.adaptiveSystem(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                        .padding(.horizontal, BrandSpacing.large)
-                        .padding(.top, BrandSpacing.large)
-                        .padding(.bottom, BrandSpacing.small)
 
-                    IPoPPreferencesListView(viewModel: viewModel)
-                        .frame(maxHeight: .infinity)
-                }
+                Text("Some people love the history. Others want the human drama.\nTell us what pulls you in, we'll do the rest.")
+                    .font(.adaptiveSystem(size: 17, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, BrandSpacing.large)
+                    .padding(.bottom, BrandSpacing.medium)
+
+                IPoPPreferencesListView(viewModel: viewModel)
+                    .frame(maxHeight: .infinity)
             }
 
             Text(IPoPStrings.usageNote)

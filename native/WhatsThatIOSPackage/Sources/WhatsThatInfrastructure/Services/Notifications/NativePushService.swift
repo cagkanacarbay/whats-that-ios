@@ -36,6 +36,24 @@ public final class NativePushService: DiscoveryPushService, @unchecked Sendable 
         return await NativePushTokenStore.shared.waitForToken()
     }
 
+    public func getPushTokenIfAuthorized() async throws -> String? {
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .ephemeral, .provisional:
+            // Already authorized - get or wait for token
+            if let existing = await NativePushTokenStore.shared.currentToken() {
+                return existing
+            }
+            await registerForRemoteNotifications()
+            return await NativePushTokenStore.shared.waitForToken()
+        case .notDetermined, .denied:
+            // Not authorized - don't request, just return nil
+            return nil
+        @unknown default:
+            return nil
+        }
+    }
+
     @MainActor
     private func registerForRemoteNotifications() {
         #if canImport(UIKit)

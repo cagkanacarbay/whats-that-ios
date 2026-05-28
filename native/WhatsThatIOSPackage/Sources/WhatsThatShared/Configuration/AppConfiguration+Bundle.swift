@@ -29,6 +29,10 @@ public extension AppConfiguration {
             preconditionFailure("Invalid SUPABASE_URL format. Ensure Info.plist contains a valid URL string.")
         }
 
+        // DEBUG: Print the Supabase URL being used
+        print("[AppConfiguration] SUPABASE_URL = \(supabaseURLString)")
+        print("[AppConfiguration] Expected DEV = cywshvmspnvimucwqarc.supabase.co")
+
         let passwordResetRedirectURL: URL?
         if let redirectString, !redirectString.isEmpty, let redirectURL = URL(string: redirectString) {
             passwordResetRedirectURL = redirectURL

@@ -33,17 +33,6 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
             suiteName: testSuite,
             ttl: 0
         )
-        let analysisClient = StubAnalysisClient(
-            events: [
-                .status("Uploading photo…"),
-                .token("=== USER RESPONSE ===\n"),
-                .token("## Redwood Sentinel\n\n"),
-                .token("An ancient tree stands tall along the ridge.\n\n"),
-                .token("### metadata_json\n{\"title\":\"Redwood Sentinel\",\"shortDescription\":\"A centuries-old coast redwood.\"}\n"),
-                .complete(discoveryId: 99, systemPromptVersion: "1", userPromptVersion: "1"),
-                .end
-            ]
-        )
         let imageEncoder = StubImageEncoder()
         let pushService = StubPushService()
         let locationService = StubLocationService(location: sampleLocation)
@@ -53,19 +42,11 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
             captureService: StubCaptureService(),
             selectionService: selectionService,
             historyRepository: historyRepository,
-            creditsRepository: creditsRepository,
             creditBalanceStore: creditBalanceStore,
-            analysisClient: analysisClient,
             imageEncoder: imageEncoder,
             pushService: pushService,
             locationService: locationService
         )
-
-        let createdExpectation = expectation(description: "discovery created")
-        viewModel.onDiscoveryCreated = { identifier in
-            XCTAssertEqual(identifier, 99)
-            createdExpectation.fulfill()
-        }
 
         viewModel.startFlow()
 
@@ -96,7 +77,8 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
         XCTAssertTrue(analysisState.displayMarkdown.contains("## Redwood Sentinel"))
         XCTAssertFalse(analysisState.displayMarkdown.contains("metadata_json"))
 
-        await fulfillment(of: [createdExpectation], timeout: 1.0)
+        // Verify the published property was set (Phase 3: replaces onDiscoveryCreated closure)
+        XCTAssertEqual(viewModel.createdDiscoveryId, 99)
     }
 
     func testUploadCancellationReturnsToIdleState() async {
@@ -114,9 +96,7 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
             captureService: StubCaptureService(),
             selectionService: CancellingSelectionService(),
             historyRepository: historyRepository,
-            creditsRepository: creditsRepository,
             creditBalanceStore: creditBalanceStore,
-            analysisClient: StubAnalysisClient(events: []),
             imageEncoder: StubImageEncoder(),
             pushService: StubPushService(),
             locationService: StubLocationService(location: nil)
@@ -154,9 +134,7 @@ final class DiscoveryCreationFlowViewModelTests: XCTestCase {
             captureService: CancellingCaptureService(),
             selectionService: StubSelectionService(media: capturedMedia),
             historyRepository: historyRepository,
-            creditsRepository: creditsRepository,
             creditBalanceStore: creditBalanceStore,
-            analysisClient: StubAnalysisClient(events: []),
             imageEncoder: StubImageEncoder(),
             pushService: StubPushService(),
             locationService: StubLocationService(location: nil)
@@ -245,38 +223,6 @@ private struct StubCreditsRepository: DiscoveryCreditsRepository {
     }
 }
 
-private final class StubAnalysisClient: DiscoveryAnalysisClient {
-    private let scheduledEvents: [DiscoveryAnalysisEvent]
-
-    init(events: [DiscoveryAnalysisEvent]) {
-        self.scheduledEvents = events
-    }
-
-    func startAnalysis(
-        payload _: DiscoveryAnalysisPayload,
-        sessionId _: UUID,
-        cancellationHandler: @escaping @Sendable () async -> Void
-    ) -> AsyncThrowingStream<DiscoveryAnalysisEvent, Error> {
-        let events = scheduledEvents
-
-        return AsyncThrowingStream { continuation in
-            Task {
-                for event in events {
-                    continuation.yield(event)
-                    try? await Task.sleep(nanoseconds: 2_000_000)
-                }
-                continuation.finish()
-            }
-
-            continuation.onTermination = { _ in
-                Task {
-                    await cancellationHandler()
-                }
-            }
-        }
-    }
-}
-
 private struct StubImageEncoder: DiscoveryImageEncodingService {
     func encodeImageData(_ media: DiscoveryCapturedMedia, maxDimension _: Int) async throws -> Data {
         media.data
@@ -322,6 +268,8 @@ private final class StubLocationService: DiscoveryLocationService {
     }
 
     func startTrackingIfNeeded() async {}
+
+    func requestLocationAuthorization() async {}
 
     func stopTracking() {}
 

@@ -27,6 +27,7 @@ struct DiscoveriesHomeView: View {
     private let onQuickCamera: (() -> Void)?
     private let onQuickUpload: (() -> Void)?
     private let onOpenAudioGuide: ((DiscoverySummary) -> Void)?
+    private let onReconnectSession: ((InProgressItem) -> Void)?
 
     @StateObject private var detailCoordinator: DiscoveryDetailTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
@@ -39,7 +40,9 @@ struct DiscoveriesHomeView: View {
     @State private var deletingDiscoveryId: Int64?
     @State private var isDeletionInProgress = false
     @State private var deletionErrorMessage: String?
+    @State private var failedItemToRetry: InProgressItem?
     @State private var isDetailFromAudioGuides = false
+    @State private var isDetailViewWarmedUp = false
 
     private var headerMetrics: DiscoveriesHeaderMetrics {
         DiscoveriesHeaderMetrics(
@@ -65,7 +68,8 @@ struct DiscoveriesHomeView: View {
         isSettingsSelected: Bool = false,
         onQuickCamera: (() -> Void)? = nil,
         onQuickUpload: (() -> Void)? = nil,
-        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil
+        onOpenAudioGuide: ((DiscoverySummary) -> Void)? = nil,
+        onReconnectSession: ((InProgressItem) -> Void)? = nil
     ) {
         self._storeObserver = ObservedObject(wrappedValue: storeObserver)
         self.deletionUseCase = deletionUseCase
@@ -80,6 +84,7 @@ struct DiscoveriesHomeView: View {
         self.onQuickCamera = onQuickCamera
         self.onQuickUpload = onQuickUpload
         self.onOpenAudioGuide = onOpenAudioGuide
+        self.onReconnectSession = onReconnectSession
         _detailCoordinator = StateObject(
             wrappedValue: DiscoveryDetailTransitionCoordinator(voiceoverController: voiceoverController)
         )
@@ -92,12 +97,35 @@ struct DiscoveriesHomeView: View {
         .overlay(alignment: .bottom) {
             paginatingOverlay
         }
-        .animation(.easeInOut, value: storeObserver.loadState)
         .alert(
             "An error occurred",
             isPresented: refreshErrorBinding,
             actions: { refreshErrorActions },
             message: { refreshErrorMessage_view }
+        )
+        .alert(
+            "Discovery Failed",
+            isPresented: Binding(
+                get: { failedItemToRetry != nil },
+                set: { if !$0 { failedItemToRetry = nil } }
+            ),
+            actions: {
+                Button("Try Again") {
+                    if let item = failedItemToRetry {
+                        DiscoverySessionManager.shared.retryFailedSession(item.id)
+                    }
+                    failedItemToRetry = nil
+                }
+                Button("Dismiss", role: .cancel) {
+                    if let item = failedItemToRetry {
+                        DiscoverySessionManager.shared.dismissFailedSession(item.id)
+                    }
+                    failedItemToRetry = nil
+                }
+            },
+            message: {
+                Text("Something went wrong while creating this discovery. Would you like to try again?")
+            }
         )
         .overlay {
             deletionErrorOverlay
@@ -123,10 +151,29 @@ struct DiscoveriesHomeView: View {
                 .ignoresSafeArea()
             
             scrollContent(contentWidth: contentWidth, contentHeight: contentHeight, metrics: metrics)
-            
+                .animation(.easeInOut, value: storeObserver.loadState)
+
             headerContent(contentWidth: contentWidth, metrics: metrics)
-            
+
             detailOverlayContent
+
+            // Invisible warmup view to pre-compile the detail overlay view hierarchy.
+            // This eliminates first-tap animation jank by forcing SwiftUI to compile
+            // the complex view before the user interacts with it.
+            if !isDetailViewWarmedUp {
+                DiscoveryDetailWarmupView(
+                    voiceoverController: voiceoverController,
+                    backgroundColor: backgroundColor,
+                    colorScheme: colorScheme
+                )
+                .allowsHitTesting(false)
+                .zIndex(-1)
+            }
+        }
+        .task {
+            // Schedule warmup completion after the warmup animation completes (300ms + buffer)
+            try? await Task.sleep(nanoseconds: 400_000_000) // 400ms
+            isDetailViewWarmedUp = true
         }
         .onAppear {
             updateSafeAreaBottomInsetIfNeeded(safeBottom)
@@ -148,7 +195,15 @@ struct DiscoveriesHomeView: View {
         ScrollView {
             VStack(spacing: 0) {
                 refreshHeaderView(metrics: metrics)
-                
+
+                InProgressSectionContainer(
+                    gridHorizontalPadding: gridHorizontalPadding,
+                    onTap: { item in handleInProgressItemTapped(item) },
+                    onDismissFailure: { item in
+                        DiscoverySessionManager.shared.dismissFailedSession(item.id)
+                    }
+                )
+
                 DiscoveriesGridView(
                     storeObserver: storeObserver,
                     availableWidth: contentWidth,
@@ -180,6 +235,12 @@ struct DiscoveriesHomeView: View {
         }
         .task {
             await storeObserver.loadInitialIfNeeded()
+
+            // Prefetch voiceover metadata to avoid jank on first tap
+            if storeObserver.loadState == .loaded && !storeObserver.discoveries.isEmpty {
+                prefetchVoiceovers(for: storeObserver.discoveries)
+            }
+
             presentPendingDiscoveryIfNeeded()
             resolveOpenFromAudioGuidesIfNeeded()
         }
@@ -188,7 +249,14 @@ struct DiscoveriesHomeView: View {
             let adjusted = rawValue + metrics.gridTopPadding
             scrollOffset = adjusted
         }
-        .onChange(of: storeObserver.discoveries) {
+        .onChange(of: storeObserver.discoveries) { oldValue, newValue in
+            // Prefetch voiceovers for newly added discoveries
+            let oldIds = Set(oldValue.map { $0.id })
+            let newDiscoveries = newValue.filter { !oldIds.contains($0.id) }
+            if !newDiscoveries.isEmpty {
+                prefetchVoiceovers(for: newDiscoveries)
+            }
+
             DispatchQueue.main.async {
                 presentPendingDiscoveryIfNeeded()
                 resolveOpenFromAudioGuidesIfNeeded()
@@ -238,6 +306,25 @@ struct DiscoveriesHomeView: View {
         }
     }
     
+    // inProgressContent moved to InProgressSectionContainer (owns its own @ObservedObject
+    // so sessionManager changes don't trigger full DiscoveriesHomeView body re-evaluation,
+    // which was disrupting the detail overlay's hero animation).
+
+    private func handleInProgressItemTapped(_ item: InProgressItem) {
+        switch item.status {
+        case .completed(let summary):
+            handleDiscoverySelection(
+                discovery: summary,
+                imageURL: imageURL(for: summary),
+                startFrame: fallbackStartFrame()
+            )
+        case .failed:
+            failedItemToRetry = item
+        case .processing, .queued:
+            onReconnectSession?(item)
+        }
+    }
+
     @ViewBuilder
     private var detailOverlayContent: some View {
         let detailSnapshot = detailCoordinator.snapshot
@@ -254,7 +341,7 @@ struct DiscoveriesHomeView: View {
                 deletingDiscoveryId: deletingDiscoveryId,
                 isDeletingDiscovery: isDeletionInProgress,
                 onDelete: { handleDeleteRequest(for: $0) },
-                onShowOptions: nil,
+                onShowOptions: {},  // Enable options/share/map buttons
                 onOpenAudioGuide: onOpenAudioGuide,
                 onScrollContentOffsetChanged: { detailCoordinator.updateContentScrollOffset($0) }
             )
@@ -536,6 +623,14 @@ struct DiscoveriesHomeView: View {
         return URL(string: path)
     }
 
+    /// Prefetches voiceover metadata for the given discoveries.
+    /// Fire-and-forget - VoiceoverPlaybackController handles caching and deduplication.
+    private func prefetchVoiceovers(for discoveries: [DiscoverySummary]) {
+        let discoveryIds = discoveries.map { $0.id }
+        voiceoverController.prefetch(for: discoveryIds)
+        discoveriesHomeLogger.trace("Prefetched voiceovers for \(discoveryIds.count) discoveries")
+    }
+
     private var detailEdgeDragGesture: AnyGesture<DragGesture.Value> {
         AnyGesture(
             DragGesture(minimumDistance: 5, coordinateSpace: .global)
@@ -585,11 +680,7 @@ struct DiscoveriesHomeView: View {
     }
 
     private func refreshIndicator(opacity: Double) -> some View {
-        ProgressView()
-            .progressViewStyle(CircularProgressViewStyle(tint: BrandColors.spinner))
-            .progressViewStyle(.circular)
-            .controlSize(.large)
-            .scaleEffect(1.1, anchor: .center)
+        BrandedRefreshSpinner()
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Refreshing discoveries")
@@ -675,5 +766,43 @@ private extension String {
     var nonEmptyOrNil: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - Branded Refresh Spinner
+
+/// Small version of the branded logo + spinning ring, used as the pull-to-refresh indicator.
+private struct BrandedRefreshSpinner: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            BrandColors.spinner.opacity(0.1),
+                            BrandColors.spinner
+                        ]),
+                        center: .center,
+                        startAngle: .degrees(0),
+                        endAngle: .degrees(360)
+                    ),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .frame(width: 60, height: 60)
+                .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                .animation(
+                    .linear(duration: 1.2).repeatForever(autoreverses: false),
+                    value: isAnimating
+                )
+
+            Image("LaunchLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 36, height: 36)
+        }
+        .onAppear { isAnimating = true }
     }
 }

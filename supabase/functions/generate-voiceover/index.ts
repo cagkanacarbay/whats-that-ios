@@ -472,6 +472,7 @@ const cleanVoiceoverText = (title: string, description: string, logger: Logger):
   // 4. Normalize whitespace and breaks
   return combinedText
     .replace(/[\r\n]+/g, ' ')
+    .replace(/\*+/g, '')  // Remove asterisks (markdown bold/italic)
     .replace(/\s+/g, ' ')
     // Normalize breaks - ensure we don't have multiple long-breaks in a row
     // and that they have proper spacing

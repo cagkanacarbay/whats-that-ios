@@ -68,3 +68,7 @@ native/Config/Environments/*.xcconfig
 
 .env.mcp
 mcp_config.json
+
+# Claude plugin context files (ignore all except .claude/CLAUDE.md)
+**/CLAUDE.md
+!.claude/CLAUDE.md

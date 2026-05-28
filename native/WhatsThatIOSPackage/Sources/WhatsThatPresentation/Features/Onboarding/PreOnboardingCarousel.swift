@@ -1,8 +1,65 @@
 import SwiftUI
 import WhatsThatShared
+import WhatsThatDomain
 import UIKit
 
+/// Pre-onboarding view that showcases sample discoveries before sign-up.
+/// Displays an interactive discovery gallery where users can:
+/// - Browse sample discoveries in a grid
+/// - Tap to see full discovery details with audio playback
+/// - Proceed to authentication via the "Create Your Own" button
+/// - Sign in via the "Account · Sign in" link
 struct PreOnboardingCarousel: View {
+    let discoveryService: SampleDiscoveryService?
+    let makeVoiceoverController: (() -> VoiceoverPlaybackController)?
+    let onContinue: () -> Void
+    let onSignIn: (() -> Void)?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Legacy initializer for backward compatibility (shows static slides if no discovery service)
+    init(onContinue: @escaping () -> Void) {
+        self.discoveryService = nil
+        self.makeVoiceoverController = nil
+        self.onContinue = onContinue
+        self.onSignIn = nil
+    }
+
+    /// Full initializer with discovery service for interactive gallery
+    init(
+        discoveryService: SampleDiscoveryService,
+        makeVoiceoverController: @escaping () -> VoiceoverPlaybackController,
+        onContinue: @escaping () -> Void,
+        onSignIn: @escaping () -> Void
+    ) {
+        self.discoveryService = discoveryService
+        self.makeVoiceoverController = makeVoiceoverController
+        self.onContinue = onContinue
+        self.onSignIn = onSignIn
+    }
+
+    var body: some View {
+        if let service = discoveryService, let factory = makeVoiceoverController {
+            // New interactive discovery gallery with bottom sheet
+            // The .id() ensures stable view identity to prevent StateObject recreation
+            PreOnboardingDiscoveriesContainer(
+                discoveryService: service,
+                makeVoiceoverController: factory,
+                onContinue: onContinue,
+                onSignIn: onSignIn ?? onContinue
+            )
+            .id("preOnboardingContainer")
+        } else {
+            // Fallback to legacy static carousel
+            LegacyPreOnboardingCarousel(onContinue: onContinue)
+        }
+    }
+}
+
+// MARK: - Legacy Carousel (Fallback)
+
+/// The original static carousel implementation, kept for backward compatibility.
+private struct LegacyPreOnboardingCarousel: View {
     struct Slide: Identifiable {
         let id = UUID()
         let title: String
@@ -56,8 +113,6 @@ struct PreOnboardingCarousel: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        // Respect the safe area so the image aligns with the notch.
-        // Do not extend under the status bar/notch for pre-onboarding visuals.
         .frame(width: width)
         .ignoresSafeArea(edges: .top)
         .safeAreaInset(edge: .bottom) {
@@ -79,7 +134,6 @@ struct PreOnboardingCarousel: View {
                 }
             }
         }
-        // .padding(.top, BrandSpacing.small)
         .padding(.horizontal, BrandSpacing.large)
         .padding(.bottom, min(bottomInset, BrandSpacing.small))
         .background(backgroundColor)
@@ -97,5 +151,3 @@ struct PreOnboardingCarousel: View {
         colorScheme == .dark ? BrandColors.Dark.background : BrandColors.Light.background
     }
 }
-
-// MARK: - Helpers

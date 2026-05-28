@@ -54,6 +54,8 @@ public final class CreditsViewModel: ObservableObject {
     @Published public private(set) var activePurchaseIdentifier: String?
     @Published public var toastMessage: ToastMessage?
     @Published public var alertContent: AlertContent?
+    @Published public var shouldShowPostPurchaseConfig: Bool = false
+    @Published public private(set) var purchasedCreditAmount: Int?
 
     private let creditsRepository: DiscoveryCreditsRepository
     private let store: CreditsStore
@@ -164,6 +166,10 @@ public final class CreditsViewModel: ObservableObject {
                     message: "\(pack.creditAmount) credits added.",
                     style: .success
                 )
+                // Mark that user has made a purchase (for notification permission timing)
+                let tracker = FreeCreditsAlertTracker.shared
+                await tracker.markPurchaseMade()
+
                 // Refresh balance after successful purchase
                 do {
                     let newValue = try await balanceStore.refresh(force: true)
@@ -178,6 +184,17 @@ public final class CreditsViewModel: ObservableObject {
                         message: "Your credits were added. If your balance doesn't update, try pulling down to refresh.",
                         style: .success
                     )
+                }
+                // Check if we should show post-purchase configuration
+                // Note: We don't mark as completed here - that happens when the flow actually finishes
+                // This ensures if the UI can't show (missing closures), user will see it next time
+                let shouldShowConfig = await tracker.shouldShowPostPurchaseConfig()
+                if shouldShowConfig {
+                    await MainActor.run {
+                        self.purchasedCreditAmount = pack.creditAmount
+                        self.shouldShowPostPurchaseConfig = true
+                    }
+                    print("[CreditsVM] Triggering post-purchase configuration flow")
                 }
             case .pending:
                 toastMessage = ToastMessage(

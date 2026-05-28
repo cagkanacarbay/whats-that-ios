@@ -1,7 +1,7 @@
 # Terms of Service — “What’s That?”
 
 Effective date: 8 January 2026
-Version: 1.0
+Version: 1.0.0
 
 These Terms of Service (“Terms”) govern your access to and use of the “What’s That?” mobile application and related services (collectively, the “Service”). By creating an account or using the Service, you agree to these Terms. If you do not agree, do not use the Service.
 

@@ -58,15 +58,21 @@
 ### Behavior
 
 - **Checkbox** → Enables "Accept and Continue" button when checked
-- **Accept and Continue** → Calls `accept-terms` endpoint → Records acceptance → Dismisses modal (silently retries if API fails)
+- **Accept and Continue** → Disables button, shows spinner, calls `accept-terms` endpoint
+  - **On success:** Dismisses modal, continues to app
+  - **On failure:** Retries up to 3 times automatically (1-second delays)
+  - **If all retries fail:** Shows inline error "Network error. Please check your connection and try again.", re-enables button for manual retry
 - **View Full Terms/Policy** → Opens in-app browser or Safari
-- **Delete Account** → **Sign Out**: Logs user out immediately. "Delete Account" is accessible from Settings if desired, but declining terms simply means stopping usage.
+- **Sign Out**: Logs user out immediately. NOTE: This is NOT account deletion.
+
+> [!IMPORTANT]
+> **Modal cannot be dismissed until acceptance is confirmed by the server.** This ensures legal compliance - we have server-side proof of acceptance before allowing app usage.
 
 ### Styling Notes
-- Modal cannot be dismissed by tapping outside or swiping
+- Modal cannot be dismissed by tapping outside or swiping (ZStack overlay handles this naturally)
 - Use existing app styling (dark mode, accent colors)
 - Cards for each updated document (show only those that need acceptance)
-- **iPad**: Present as centered card (not full-screen), consistent with other iPad modals
+- **iPad**: Present as centered card (not full-screen), consistent with other iPad modals. Use `frame(maxWidth:)` within the overlay.
 
 ---
 
@@ -104,6 +110,10 @@
 - After Day 7: Stop showing for this version
 - New version released: Reset schedule
 
+### Styling Notes
+- **iPad**: Present as centered sheet (`.sheet` modifier), consistent with Settings modals
+- Soft updates are non-blocking, so `.sheet` is acceptable here (unlike blocking modals which use ZStack overlay)
+
 ---
 
 ## 3. App Update Prompt (Force, within grace)
@@ -139,6 +149,10 @@
 - **Remind Me Later** → Dismisses, continues to app
 - Shows countdown of days remaining
 
+### Styling Notes
+- Use warning color scheme (amber/orange accents)
+- **iPad**: Present as centered sheet (`.sheet` modifier)
+
 ---
 
 ## 4. Force Update Required (grace expired)
@@ -165,6 +179,9 @@
 │  ┌─────────────────────────────────┐    │
 │  │       Update Now                │    │
 │  └─────────────────────────────────┘    │
+│  ┌─────────────────────────────────┐    │
+│  │       Check Again               │    │
+│  └─────────────────────────────────┘    │
 │                                         │
 │                                         │
 └─────────────────────────────────────────┘
@@ -174,7 +191,16 @@
 
 - **Full-screen, no dismiss option**
 - **Update Now** → Opens App Store
+- **Check Again** → Manually re-fetches config to check if update installed
 - No navigation allowed
+
+### Refresh Logic
+- **Auto-Refresh:** On app foreground, if `Bundle.main.appVersion` has changed (user updated via App Store).
+- **Manual Refresh:** "Check Again" button (rate-limited to once per minute, same as maintenance screen).
+
+### Styling Notes
+- Blocking screen, not a sheet
+- **iPad**: Full-screen presentation (same as iPhone)
 
 ---
 
@@ -203,6 +229,10 @@
 │    │ Expected downtime: 30 minutes."│   │
 │    └─────────────────────────────────┘  │
 │                                         │
+│    ┌─────────────────────────────────┐  │
+│    │       Check Again               │  │
+│    └─────────────────────────────────┘  │
+│                                         │
 │                                         │
 └─────────────────────────────────────────┘
 ```
@@ -213,11 +243,17 @@
 - **No navigation allowed**
 - If `maintenance_message` is NULL, show only default text
 - If `maintenance_message` is set, show default text + custom message in a card below
-- No buttons (user can only close and reopen app to check)
+- **Check Again** → Manually re-fetches config
+
+### Refresh Logic
+- **Fresh on Every Session:** Config is fetched on every app launch.
+- **Manual Refresh:** "Check Again" button (rate-limited to once per minute).
+  - Always shows spinner for immediate feedback
+  - If within 1-minute cooldown, shows spinner briefly then returns (no network call)
+  - User doesn't see any difference between rate-limited and actual checks
 
 ### Styling Notes
 - Use a muted/neutral color scheme (not alarming like red)
-- App should re-check config on next launch or app foreground
 - **iPad**: Present as full-screen (not modal card)
 
 ---
@@ -230,9 +266,9 @@ When user taps "Sign Out":
 2.  On Confirm: Clear session -> Navigate to Login Screen.
 
 > [!NOTE]
-> We previously considered "Delete Account" here. That was too aggressive. If a user declines terms, they simply stop using the service (Sign Out). They can come back later and accept if they choose. Deleting data should be a separate, deliberate action in Settings.
+> Declining terms simply means stopping usage (Sign Out). It does NOT trigger account deletion.
 
-<!-- Steps removed -->
+---
 
 ## Edge Cases
 
@@ -244,8 +280,10 @@ When user taps "Sign Out":
 | Only ToS updated | Modal shows only ToS card |
 | Only Privacy updated | Modal shows only Privacy card |
 | ToS + App update needed | Show legal modal first, app update after |
-| User in onboarding | Defer version checks until after onboarding complete |
+| User in onboarding | Defer compliance modals until `AppFlowState == .main` (after post-onboarding) |
 | No message in version_log | Don't show message section in UI |
+| Accept button fails all retries | Show inline error, keep modal open, user can retry manually |
+| User force-closes during acceptance | Modal re-appears on next launch (server still shows needs_acceptance) |
 
 ---
 
@@ -285,6 +323,11 @@ We must **NOT** interrupt the user during critical flows.
 - Paywall / Purchase Flow
 
 **Mechanism:**
-- If update required `AppFlowState` sets `needsPresentation = true`
-- View modifiers on Safe Screens listen for this changes and present `.sheet`
-- Unsafe screens simply ignore it. When user navigates back to Home, the sheet appears.
+- If update required, `AppFlowState` sets `pendingComplianceModal` state.
+- A **ZStack overlay** at the app root level conditionally renders the compliance modal.
+- `shouldShowComplianceModal` computed property returns `true` only when on a safe screen.
+- **Safe Screens:** Overlay appears automatically.
+- **Unsafe Screens:** Overlay is hidden. When user navigates back to a safe screen, it appears.
+
+> [!NOTE]
+> We use ZStack overlay instead of `.sheet` because SwiftUI's sheet presentation fails when a `.fullScreenCover` is already active (e.g., Camera). ZStack guarantees visibility.

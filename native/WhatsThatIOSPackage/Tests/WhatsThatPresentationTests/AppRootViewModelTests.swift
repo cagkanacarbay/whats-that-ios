@@ -63,10 +63,18 @@ final class AppRootViewModelTests: XCTestCase {
         let authUseCase = AuthUseCase(service: authService)
         let onboardingRepository = TestOnboardingRepository()
         let onboardingUseCase = OnboardingUseCase(repository: onboardingRepository)
+        let voiceoverPreferencesStore = VoiceoverPreferencesStore()
+        let mockRepository = TestAppConfigRepository()
+        let mockLocalStore = TestComplianceLocalStore()
+        let complianceUseCase = ComplianceUseCase(repository: mockRepository, localStore: mockLocalStore)
         return AppRootViewModel(
             authUseCase: authUseCase,
             onboardingUseCase: onboardingUseCase,
-            flowResolver: AppFlowResolver()
+            flowResolver: AppFlowResolver(),
+            clearAllUserData: {},
+            voiceoverPreferencesStore: voiceoverPreferencesStore,
+            complianceUseCase: complianceUseCase,
+            userAppVersion: "1.0.0"
         )
     }
 
@@ -114,7 +122,7 @@ private actor TestAuthService: AuthService {
         }
     }
 
-    func signIn(email: String, password: String) async throws -> AuthSession {
+    func signIn(email: String, password: String) async throws -> SignInResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard let credentials = storedCredentials[normalizedEmail],
               credentials.password == password
@@ -126,10 +134,10 @@ private actor TestAuthService: AuthService {
         currentUser = user
         let session = AuthSession.authenticated(user)
         notify(session: session)
-        return session
+        return .authenticated(session)
     }
 
-    func signUp(email: String, password: String) async throws -> AuthSession {
+    func signUp(email: String, password: String) async throws -> SignUpResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if storedCredentials[normalizedEmail] != nil {
@@ -142,7 +150,7 @@ private actor TestAuthService: AuthService {
         currentUser = user
         let session = AuthSession.authenticated(user)
         notify(session: session)
-        return session
+        return .authenticated(session)
     }
 
     func signInWithGoogle() async throws -> AuthSession {
@@ -174,6 +182,13 @@ private actor TestAuthService: AuthService {
     }
 
     func updatePassword(to _: String) async throws {}
+
+    func deleteAccount() async throws {
+        currentUser = nil
+        notify(session: .signedOut)
+    }
+
+    func verifyEmailFromLink(url _: URL) async throws {}
 
     private func registerContinuation(
         id: UUID,
@@ -223,4 +238,60 @@ private actor TestOnboardingRepository: OnboardingRepository {
     func reset() async {
         flags = OnboardingFlags()
     }
+}
+
+private actor TestAppConfigRepository: AppConfigRepository {
+    func fetchConfig() async throws -> AppConfigResponse {
+        AppConfigResponse(
+            maintenance: MaintenanceConfig(enabled: false, message: nil),
+            tos: VersionInfo(version: "1.0", message: nil, releasedAt: Date()),
+            privacy: VersionInfo(version: "1.0", message: nil, releasedAt: Date()),
+            app: AppVersionInfo(
+                version: "1.0.0",
+                message: nil,
+                releasedAt: Date(),
+                appUpdateType: .soft,
+                minSupportedVersion: "1.0.0",
+                appStoreUrl: "https://apps.apple.com",
+                lastForceVersion: nil
+            ),
+            userStatus: UserComplianceStatus(
+                needsTosAcceptance: false,
+                needsPrivacyAcceptance: false,
+                acceptedTosVersion: "1.0",
+                acceptedPrivacyVersion: "1.0"
+            )
+        )
+    }
+
+    func acceptTerms(tosVersion: String?, privacyVersion: String?) async throws -> AcceptTermsResponse {
+        AcceptTermsResponse(success: true, acceptedTosVersion: tosVersion, acceptedPrivacyVersion: privacyVersion)
+    }
+}
+
+private actor TestComplianceLocalStore: ComplianceLocalStore {
+    private var reminderState = AppUpdateReminderState()
+    private var maintenanceState: CachedMaintenanceState?
+
+    func loadAppUpdateReminderState() async -> AppUpdateReminderState {
+        reminderState
+    }
+
+    func saveAppUpdateReminderState(_ state: AppUpdateReminderState) async {
+        reminderState = state
+    }
+
+    func loadCachedMaintenanceState() async -> CachedMaintenanceState? {
+        maintenanceState
+    }
+
+    func cacheMaintenanceState(_ state: CachedMaintenanceState) async {
+        maintenanceState = state
+    }
+
+    func clearAll() async {
+        reminderState = AppUpdateReminderState()
+    }
+
+    func corruptForTesting() async {}
 }

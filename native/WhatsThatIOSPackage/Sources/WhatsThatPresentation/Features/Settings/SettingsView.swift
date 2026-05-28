@@ -4,6 +4,15 @@ import WhatsThatShared
 #if canImport(Photos)
 import Photos
 #endif
+#if canImport(CoreLocation)
+import CoreLocation
+#endif
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 #if DEBUG
 import Security
 #endif
@@ -35,6 +44,13 @@ struct SettingsView: View {
     @State private var showPhotoSavePermissionGuide = false
     private let photoSavePreferencesStore = PhotoSavePreferencesStore()
     @Environment(\.scenePhase) private var scenePhase
+
+    // Permissions section state
+    @State private var locationPermissionStatus: PermissionStatus = .notDetermined
+    @State private var notificationPermissionStatus: PermissionStatus = .notDetermined
+    @State private var cameraPermissionStatus: PermissionStatus = .notDetermined
+    @State private var photoLibraryPermissionStatus: PermissionStatus = .notDetermined
+    @StateObject private var locationPermissionDelegate = LocationPermissionDelegate()
     #if DEBUG
     @State private var debugCreditInput: String = ""
     #endif
@@ -103,6 +119,7 @@ struct SettingsView: View {
             List {
                 creditsSection
                 themeSection
+                permissionsSection
                 photoSaveSection
                 ipopSection
                 audioGuidesSection
@@ -118,6 +135,7 @@ struct SettingsView: View {
                 await voicePickerViewModel.ensureLoadedForDisplay()
                 await ipopPreferencesViewModel.ensureLoaded()
                 await loadPhotoSavePreferences()
+                await loadPermissionStatuses()
                 if committedVoiceModelId == nil {
                     committedVoiceModelId = voicePickerViewModel.selectedVoiceId
                 }
@@ -126,6 +144,7 @@ struct SettingsView: View {
                 if newPhase == .active {
                     Task {
                         await loadPhotoSavePreferences()
+                        await loadPermissionStatuses()
                     }
                 }
             }
@@ -546,6 +565,218 @@ struct SettingsView: View {
         } message: {
             Text("To save photos from the camera:\n\n1. Tap 'Open Settings'\n2. Select 'Photos'\n3. Choose 'Add Photos Only' or 'Full Access'")
         }
+    }
+
+    // MARK: - Permissions Section
+
+    private var permissionsSection: some View {
+        Section(header: Text("Permissions")) {
+            permissionRow(
+                icon: "location.fill",
+                title: "Location",
+                subtitle: "For richer, location-aware stories",
+                status: locationPermissionStatus,
+                onTap: handleLocationPermissionTap
+            )
+
+            permissionRow(
+                icon: "bell.fill",
+                title: "Notifications",
+                subtitle: "Know when discoveries are ready",
+                status: notificationPermissionStatus,
+                onTap: handleNotificationPermissionTap
+            )
+
+            permissionRow(
+                icon: "camera.fill",
+                title: "Camera",
+                subtitle: "Take photos to discover",
+                status: cameraPermissionStatus,
+                onTap: handleCameraPermissionTap
+            )
+
+            permissionRow(
+                icon: "photo.fill",
+                title: "Photo Library",
+                subtitle: "Select photos to discover",
+                status: photoLibraryPermissionStatus,
+                onTap: handlePhotoLibraryPermissionTap
+            )
+        }
+    }
+
+    private func permissionRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        status: PermissionStatus,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .imageScale(.large)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.adaptiveBody().weight(.medium))
+                        .foregroundStyle(Color.primary)
+                    Text(subtitle)
+                        .font(.adaptiveFootnote())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 6) {
+                    switch status {
+                    case .authorized:
+                        Text("Enabled")
+                            .font(.adaptiveFootnote())
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    case .denied, .restricted:
+                        Text("Denied")
+                            .font(.adaptiveFootnote())
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.adaptiveCallout().weight(.semibold))
+                            .foregroundStyle(Color.secondary)
+                    case .notDetermined:
+                        Text("Not set")
+                            .font(.adaptiveFootnote())
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.adaptiveCallout().weight(.semibold))
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, UIDevice.isIPad ? 10 : 4)
+        }
+        .disabled(status == .authorized)
+        .accessibilityIdentifier("settings.permission.\(title.lowercased())")
+    }
+
+    private func loadPermissionStatuses() async {
+        // Location
+        #if canImport(CoreLocation)
+        let locationStatus = locationPermissionDelegate.manager.authorizationStatus
+        locationPermissionStatus = switch locationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: .authorized
+        case .denied: .denied
+        case .restricted: .restricted
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+        #endif
+
+        // Notifications
+        #if canImport(UserNotifications)
+        let notificationSettings = await UNUserNotificationCenter.current().notificationSettings()
+        notificationPermissionStatus = switch notificationSettings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: .authorized
+        case .denied: .denied
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+        #endif
+
+        // Camera
+        #if canImport(AVFoundation)
+        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        cameraPermissionStatus = switch cameraStatus {
+        case .authorized: .authorized
+        case .denied: .denied
+        case .restricted: .restricted
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+        #endif
+
+        // Photo Library (read/write access)
+        #if canImport(Photos)
+        let photoStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        photoLibraryPermissionStatus = switch photoStatus {
+        case .authorized, .limited: .authorized
+        case .denied: .denied
+        case .restricted: .restricted
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+        #endif
+    }
+
+    private func handleLocationPermissionTap() {
+        #if canImport(CoreLocation)
+        if locationPermissionStatus == .notDetermined {
+            locationPermissionDelegate.onStatusChange = { [self] status in
+                Task { @MainActor in
+                    locationPermissionStatus = switch status {
+                    case .authorizedWhenInUse, .authorizedAlways: .authorized
+                    case .denied: .denied
+                    case .restricted: .restricted
+                    case .notDetermined: .notDetermined
+                    @unknown default: .notDetermined
+                    }
+                }
+            }
+            locationPermissionDelegate.manager.requestWhenInUseAuthorization()
+        } else {
+            openAppSettings()
+        }
+        #endif
+    }
+
+    private func handleNotificationPermissionTap() {
+        #if canImport(UserNotifications)
+        if notificationPermissionStatus == .notDetermined {
+            Task {
+                let granted = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                await MainActor.run {
+                    notificationPermissionStatus = granted == true ? .authorized : .denied
+                }
+            }
+        } else {
+            openAppSettings()
+        }
+        #endif
+    }
+
+    private func handleCameraPermissionTap() {
+        #if canImport(AVFoundation)
+        if cameraPermissionStatus == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                Task { @MainActor in
+                    cameraPermissionStatus = granted ? .authorized : .denied
+                }
+            }
+        } else {
+            openAppSettings()
+        }
+        #endif
+    }
+
+    private func handlePhotoLibraryPermissionTap() {
+        #if canImport(Photos)
+        if photoLibraryPermissionStatus == .notDetermined {
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                Task { @MainActor in
+                    photoLibraryPermissionStatus = switch status {
+                    case .authorized, .limited: .authorized
+                    case .denied: .denied
+                    case .restricted: .restricted
+                    case .notDetermined: .notDetermined
+                    @unknown default: .notDetermined
+                    }
+                }
+            }
+        } else {
+            openAppSettings()
+        }
+        #endif
     }
 
     private func loadPhotoSavePreferences() async {
@@ -975,11 +1206,19 @@ private struct AudioGuidePickerSheet: View {
             .padding(.horizontal, BrandSpacing.large)
             .padding(.top, BrandSpacing.large)
 
-            Text("Select an audio guide narrator")
-                .font(.adaptiveTitle().weight(.semibold))
+            Text("Who tells your stories?")
+                .font(.adaptiveSystem(size: 26, weight: .bold))
                 .foregroundStyle(Color.primary)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, BrandSpacing.large)
+
+            Text("Your guide should feel like a friend, not a robot.\nFind the voice that makes you want to keep listening.")
+                .font(.adaptiveSystem(size: 17, weight: .regular))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, BrandSpacing.large)
+                .padding(.bottom, BrandSpacing.medium)
 
             VoicePickerView(
                 viewModel: viewModel,
@@ -1107,3 +1346,30 @@ private struct DeletingAccountOverlay: View {
         }
     }
 }
+
+// MARK: - Permission Status
+
+private enum PermissionStatus {
+    case authorized
+    case denied
+    case restricted
+    case notDetermined
+}
+
+// MARK: - Location Permission Delegate
+
+#if canImport(CoreLocation)
+private final class LocationPermissionDelegate: NSObject, ObservableObject, CLLocationManagerDelegate {
+    let manager = CLLocationManager()
+    var onStatusChange: ((CLAuthorizationStatus) -> Void)?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        onStatusChange?(manager.authorizationStatus)
+    }
+}
+#endif

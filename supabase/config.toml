@@ -248,7 +248,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.validate-receipt]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/validate-receipt/index.ts"
@@ -258,13 +258,13 @@ entrypoint = "./functions/validate-receipt/index.ts"
 
 [functions.ask-ai-v7]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/ask-ai-v7/index.ts"
 
 [functions.nearby-places]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/nearby-places/index.ts"
 
@@ -276,6 +276,6 @@ entrypoint = "./functions/shared-discovery/index.ts"
 
 [functions.generate-voiceover]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/generate-voiceover/index.ts"

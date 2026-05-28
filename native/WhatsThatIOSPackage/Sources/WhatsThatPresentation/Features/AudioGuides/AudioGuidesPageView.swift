@@ -12,6 +12,7 @@ public enum AudioGuidesDisplayMode: Equatable {
 struct AudioGuidesPageView: View {
     @Environment(\.audioServices) private var audioServices
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.postPurchaseConfig) private var postPurchaseConfig
     
     /// Binding to mode, so MainTabView can hide mini player in hero mode
     @Binding var mode: AudioGuidesDisplayMode
@@ -25,13 +26,20 @@ struct AudioGuidesPageView: View {
     @State private var heroDragOffset: CGFloat = 0
     @State private var creditBalance: Int?
     
-    // MARK: - Insufficient Credits State
-    @State private var showInsufficientCreditsAlert: Bool = false
+    // MARK: - Credits State
     @State private var presentedCreditsViewModel: CreditsViewModel?
     @State private var showCreditsSheet: Bool = false
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
-    
+
+    // Post-purchase configuration closures
+    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
+    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
+    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
+    private let fetchVoiceSampleURL: ((String) async -> URL?)?
+    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
+    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
+
     private let log = Logger(subsystem: "WhatsThat.AudioGuides", category: "AudioGuidesPageView")
     private let transitionDuration: Double = 0.3
     private let miniPlayerHeight: CGFloat = 76
@@ -40,12 +48,24 @@ struct AudioGuidesPageView: View {
         mode: Binding<AudioGuidesDisplayMode>,
         audioServices: AudioServicesContainer,
         onTextSelected: @escaping (DiscoverySummary?) -> Void = { _ in },
-        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
+        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
+        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
+        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
+        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
+        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
+        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         self._mode = mode
         self.onTextSelected = onTextSelected
         self.makeCreditsViewModel = makeCreditsViewModel
-        
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
+
         // Create ViewModel using passed audio services
         _viewModel = StateObject(wrappedValue: AudioGuidesViewModel(
             discoveryStore: audioServices.discoveryStore,
@@ -117,21 +137,6 @@ struct AudioGuidesPageView: View {
                 creditBalance = await store.getCached()
             }
         }
-        // MARK: - Insufficient Credits Alert
-        .alert(
-            "Out of Credits",
-            isPresented: $showInsufficientCreditsAlert,
-            actions: {
-                Button("Not Now", role: .cancel) { }
-                Button("Get Credits") {
-                    presentCreditsSheet()
-                }
-                .keyboardShortcut(.defaultAction)
-            },
-            message: {
-                Text("Each audio guide costs 1 credit. Purchase more to continue.")
-            }
-        )
         // MARK: - Credits Sheet
         .sheet(isPresented: $showCreditsSheet, onDismiss: {
             presentedCreditsViewModel = nil
@@ -139,7 +144,15 @@ struct AudioGuidesPageView: View {
         }) {
             NavigationStack {
                 if let creditsViewModel = presentedCreditsViewModel {
-                    CreditsView(viewModel: creditsViewModel)
+                    CreditsView(
+                        viewModel: creditsViewModel,
+                        loadVoiceoverPreferences: loadVoiceoverPreferences ?? postPurchaseConfig?.loadVoiceoverPreferences,
+                        saveVoiceoverPreferences: saveVoiceoverPreferences ?? postPurchaseConfig?.saveVoiceoverPreferences,
+                        fetchVoiceOptions: fetchVoiceOptions ?? postPurchaseConfig?.fetchVoiceOptions,
+                        fetchVoiceSampleURL: fetchVoiceSampleURL ?? postPurchaseConfig?.fetchVoiceSampleURL,
+                        loadIPoPPreferences: loadIPoPPreferences ?? postPurchaseConfig?.loadIPoPPreferences,
+                        saveIPoPPreferences: saveIPoPPreferences ?? postPurchaseConfig?.saveIPoPPreferences
+                    )
                 } else {
                     Text("Credits unavailable")
                         .font(.headline)
@@ -150,12 +163,14 @@ struct AudioGuidesPageView: View {
             .presentationDragIndicator(.visible)
         }
         // MARK: - Observe assetStates for insufficient_credits errors
-        .onChange(of: audioServices?.playbackController.assetStates) { _, newStates in
+        .onChange(of: audioServices?.playbackController.assetStates) { oldStates, newStates in
             // Defer to next runloop to prevent "update multiple times per frame" error
             DispatchQueue.main.async {
                 guard let states = newStates else { return }
-                for (_, asset) in states {
-                    if asset.errorReason == "insufficient_credits" {
+                for (id, asset) in states {
+                    // Only react to NEW errors - ignore if error already existed in old state
+                    let hadErrorBefore = oldStates?[id]?.errorReason == "insufficient_credits"
+                    if asset.errorReason == "insufficient_credits" && !hadErrorBefore {
                         // Update local credit balance to 0 since server says no credits
                         creditBalance = 0
                         // Also update the store's cache
@@ -164,7 +179,16 @@ struct AudioGuidesPageView: View {
                                 await store.set(0)
                             }
                         }
-                        showInsufficientCreditsAlert = true
+                        // Don't auto-present credits sheet during intro mode -
+                        // CreditsExhaustedFullScreenView handles this case
+                        Task {
+                            let isIntroMode = await FreeCreditsAlertTracker.shared.isInIntroMode
+                            if !isIntroMode {
+                                await MainActor.run {
+                                    presentCreditsSheet()
+                                }
+                            }
+                        }
                         break
                     }
                 }

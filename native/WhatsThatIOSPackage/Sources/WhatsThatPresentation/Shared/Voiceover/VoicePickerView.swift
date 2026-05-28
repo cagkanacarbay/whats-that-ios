@@ -141,7 +141,7 @@ struct VoiceRow: View {
                     Circle()
                         .strokeBorder(isSelected ? palette.primaryAction : palette.border, lineWidth: 2)
                         .frame(width: 24, height: 24)
-                    
+
                     if isSelected {
                         Circle()
                             .fill(palette.primaryAction)

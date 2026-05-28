@@ -30,7 +30,9 @@ struct DiscoveryAudioControls: View {
     }
     
     @Environment(\.colorScheme) private var colorScheme
-    
+    @Environment(\.postPurchaseConfig) private var postPurchaseConfig
+    @Environment(\.creditsViewModelFactory) private var creditsViewModelFactoryFromEnv
+
     @ObservedObject private var voiceoverController: VoiceoverPlaybackController
     private let queueStore: AudioGuidesQueueStore
     private let progressStore: VoiceoverProgressStore
@@ -77,16 +79,29 @@ struct DiscoveryAudioControls: View {
     
     // MARK: - Credits Sheet State
     @State private var showCreditsSheet: Bool = false
-    @State private var showInsufficientCreditsAlert: Bool = false
     @State private var presentedCreditsViewModel: CreditsViewModel?
     @State private var creditsSheetDetent: PresentationDetent = .fraction(0.8)
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
-    
+
+    // Post-purchase configuration closures
+    private let loadVoiceoverPreferences: (() async -> VoiceoverPreferences)?
+    private let saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)?
+    private let fetchVoiceOptions: (() async -> [VoiceModelOption])?
+    private let fetchVoiceSampleURL: ((String) async -> URL?)?
+    private let loadIPoPPreferences: (() async -> IPoPPreferences?)?
+    private let saveIPoPPreferences: ((IPoPPreferences) async -> Void)?
+
     init(
         discovery: DiscoverySummary,
         audioServices: AudioServicesContainer,
         scrollOffset: Binding<CGFloat>,
-        makeCreditsViewModel: (() -> CreditsViewModel)? = nil
+        makeCreditsViewModel: (() -> CreditsViewModel)? = nil,
+        loadVoiceoverPreferences: (() async -> VoiceoverPreferences)? = nil,
+        saveVoiceoverPreferences: ((VoiceoverPreferences) async -> Void)? = nil,
+        fetchVoiceOptions: (() async -> [VoiceModelOption])? = nil,
+        fetchVoiceSampleURL: ((String) async -> URL?)? = nil,
+        loadIPoPPreferences: (() async -> IPoPPreferences?)? = nil,
+        saveIPoPPreferences: ((IPoPPreferences) async -> Void)? = nil
     ) {
         self.discovery = discovery
         self._scrollOffset = scrollOffset
@@ -95,6 +110,12 @@ struct DiscoveryAudioControls: View {
         self.progressStore = audioServices.progressStore
         self.creditBalanceStore = audioServices.creditBalanceStore
         self.makeCreditsViewModel = makeCreditsViewModel
+        self.loadVoiceoverPreferences = loadVoiceoverPreferences
+        self.saveVoiceoverPreferences = saveVoiceoverPreferences
+        self.fetchVoiceOptions = fetchVoiceOptions
+        self.fetchVoiceSampleURL = fetchVoiceSampleURL
+        self.loadIPoPPreferences = loadIPoPPreferences
+        self.saveIPoPPreferences = saveIPoPPreferences
     }
     
     private var palette: BrandTheme.Palette {
@@ -197,21 +218,6 @@ struct DiscoveryAudioControls: View {
                 creditBalance = await store.getCached()
             }
         }
-        // MARK: - Insufficient Credits Alert (shown when server returns insufficient_credits)
-        .alert(
-            "Out of Credits",
-            isPresented: $showInsufficientCreditsAlert,
-            actions: {
-                Button("Not Now", role: .cancel) { }
-                Button("Get Credits") {
-                    presentCreditsSheet()
-                }
-                .keyboardShortcut(.defaultAction)
-            },
-            message: {
-                Text("Each audio guide costs 1 credit. Purchase more to continue.")
-            }
-        )
         // MARK: - Credits Sheet
         .sheet(isPresented: $showCreditsSheet, onDismiss: {
             presentedCreditsViewModel = nil
@@ -219,7 +225,15 @@ struct DiscoveryAudioControls: View {
         }) {
             NavigationStack {
                 if let creditsViewModel = presentedCreditsViewModel {
-                    CreditsView(viewModel: creditsViewModel)
+                    CreditsView(
+                        viewModel: creditsViewModel,
+                        loadVoiceoverPreferences: loadVoiceoverPreferences ?? postPurchaseConfig?.loadVoiceoverPreferences,
+                        saveVoiceoverPreferences: saveVoiceoverPreferences ?? postPurchaseConfig?.saveVoiceoverPreferences,
+                        fetchVoiceOptions: fetchVoiceOptions ?? postPurchaseConfig?.fetchVoiceOptions,
+                        fetchVoiceSampleURL: fetchVoiceSampleURL ?? postPurchaseConfig?.fetchVoiceSampleURL,
+                        loadIPoPPreferences: loadIPoPPreferences ?? postPurchaseConfig?.loadIPoPPreferences,
+                        saveIPoPPreferences: saveIPoPPreferences ?? postPurchaseConfig?.saveIPoPPreferences
+                    )
                 } else {
                     Text("Credits unavailable")
                         .font(.headline)
@@ -230,10 +244,13 @@ struct DiscoveryAudioControls: View {
             .presentationDragIndicator(.visible)
         }
         // MARK: - Observe assetStates for insufficient_credits errors
-        .onChange(of: voiceoverController.assetStates) { _, newStates in
+        .onChange(of: voiceoverController.assetStates) { oldStates, newStates in
             DispatchQueue.main.async {
                 guard let asset = newStates[discovery.id],
                       asset.errorReason == "insufficient_credits" else { return }
+                // Only react to NEW errors - ignore if error already existed in old state
+                let hadErrorBefore = oldStates[discovery.id]?.errorReason == "insufficient_credits"
+                guard !hadErrorBefore else { return }
                 // Update local credit balance to 0 since server says no credits
                 creditBalance = 0
                 // Also update the store's cache
@@ -242,7 +259,16 @@ struct DiscoveryAudioControls: View {
                         await store.set(0)
                     }
                 }
-                showInsufficientCreditsAlert = true
+                // Don't auto-present credits sheet during intro mode -
+                // CreditsExhaustedFullScreenView handles this case
+                Task {
+                    let isIntroMode = await FreeCreditsAlertTracker.shared.isInIntroMode
+                    if !isIntroMode {
+                        await MainActor.run {
+                            presentCreditsSheet()
+                        }
+                    }
+                }
             }
         }
     }
@@ -250,7 +276,7 @@ struct DiscoveryAudioControls: View {
     // MARK: - Credits Sheet Helpers
     
     private func presentCreditsSheet() {
-        guard let factory = makeCreditsViewModel else { return }
+        guard let factory = makeCreditsViewModel ?? creditsViewModelFactoryFromEnv else { return }
         let creditsViewModel = factory()
         presentedCreditsViewModel = creditsViewModel
         creditsSheetDetent = .fraction(0.8)
@@ -356,9 +382,14 @@ struct DiscoveryAudioControls: View {
         case .ready:
             voiceoverController.togglePlayback(for: discovery)
         case .empty:
-            // Show confirmation for new generation
-            withAnimation {
-                showGenerateConfirmation = true
+            // Refresh credit balance before showing confirmation
+            Task {
+                if let store = creditBalanceStore {
+                    creditBalance = await store.getCached()
+                }
+                withAnimation {
+                    showGenerateConfirmation = true
+                }
             }
         case .failed:
             // Retry immediately without confirmation

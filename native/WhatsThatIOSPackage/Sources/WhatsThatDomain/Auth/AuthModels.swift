@@ -103,6 +103,7 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
     case cancelled
     case accountDeletionFailed
     case rateLimitExceeded
+    case emailVerificationFailed
     case internalError(String)
     case unknown
 
@@ -133,6 +134,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "We couldn't delete your account. Please try again or contact support."
         case .rateLimitExceeded:
             return "Too many requests. Please wait a few minutes before trying again."
+        case .emailVerificationFailed:
+            return "Switch back to your browser and tap \"Open in What's That?\" again — you'll be signed in right away."
         case .internalError(let message):
             return message
         case .unknown:
@@ -167,6 +170,8 @@ public enum AuthError: LocalizedError, Equatable, Sendable {
             return "Couldn't delete account"
         case .rateLimitExceeded:
             return "Too many attempts"
+        case .emailVerificationFailed:
+            return "One more tap needed"
         case .internalError:
             return "Whoops"
         case .unknown:

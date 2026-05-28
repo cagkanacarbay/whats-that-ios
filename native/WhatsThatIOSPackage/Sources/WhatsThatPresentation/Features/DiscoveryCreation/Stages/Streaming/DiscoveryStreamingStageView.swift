@@ -11,6 +11,7 @@ struct DiscoveryStreamingStageView: View {
     let imageData: Data?
     let capturedAt: Date?
     let onCancel: () -> Void
+    let onNewDiscovery: (() -> Void)?
     private let makeCreditsViewModel: (() -> CreditsViewModel)?
 
     init(
@@ -18,12 +19,14 @@ struct DiscoveryStreamingStageView: View {
         imageData: Data?,
         capturedAt: Date?,
         onCancel: @escaping () -> Void,
+        onNewDiscovery: (() -> Void)? = nil,
         makeCreditsViewModel: (() -> CreditsViewModel)? = nil
     ) {
         self.viewModel = viewModel
         self.imageData = imageData
         self.capturedAt = capturedAt
         self.onCancel = onCancel
+        self.onNewDiscovery = onNewDiscovery
         self.makeCreditsViewModel = makeCreditsViewModel
     }
 
@@ -40,6 +43,7 @@ struct DiscoveryStreamingStageView: View {
     @State private var currentMessageOpacity: Double = 1
     @State private var metadataVisible: Bool = false
     @State private var hasScrolledToContent = false
+    @State private var shouldScrollToBottom = false
     @State private var hasLoggedStreamStart = false
     @State private var hasLoggedStreamEnd = false
     @State private var hasLoggedMetadata = false
@@ -144,25 +148,68 @@ struct DiscoveryStreamingStageView: View {
                                 alignment: .bottom
                             )
 
-                        // Audio controls - shown when stream completes and discovery summary is available
-                        // Placed at top to match DiscoveryDetailView
-                        audioControlsSection
-                            .padding(.top, -6)
-                            .padding(.horizontal, BrandSpacing.large)
+                        // Audio controls and markdown only shown when content has arrived
+                        // Hidden in pre-streaming state to place button directly below header
+                        if !state.streamedText.isEmpty {
+                            // Audio controls - shown when stream completes and discovery summary is available
+                            // Placed at top to match DiscoveryDetailView
+                            audioControlsSection
+                                .padding(.top, -6)
+                                .padding(.horizontal, BrandSpacing.large)
 
-                        markdownSection
-                            .id(ScrollTarget.markdown)
+                            markdownSection
+                                .id(ScrollTarget.markdown)
+                        }
+
+                        // "Discover More" button - shown before content arrives and after streaming completes
+                        // Hidden only while actively streaming content
+                        if (!state.isStreaming || state.streamedText.isEmpty), let onNewDiscovery {
+                            newDiscoveryButton(action: onNewDiscovery)
+                                .padding(.horizontal, BrandSpacing.large)
+                                .padding(.top, state.streamedText.isEmpty ? BrandSpacing.large : 0)
+                                .padding(.bottom, BrandSpacing.large)
+                                .id(ScrollTarget.bottomAction)
+                        }
+
+                        // Mini player filler: extends the background color downward when mini player is visible
+                        // Applies whenever the "Discover More" button is shown (before streaming and after completion)
+                        // Uses a wrapper view with @ObservedObject to properly observe nested ObservableObject changes
+                        if (!state.isStreaming || state.streamedText.isEmpty), let audioServices {
+                            MiniPlayerFillerView(
+                                miniPlayerPresence: audioServices.miniPlayerPresence,
+                                backgroundColor: palette.background
+                            )
+                        }
+
+                        // Scroll anchor at the very bottom of content (after filler)
+                        Color.clear
+                            .frame(height: 1)
+                            .id(ScrollTarget.contentBottom)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 // Image/header drawn inside content overlay, so the whole page scrolls.
-                .background(palette.background.ignoresSafeArea())
-                .miniPlayerScrollInset()
+                // Only ignore top safe area so tab bar remains visible during streaming
+                .background(palette.background.ignoresSafeArea(edges: .top))
                 .onAppear {
+                    // Check if this is a restoration (streaming already complete on appear)
+                    let isRestoration = !state.isStreaming && !state.streamedText.isEmpty
+                    // Check if this is pre-streaming (no content yet, button should be visible)
+                    let isPreStreaming = state.streamedText.isEmpty
+                    shouldScrollToBottom = isRestoration
+
                     resetStateForInitialRender()
-                    if loaderCleared {
-                        DispatchQueue.main.async {
-                            scrollToContent(using: scrollProxy, animated: false)
+
+                    DispatchQueue.main.async {
+                        if isPreStreaming {
+                            // Pre-streaming: scroll to show the button above mini player
+                            scrollToButton(using: scrollProxy, animated: false)
+                        } else if loaderCleared {
+                            if shouldScrollToBottom {
+                                scrollToBottom(using: scrollProxy, animated: false)
+                            } else {
+                                scrollToContent(using: scrollProxy, animated: false)
+                            }
                         }
                     }
                 }
@@ -220,14 +267,19 @@ struct DiscoveryStreamingStageView: View {
                     }
                 }
                 .onChange(of: state.isStreaming) {
+                    // Capture values NOW before async dispatch to avoid race condition.
+                    // The `state` computed property reads from viewModel.analysisState, which
+                    // could become nil (returning default with isStreaming=true) if the view
+                    // hierarchy changes before the async block executes.
+                    let isStreamingEnded = !state.isStreaming
+                    let finalMarkdown = currentMarkdown
                     // Defer to next runloop to prevent "update multiple times per frame" error
                     DispatchQueue.main.async {
-                        if !state.isStreaming {
+                        if isStreamingEnded {
                             // Streaming ended: snap to final text (no animation) to avoid cut-offs
                             markdownAnimationTask?.cancel()
-                            let final = currentMarkdown
-                            displayedMarkdown = final
-                            evaluateLoaderCleared(with: final)
+                            displayedMarkdown = finalMarkdown
+                            evaluateLoaderCleared(with: finalMarkdown)
                             loaderCleared = true
                             logStreamEnded()
                         }
@@ -420,6 +472,33 @@ struct DiscoveryStreamingStageView: View {
         }
     }
 
+    private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool = true) {
+        hasScrolledToContent = true
+        let action = {
+            proxy.scrollTo(ScrollTarget.contentBottom, anchor: .bottom)
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.45)) {
+                action()
+            }
+        } else {
+            action()
+        }
+    }
+
+    private func scrollToButton(using proxy: ScrollViewProxy, animated: Bool = true) {
+        let action = {
+            proxy.scrollTo(ScrollTarget.bottomAction, anchor: .bottom)
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.45)) {
+                action()
+            }
+        } else {
+            action()
+        }
+    }
+
     @ViewBuilder
     private func headerImageSection(size: CGSize, safeTop: CGFloat) -> some View {
         // Full-bleed image header with gradient/title overlay.
@@ -560,23 +639,110 @@ struct DiscoveryStreamingStageView: View {
         .padding(.bottom, BrandSpacing.small)
     }
 
-
+    @ViewBuilder
+    private func newDiscoveryButton(action: @escaping () -> Void) -> some View {
+        BrandPrimaryButton(title: "Discover More") {
+            action()
+        }
+        .frame(maxWidth: 320)
+    }
 
     private static let loadingMessages: [String] = [
-        "Identifying landmarks…",
-        "Admiring nature…",
-        "Looking for leprechauns…",
-        "Analyzing architecture…",
-        "Uncovering hidden history…",
-        "Spotting local wildlife…",
-        "Decoding ancient symbols…",
-        "Consulting travel guides…",
-        "Tracking bigfoot sightings…",
-        "Translating squirrel chatter…"
+        // The research
+        "Looking for leprechauns",
+        "Spotting local wildlife",
+        "Tracking bigfoot sightings",
+        "Translating squirrel chatter",
+        "Browsing Wikipedia",
+        "Opening another tab",
+        "Opening more tabs",
+        "Lost in the footnotes",
+        "Dusting off archives",
+        "Unfolding old maps",
+        "Counting bricks",
+        "Measuring shadows",
+        "Flipping through footnotes",
+        "Checking the angles",
+        "Squinting at details",
+        "Reading the fine print",
+        "Arguing online",
+        "Asking Reddit",
+        "Searching TikTok",
+        "Reading YouTube comments",
+        "Cross-referencing everything",
+        "Zooming in",
+        // The spiral
+        "Following a hunch",
+        "One more rabbit hole",
+        "Going deeper",
+        "What year is it",
+        "Can't stop now",
+        "Just one more page",
+        "One more source",
+        "Where was I",
+        // The reactions
+        "Hmm, interesting",
+        "Oh I like this one",
+        "Oh HELLO",
+        "Found something",
+        "This looks familiar",
+        "What am I looking at",
+        "Oh wow",
+        "Can't stop staring",
+        // The breakthroughs
+        "Wait, these are linked",
+        "That can't be a coincidence",
+        "This changes everything",
+        "Hold on hold on hold on",
+        "Oh man oh man oh man",
+        "No no no YES",
+        "Everything connects",
+        "Connecting dots",
+        "Got it got it got it",
+        "OH WAIT",
+        "KNEW IT 🔍",
+        "👀",
+        "There it is",
+        // The self-aware
+        "It's fine this is fine",
+        "Spiraling",
+        "Back on track",
+        "What were we doing",
+        "I was right the first time",
+        "Should've started here",
+        "Oh right I have a job",
+        // The internet
+        "Doom scrolling",
+        "Checking replies",
+        "Googling furiously",
+        "Clearing search history",
+        "Sending a DM",
+        // The characters
+        "Channeling inner Rick Steves",
+        "Practicing my Attenborough",
+        "Making noise in the library",
+        // The preparation
+        "Clearing vocal chords",
+        "Warming up my voice",
+        "Rehearsing the story",
+        "Practicing pronunciation",
+        // The silly
+        "Casting a spell",
+        "Consulting the oracle",
+        "Rubbing a lamp",
+        "Asking the pigeons",
+        "Bribing a ghost",
+        // The technical
+        "Chrome needs more RAM",
+        "Fan is screaming",
+        "247 tabs open",
+        "Crashing out",
     ]
 
     private enum ScrollTarget {
         static let markdown = "analysisMarkdown"
+        static let bottomAction = "bottomAction"
+        static let contentBottom = "contentBottom"
     }
 
     private func logStreamStarted() {
@@ -642,5 +808,23 @@ private struct ShareSheetModifier: ViewModifier {
                 .presentationDetents(detents, selection: $shareSheetDetent)
                 .presentationDragIndicator(.visible)
         }
+    }
+}
+
+/// Wrapper view that properly observes MiniPlayerPresenceStore to reactively show/hide the filler.
+/// Using @ObservedObject ensures SwiftUI re-renders when the nested ObservableObject's @Published properties change.
+private struct MiniPlayerFillerView: View {
+    @ObservedObject var miniPlayerPresence: MiniPlayerPresenceStore
+    let backgroundColor: Color
+
+    private var isActive: Bool {
+        miniPlayerPresence.isVisible && !miniPlayerPresence.isDismissed
+    }
+
+    var body: some View {
+        backgroundColor
+            .frame(height: isActive ? miniPlayerPresence.effectiveInset : 0)
+            .frame(maxWidth: .infinity)
+            .animation(.easeInOut(duration: 0.25), value: isActive)
     }
 }

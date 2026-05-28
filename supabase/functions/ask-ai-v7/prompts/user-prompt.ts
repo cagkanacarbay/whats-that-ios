@@ -38,8 +38,11 @@ INPUT SIGNALS
 ## Recent discovery summaries - What the user has been discovering recently. We generated all these results for them.
 {userDiscoveryContext}
 
-## Full recent discoveries - Use to avoid repetition. Only connect when you can name a specific shared person, place, event, or object. Abstract concepts like 'scale', 'philosophy', or 'contrast' are not valid connections." See MANDATORY CONNECTION TEST in system prompt before referencing.
+## Full recent discoveries - Use to avoid repetition. Only connect when you can name a specific shared person, place, event, or object. Abstract concepts like 'scale', 'philosophy', or 'contrast' are not valid connections. See MANDATORY CONNECTION TEST in system prompt before referencing.
 {recentFullDiscoveries}
+
+CRITICAL: CONNECTION VALUE TEST
+Before writing ANY connection to a previous discovery, ask: "Does this connection teach the user something new, or just remind them of what they saw?" Connections that simply state two things are related without explaining the relationship are WORSE than no connection at all. A connection must illuminate, not just link.
 
 TASK
 - Follow every structural, stylistic, and content rule in the system prompt.

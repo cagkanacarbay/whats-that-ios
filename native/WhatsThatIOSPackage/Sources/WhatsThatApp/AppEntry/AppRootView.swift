@@ -69,6 +69,10 @@ public struct AppRootView: View {
         let resetIPoPPreferences: () async -> Void = {
             await container.resetIPoPPreferences()
         }
+        let sampleDiscoveryService: SampleDiscoveryService = container.sampleDiscoveryService
+        let makeOnboardingVoiceoverController: () -> VoiceoverPlaybackController = {
+            container.makeOnboardingVoiceoverPlaybackController()
+        }
         #else
         let audioServicesFactory: (() -> AudioServicesContainer)? = nil
         let storeObserverFactory: (() -> DiscoveryStoreObserver)? = nil
@@ -92,6 +96,8 @@ public struct AppRootView: View {
         let loadIPoPPreferences: () async -> IPoPPreferences? = { nil }
         let saveIPoPPreferences: (IPoPPreferences) async -> Void = { _ in }
         let resetIPoPPreferences: () async -> Void = { }
+        let sampleDiscoveryService: SampleDiscoveryService? = nil
+        let makeOnboardingVoiceoverController: (() -> VoiceoverPlaybackController)? = nil
         #endif
 
         let nearbyInspectorFactory: (() -> AnyView)? = {
@@ -133,11 +139,20 @@ public struct AppRootView: View {
                 await container.clearAllUserData()
             },
             voiceoverPreferencesStore: container.voiceoverPreferencesStore,
+            complianceUseCase: container.complianceUseCase,
             setCreditBalance: { credits in
                 #if DEBUG
                 await container.setCreditBalance(credits)
                 #endif
-            }
+            },
+            resolveIntroState: {
+                await container.resolveIntroStateIfNeeded()
+            },
+            refreshCreditBalance: {
+                await container.refreshCreditBalance()
+            },
+            sampleDiscoveryService: sampleDiscoveryService,
+            makeOnboardingVoiceoverController: makeOnboardingVoiceoverController
         )
         .task {
             // Configure DiscoverySessionManager for background discovery processing

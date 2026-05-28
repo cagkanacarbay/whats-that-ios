@@ -15,6 +15,8 @@ struct DiscoveryConfirmationActionsView: View {
     let onOutOfCredits: () -> Void
     let onCreditsTap: (() -> Void)?
     @Binding var generateAudioGuide: Bool
+    /// When true, audio toggle is locked ON (intro mode).
+    var isAudioToggleLocked: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -30,10 +32,10 @@ struct DiscoveryConfirmationActionsView: View {
                 }
                 .buttonStyle(.plain)
                 // Allow opening Credits even if balance is loading/unknown.
-                
+
                 Spacer()
-                
-                AudioToggleView(isOn: $generateAudioGuide, palette: palette)
+
+                AudioToggleView(isOn: $generateAudioGuide, palette: palette, isLocked: isAudioToggleLocked)
                     .padding(.trailing, 4) // Add slight trailing padding for visual balance
             }
             .padding(.bottom, 4)
